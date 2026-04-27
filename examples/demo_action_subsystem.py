@@ -12,12 +12,12 @@ from datetime import datetime
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(name)s - %(message)s')
 
-# Add the emergence_core to path
-import sys
-sys.path.insert(0, '/home/runner/work/Sanctuary/Sanctuary/emergence_core')
-
-from mind.cognitive_core.workspace import GlobalWorkspace, Goal, GoalType, Percept, WorkspaceSnapshot
-from mind.cognitive_core.action import ActionSubsystem, Action, ActionType
+# NOTE: This demo predates the emergence_core -> sanctuary/mind migration
+# and the legacy import paths below no longer exist. Kept for historical
+# reference; will not run as-is. Update imports to current sanctuary.mind.*
+# paths before running.
+from mind.cognitive_core.workspace import GlobalWorkspace, Goal, GoalType, Percept, WorkspaceSnapshot  # noqa: E402
+from mind.cognitive_core.action import ActionSubsystem, Action, ActionType  # noqa: E402
 
 
 def demo_action_decision():

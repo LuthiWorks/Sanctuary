@@ -47,8 +47,27 @@ def is_protocol_file(filepath):
 
 
 if __name__ == "__main__":
-    repo_root = "c:/Users/Hasha Smokes/Desktop/Sanctuary_project_root/CleanClone/Sanctuary-Emergence/data"
-    schemas_dir = "c:/Users/Hasha Smokes/Desktop/Sanctuary_project_root/CleanClone/Sanctuary-Emergence/Schemas"
+    import argparse
+    from pathlib import Path
+
+    repo_default = Path(__file__).resolve().parents[1]
+    parser = argparse.ArgumentParser(
+        description="Validate JSON data files against schemas."
+    )
+    parser.add_argument(
+        "--data-root",
+        default=str(repo_default / "sanctuary" / "data"),
+        help="Directory containing JSON files to validate.",
+    )
+    parser.add_argument(
+        "--schemas-dir",
+        default=str(repo_default / "schemas"),
+        help="Directory containing schema files.",
+    )
+    args = parser.parse_args()
+    repo_root = args.data_root
+    schemas_dir = args.schemas_dir
+
     all_json_files = []
     
     for root, dirs, files in os.walk(repo_root):

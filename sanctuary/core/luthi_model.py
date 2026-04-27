@@ -199,6 +199,49 @@ class LuthiModel:
             load_time,
         )
 
+    def load_from_objects(
+        self,
+        model: torch.nn.Module,
+        tokenizer,
+        model_config: dict,
+    ) -> None:
+        """Initialize the bridge from already-loaded objects.
+
+        Use this instead of :meth:`load` when the host process has built
+        or loaded the Luthi model another way (in-memory construction,
+        plain checkpoint, test fixture). Skips the encrypted-checkpoint
+        loader entirely. Useful for integration tests and for embedded
+        deployments where the model is constructed in the same process.
+
+        Args:
+            model: A Luthi ``nn.Module`` (LuthiLM, SpikingLuthiLM,
+                MultimodalLuthiLM, etc).
+            tokenizer: The tokenizer paired with ``model``.
+            model_config: Config dict with at minimum ``d_model``,
+                ``n_blocks``, ``seq_len`` keys.
+        """
+        if self._loaded:
+            raise RuntimeError("LuthiModel is already loaded")
+
+        self._ensure_luthi_importable()
+
+        self.model = model
+        self.tokenizer = tokenizer
+        self.model_config = model_config
+        try:
+            self.device = next(model.parameters()).device
+        except StopIteration:
+            self.device = torch.device("cpu")
+
+        from luthi.sanctuary_interface import snapshot_modulatable_state
+        self._base_snapshot = snapshot_modulatable_state(self.model)
+        self._loaded = True
+        logger.info(
+            "Luthi model loaded from objects: %dd, %d blocks",
+            self.model_config.get("d_model", "?"),
+            self.model_config.get("n_blocks", "?"),
+        )
+
     def _ensure_luthi_importable(self) -> None:
         """Make the ``luthi`` package importable.
 

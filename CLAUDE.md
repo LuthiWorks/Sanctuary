@@ -58,6 +58,10 @@ At the start of every new conversation **and** whenever the context window reset
 
 **If the user asks "what's next?" — always re-read `To-Do.md` before answering.** Do not guess or say you don't know. The answer is in that file.
 
+## Fresh-Instance Audits
+
+Brian is the sole human in the loop on this project. To compensate for the blind spots that pattern produces, run periodic fresh-instance audits — a new Claude instance with no investment in existing decisions reads the code with outsider eyes and reports drift, dead code, and quietly-wrong assumptions. Protocol, when to run, and prompt templates live in `docs/AUDIT_PROTOCOL.md`. Read that file before spawning an audit so the prompt is structured for useful output.
+
 ## Coding Standards — No Unnecessary Defensiveness
 
 This project values **correct, direct code over defensive code**. Follow these principles:
