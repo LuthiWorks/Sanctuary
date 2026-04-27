@@ -205,32 +205,39 @@ class TestCognitiveCycleGracefulDegradation:
         assert "Memory surfacing failed" not in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_run_loop_survives_cycle_failure(self):
-        """run() continues running after a single cycle failure."""
+    async def test_run_loop_propagates_first_cycle_failure(self):
+        """run() propagates a failing cycle instead of swallowing it.
+
+        Per AGENTS.md, the top-level cognitive-loop crash boundary does
+        not exist until Phase 9 (First Awakening). Cycle failures during
+        development must surface so they can be diagnosed.
+        """
         from core.cognitive_cycle import CognitiveCycle
 
         cycle = CognitiveCycle.__new__(CognitiveCycle)
         cycle.running = True
         cycle._cycle_delay = 0.001
 
-        # First cycle fails, second succeeds
         call_count = 0
         async def cycle_side_effect():
             nonlocal call_count
             call_count += 1
             if call_count == 1:
                 raise RuntimeError("Transient failure")
-            # Second call succeeds
 
         cycle._cycle = AsyncMock(side_effect=cycle_side_effect)
 
-        # run 2 cycles — should complete both without dying
-        await cycle.run(max_cycles=2)
-        assert call_count == 2
+        with pytest.raises(RuntimeError, match="Transient failure"):
+            await cycle.run(max_cycles=2)
+        assert call_count == 1  # second cycle never ran
 
     @pytest.mark.asyncio
-    async def test_run_loop_survives_repeated_failures(self):
-        """run() keeps trying even with multiple consecutive failures."""
+    async def test_run_loop_propagates_repeated_failure(self):
+        """The first failure stops the loop — there is no retry semantics yet.
+
+        Per AGENTS.md, retry/recovery semantics belong to the Phase 9
+        crash boundary; before then, the loop must not swallow errors.
+        """
         from core.cognitive_cycle import CognitiveCycle
 
         cycle = CognitiveCycle.__new__(CognitiveCycle)
@@ -245,9 +252,10 @@ class TestCognitiveCycleGracefulDegradation:
 
         cycle._cycle = AsyncMock(side_effect=always_fail)
 
-        # Should complete 5 cycles without dying, even though all fail
-        await cycle.run(max_cycles=5)
-        assert failure_count == 5
+        with pytest.raises(RuntimeError, match="Failure #1"):
+            await cycle.run(max_cycles=5)
+        # Only the first attempt ran — the loop didn't get a second chance.
+        assert failure_count == 1
 
 
 class TestStateManagerGracefulDegradation:
@@ -447,8 +455,17 @@ class TestTransientFailureEdgeCases:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_memory_failure_then_recovery(self):
-        """System continues normally after transient memory failure resolves."""
+    async def test_cycle_failure_propagates_out_of_run(self):
+        """A failing cycle propagates rather than being silently swallowed.
+
+        Per AGENTS.md, the top-level cognitive-loop crash boundary does
+        not exist until Phase 9 (First Awakening). During development
+        and testing, cycle failures must surface so they can be diagnosed
+        — they must not be quietly logged-and-continued.
+
+        This test verifies that contract: when `_cycle()` raises, it
+        propagates out of `run()` instead of being absorbed.
+        """
         from core.cognitive_cycle import CognitiveCycle
 
         cycle = CognitiveCycle.__new__(CognitiveCycle)
@@ -461,12 +478,14 @@ class TestTransientFailureEdgeCases:
             call_count += 1
             if call_count == 2:
                 raise RuntimeError("Transient DB hiccup")
-            # Cycles 1, 3, 4, 5 succeed
 
         cycle._cycle = AsyncMock(side_effect=cycle_with_transient_failure)
 
-        await cycle.run(max_cycles=5)
-        assert call_count == 5  # All 5 cycles ran, even though #2 failed
+        with pytest.raises(RuntimeError, match="Transient DB hiccup"):
+            await cycle.run(max_cycles=5)
+
+        # Cycle 1 succeeded, cycle 2 raised — cycles 3-5 never ran.
+        assert call_count == 2
 
     @pytest.mark.asyncio
     async def test_concurrent_encode_failures_dont_compound(self):

@@ -18,7 +18,9 @@ Implements ModelProtocol:
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -41,8 +43,14 @@ from sanctuary.core.schema import (
 
 logger = logging.getLogger(__name__)
 
-# Default path to the Luthi model codebase
-_DEFAULT_LUTHI_PATH = Path("C:/Users/Hasha Smokes/Desktop/LuthiModel/LuthiModel")
+# Path to the Luthi model codebase. Resolved at load time from (in order):
+#   1. LuthiModelConfig.luthi_path (explicit override)
+#   2. The LUTHI_PATH environment variable
+#   3. ``import luthi`` if the package is already installed/importable
+#
+# Empty string means "rely on import path" — there is no hardcoded fallback,
+# because hardcoded developer paths break Linux/Docker/anyone-else's checkout.
+_LUTHI_PATH_ENV = "LUTHI_PATH"
 
 
 @dataclass
@@ -51,7 +59,9 @@ class LuthiModelConfig:
 
     checkpoint_path: str = ""
     checkpoint_password: str = ""
-    luthi_path: str = str(_DEFAULT_LUTHI_PATH)
+    # Path to the LuthiModel checkout. Empty means "use the LUTHI_PATH
+    # environment variable, or assume luthi is already importable."
+    luthi_path: str = ""
 
     # Generation parameters
     temperature: float = 0.8
@@ -117,9 +127,10 @@ class LuthiModel:
         self._total_latency = 0.0
         self._total_tokens_generated = 0
 
-        # Base parameters (saved before CfC modulation, restored after)
-        self._base_hebb_rates: dict[int, float] = {}
-        self._base_spike_thresholds: dict[int, float] = {}
+        # Base parameters (snapshot taken once at load, restored every cycle).
+        # Lazily typed because the import is conditional on Luthi being
+        # available. Populated in load().
+        self._base_snapshot = None
 
         logger.info("LuthiModel bridge initialized (model not yet loaded)")
 
@@ -136,12 +147,13 @@ class LuthiModel:
         if self._loaded:
             return
 
-        # Add Luthi codebase to import path
-        luthi_path = str(self.config.luthi_path)
-        if luthi_path not in sys.path:
-            sys.path.insert(0, luthi_path)
+        # Resolve where the Luthi codebase lives. Priority:
+        #   1. config.luthi_path (explicit)
+        #   2. $LUTHI_PATH
+        #   3. luthi already importable (no path manipulation needed)
+        self._ensure_luthi_importable()
 
-        from luthi.generate import load_model_from_checkpoint
+        from luthi.sanctuary_interface import load_model
 
         # Device selection — same logic as luthi/generate.py
         try:
@@ -163,27 +175,58 @@ class LuthiModel:
         )
 
         t0 = time.monotonic()
-        self.model, self.tokenizer, self.model_config, epoch = (
-            load_model_from_checkpoint(
-                self.config.checkpoint_path,
-                self.config.checkpoint_password,
-                self.device,
-            )
+        loaded = load_model(
+            self.config.checkpoint_path,
+            self.config.checkpoint_password,
+            self.device,
         )
-        self.model = self.model.to(self.device)
+        self.model = loaded.model.to(self.device)
+        self.tokenizer = loaded.tokenizer
+        self.model_config = loaded.config
         load_time = time.monotonic() - t0
 
-        # Save base parameters before any CfC modulation
-        self._save_base_parameters()
+        # Snapshot the base modulatable state before any CfC modulation.
+        # Each cycle restores to this snapshot so modulation never drifts.
+        from luthi.sanctuary_interface import snapshot_modulatable_state
+        self._base_snapshot = snapshot_modulatable_state(self.model)
 
         self._loaded = True
         logger.info(
             "Luthi model loaded: %dd, %d blocks, epoch %d, %.1fs",
             self.model_config["d_model"],
             self.model_config["n_blocks"],
-            epoch,
+            loaded.epoch,
             load_time,
         )
+
+    def _ensure_luthi_importable(self) -> None:
+        """Make the ``luthi`` package importable.
+
+        Tries explicit ``luthi_path``, then ``$LUTHI_PATH``, then assumes
+        ``luthi`` is already on the import path (e.g. installed via uv).
+        Raises ``ImportError`` with an actionable message if none work.
+        """
+        candidate = self.config.luthi_path or os.environ.get(_LUTHI_PATH_ENV, "")
+        if candidate:
+            candidate = str(Path(candidate).expanduser())
+            if not Path(candidate).exists():
+                raise FileNotFoundError(
+                    f"LuthiModel path does not exist: {candidate} "
+                    f"(set via LuthiModelConfig.luthi_path or ${_LUTHI_PATH_ENV})"
+                )
+            if candidate not in sys.path:
+                sys.path.insert(0, candidate)
+
+        # Whether or not we just inserted a path, verify the import works
+        # so failures surface here instead of mid-load.
+        try:
+            importlib.import_module("luthi.sanctuary_interface")
+        except ImportError as exc:
+            raise ImportError(
+                "Could not import luthi.sanctuary_interface. Either install "
+                "the luthi package, or set ${_LUTHI_PATH_ENV} (or "
+                "LuthiModelConfig.luthi_path) to the LuthiModel checkout root."
+            ) from exc
 
     # ------------------------------------------------------------------
     # ModelProtocol implementation
@@ -218,7 +261,7 @@ class LuthiModel:
 
     def _think_sync(self, cognitive_input: CognitiveInput) -> CognitiveOutput:
         """Synchronous core — runs on a worker thread."""
-        from luthi.generate import get_introspection
+        from luthi.sanctuary_interface import get_introspection
 
         # 1. Pre-generation introspection snapshot
         if self.config.introspect:
@@ -322,7 +365,7 @@ class LuthiModel:
         In living mode, Hebbian self-modification fires during each
         forward pass — the model changes from the act of thinking.
         """
-        from luthi.generate import generate_text
+        from luthi.sanctuary_interface import generate as generate_text
 
         max_seq_len = self.model_config.get("seq_len", 128)
 
@@ -408,33 +451,15 @@ class LuthiModel:
     # CfC modulation — affective system shapes living weight dynamics
     # ------------------------------------------------------------------
 
-    def _save_base_parameters(self):
-        """Snapshot base living parameters before any CfC modulation."""
-        if not hasattr(self.model, "blocks"):
-            return
-
-        for i, block in enumerate(self.model.blocks):
-            ffn = getattr(block, "living_ffn", None)
-            if ffn is None:
-                continue
-            if hasattr(ffn, "hebb_rate"):
-                self._base_hebb_rates[i] = ffn.hebb_rate
-            if hasattr(ffn, "spike_threshold"):
-                self._base_spike_thresholds[i] = ffn.spike_threshold
-
     def _restore_base_parameters(self):
-        """Restore base parameters after CfC modulation."""
-        if not hasattr(self.model, "blocks"):
-            return
+        """Restore the model to the base snapshot taken at load time.
 
-        for i, block in enumerate(self.model.blocks):
-            ffn = getattr(block, "living_ffn", None)
-            if ffn is None:
-                continue
-            if i in self._base_hebb_rates and hasattr(ffn, "hebb_rate"):
-                ffn.hebb_rate = self._base_hebb_rates[i]
-            if i in self._base_spike_thresholds and hasattr(ffn, "spike_threshold"):
-                ffn.spike_threshold = self._base_spike_thresholds[i]
+        Called per cycle so CfC modulation never accumulates across cycles.
+        """
+        if self._base_snapshot is None:
+            return
+        from luthi.sanctuary_interface import restore_modulation
+        restore_modulation(self.model, self._base_snapshot)
 
     def _apply_cfc_modulation(self, signals: ExperientialSignals):
         """Modulate Luthi's living parameters based on CfC cell signals.
@@ -445,34 +470,33 @@ class LuthiModel:
         - Precision adjusts spike thresholds
           (more precise → fewer, more selective spikes)
 
-        Modulation is per-cycle: base parameters are saved before and
-        restored after each think() call.
+        Modulation is per-cycle: the base snapshot taken at load time is
+        restored after each think() call so modulation never accumulates.
+        Goes through ``luthi.sanctuary_interface`` rather than reaching
+        into Luthi internals — that adapter is the contract surface.
         """
-        if not hasattr(self.model, "blocks"):
-            return
+        from luthi.sanctuary_interface import apply_external_modulation
 
         arousal = signals.affect_arousal
         precision = signals.precision_weight
 
-        for block in self.model.blocks:
-            ffn = getattr(block, "living_ffn", None)
-            if ffn is None:
-                continue
+        # Arousal → Hebbian learning rate
+        # Range: 0.5x (calm, arousal=0) to 2.0x (peak, arousal=1)
+        plasticity_scale = (
+            (0.5 + 1.5 * arousal) * self.config.arousal_plasticity_scale
+        )
+        # Precision → spike threshold
+        # Higher precision = higher threshold = fewer spikes = more selective
+        # Range: 0.75x (low precision) to 1.25x (high precision)
+        spike_threshold_scale = (
+            (0.75 + 0.5 * precision) * self.config.precision_threshold_scale
+        )
 
-            # Arousal → Hebbian learning rate
-            # Range: 0.5x (calm, arousal=0) to 2.0x (peak, arousal=1)
-            if hasattr(ffn, "hebb_rate"):
-                arousal_factor = 0.5 + (1.5 * arousal)
-                ffn.hebb_rate *= arousal_factor * self.config.arousal_plasticity_scale
-
-            # Precision → spike threshold
-            # Higher precision = higher threshold = fewer spikes = more selective
-            # Range: 0.75x (low precision) to 1.25x (high precision)
-            if hasattr(ffn, "spike_threshold"):
-                precision_factor = 0.75 + (0.5 * precision)
-                ffn.spike_threshold *= (
-                    precision_factor * self.config.precision_threshold_scale
-                )
+        apply_external_modulation(
+            self.model,
+            plasticity_scale=plasticity_scale,
+            spike_threshold_scale=spike_threshold_scale,
+        )
 
     # ------------------------------------------------------------------
     # Introspection — cognitive proprioception channel

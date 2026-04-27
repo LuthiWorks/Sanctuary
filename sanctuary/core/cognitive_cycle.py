@@ -315,11 +315,10 @@ class CognitiveCycle:
         cycles = 0
 
         while self.running:
-            try:
-                await self._cycle()
-            except Exception as e:
-                logger.error("Cognitive cycle %d failed: %s", cycles, e, exc_info=True)
-                # Continue running — a single bad cycle should not kill the system
+            # Per AGENTS.md: no top-level crash boundary until Phase 9 (First
+            # Awakening). During development and testing, let cycle failures
+            # surface so they can be diagnosed.
+            await self._cycle()
 
             cycles += 1
 
