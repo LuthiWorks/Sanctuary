@@ -62,7 +62,6 @@ class MemoryConfig:
     # Significance thresholds
     MIN_SIGNIFICANCE = 1
     MAX_SIGNIFICANCE = 10
-    BLOCKCHAIN_THRESHOLD = 8  # Entries above this trigger blockchain commit
     PIVOTAL_MEMORY_THRESHOLD = 9  # Entries above this become pivotal memories
     
     # Storage limits
@@ -125,7 +124,7 @@ class JournalEntry(BaseModel):
         summary: Condensed version for RAG embedding (max 500 chars)
         tags: Semantic labels for categorization
         emotional_signature: Affective state(s) during this moment
-        significance_score: Importance rating (1-10, triggers blockchain at >8)
+        significance_score: Importance rating (1-10, mundane→pivotal)
         metadata: Additional context (location, interaction partner, etc.)
     """
     model_config = ConfigDict(
@@ -165,7 +164,7 @@ class JournalEntry(BaseModel):
         default=5,
         ge=MemoryConfig.MIN_SIGNIFICANCE,
         le=MemoryConfig.MAX_SIGNIFICANCE,
-        description=f"Importance rating: 1=mundane, 10=pivotal (>{MemoryConfig.BLOCKCHAIN_THRESHOLD} triggers blockchain)"
+        description="Importance rating: 1=mundane, 10=pivotal"
     )
     metadata: Dict[str, Any] = Field(
         default_factory=dict,
@@ -399,48 +398,35 @@ class MemoryManager:
         self,
         base_dir: Path,
         chroma_dir: Path,
-        blockchain_enabled: bool = False,
-        blockchain_config: Optional[Dict[str, Any]] = None,
         gc_config: Optional[Dict[str, Any]] = None
     ):
-        """Initialize the Memory Manager with tri-state storage.
-        
+        """Initialize the Memory Manager with dual-state storage.
+
         Args:
             base_dir: Root directory for local JSON storage
             chroma_dir: Directory for ChromaDB persistent storage
-            blockchain_enabled: Whether to enable blockchain commits
-            blockchain_config: Configuration for blockchain connection
             gc_config: Configuration for garbage collection
-            
+
         Raises:
             ValueError: If directories are invalid or inaccessible
         """
         self.base_dir = Path(base_dir)
         self.chroma_dir = Path(chroma_dir)
-        self.blockchain_enabled = blockchain_enabled
-        self.blockchain_config = blockchain_config or {}
-        
+
         # Validate and create directory structure
         self._initialize_storage()
-        
+
         # Initialize ChromaDB client
         self._initialize_chromadb()
-        
-        # Initialize blockchain client if enabled
-        if self.blockchain_enabled:
-            self._initialize_blockchain()
-        
+
         # Initialize garbage collector
         from mind.cognitive_core.memory_gc import MemoryGarbageCollector
         self.gc = MemoryGarbageCollector(
             memory_store=self.journal_collection,
             config=gc_config or {}
         )
-        
-        logger.info(
-            f"MemoryManager initialized at {self.base_dir} "
-            f"(blockchain={'enabled' if blockchain_enabled else 'disabled'})"
-        )
+
+        logger.info(f"MemoryManager initialized at {self.base_dir}")
     
     def _initialize_storage(self) -> None:
         """Create directory structure for local JSON storage.
@@ -527,17 +513,6 @@ class MemoryManager:
             logger.error(f"ChromaDB initialization failed: {e}")
             raise RuntimeError(f"Cannot initialize ChromaDB: {e}")
     
-    def _initialize_blockchain(self) -> None:
-        """Initialize blockchain client for immutable timestamps.
-        
-        Note: This is a placeholder for blockchain integration.
-        Actual implementation would connect to Ethereum/IPFS/etc.
-        """
-        logger.warning("Blockchain integration is not yet implemented")
-        # TODO: Implement actual blockchain client
-        # from web3 import Web3
-        # self.blockchain_client = Web3(...)
-    
     async def _retry_operation(self, operation, *args, **kwargs) -> bool:
         """Retry an operation with exponential backoff.
         
@@ -581,56 +556,43 @@ class MemoryManager:
         return False
     
     async def commit_journal(self, entry: JournalEntry) -> bool:
-        """Commit a journal entry to tri-state storage.
-        
+        """Commit a journal entry to dual-state storage.
+
         Process:
         1. Validate entry (Pydantic handles this)
         2. Save authoritative JSON to local filesystem
         3. Upsert summary (NOT full text) to ChromaDB
-        4. If significance_score > 8, commit to blockchain
-        
+
         Args:
             entry: Validated JournalEntry to commit
-            
+
         Returns:
             True if all commits succeeded, False otherwise
-            
+
         Raises:
             ValueError: If entry validation fails
             IOError: If filesystem write fails (critical)
         """
         try:
             logger.info(f"Committing journal entry {entry.id} (significance: {entry.significance_score})")
-            
+
             # Step 1: Save to local JSON (authoritative source)
             success_local = await self._commit_journal_local(entry)
             if not success_local:
                 logger.error(f"CRITICAL: Local commit failed for {entry.id}")
                 raise IOError("Local storage commit failed - this is a critical failure")
-            
+
             # Step 2: Upsert summary to ChromaDB
             success_vector = await self._commit_journal_vector(entry)
             if not success_vector:
                 logger.warning(f"Vector storage failed for {entry.id} - retrieval may be impaired")
-            
-            # Step 3: Blockchain commit for pivotal memories
-            success_blockchain = True
-            if entry.significance_score > MemoryConfig.BLOCKCHAIN_THRESHOLD:
-                logger.info(
-                    f"Entry {entry.id} significance ({entry.significance_score}) exceeds "
-                    f"blockchain threshold ({MemoryConfig.BLOCKCHAIN_THRESHOLD}), committing to blockchain"
-                )
-                success_blockchain = await self._commit_journal_blockchain(entry)
-                if not success_blockchain:
-                    logger.warning(f"Blockchain commit failed for pivotal entry {entry.id}")
-            
-            # All critical paths succeeded if we got here
+
             logger.info(
                 f"Journal entry {entry.id} committed successfully "
-                f"(local={success_local}, vector={success_vector}, blockchain={success_blockchain})"
+                f"(local={success_local}, vector={success_vector})"
             )
             return True
-            
+
         except Exception as e:
             logger.error(f"Journal commit failed for {entry.id}: {e}", exc_info=True)
             return False
@@ -708,31 +670,6 @@ class MemoryManager:
             
         except Exception as e:
             logger.error(f"Vector storage failed: {e}", exc_info=True)
-            return False
-    
-    async def _commit_journal_blockchain(self, entry: JournalEntry) -> bool:
-        """Commit pivotal memory to blockchain for immutable timestamp.
-        
-        This is only called for entries with significance_score > 8.
-        
-        Args:
-            entry: Pivotal journal entry
-            
-        Returns:
-            True if successful or blockchain disabled, False on failure
-        """
-        if not self.blockchain_enabled:
-            logger.debug("Blockchain disabled, skipping commit")
-            return True
-        
-        try:
-            # TODO: Implement actual blockchain commit
-            # Example: IPFS hash + Ethereum timestamp
-            logger.warning(f"Blockchain commit not yet implemented for {entry.id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Blockchain commit failed: {e}", exc_info=True)
             return False
     
     async def commit_fact(self, fact: FactEntry) -> bool:

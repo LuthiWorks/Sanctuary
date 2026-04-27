@@ -243,28 +243,6 @@ class TestMemoryRetrieverEdgeCases:
             retriever.retrieve_memories("test", k=-5)
 
 
-class TestMemoryStorageEdgeCases:
-    """Test edge cases for memory storage (mocked)."""
-    
-    def test_add_to_blockchain_with_empty_data(self):
-        """Test blockchain add with empty dict."""
-        from mind.memory.storage import MemoryStorage
-        
-        # This would require full initialization, so we'll just test the validation logic
-        # by checking the method signature
-        import inspect
-        sig = inspect.signature(MemoryStorage.add_to_blockchain)
-        assert 'data' in sig.parameters
-    
-    def test_verify_block_with_empty_hash(self):
-        """Test block verification with empty hash."""
-        # Similar validation test
-        from mind.memory.storage import MemoryStorage
-        import inspect
-        sig = inspect.signature(MemoryStorage.verify_block)
-        assert 'block_hash' in sig.parameters
-
-
 if __name__ == "__main__":
     print("Running edge case tests...")
     

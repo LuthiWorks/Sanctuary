@@ -103,7 +103,6 @@ async def main():
         memory_manager = MemoryManager(
             base_dir=args.memory_dir,
             chroma_dir=args.chroma_dir,
-            blockchain_enabled=False
         )
         
         # Get initial statistics

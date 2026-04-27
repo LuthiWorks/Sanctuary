@@ -31,12 +31,9 @@ def temp_dirs():
 
     temp_base = tempfile.mkdtemp()
     persistence_dir = Path(temp_base) / "memories"
-    chain_dir = Path(temp_base) / "chain"
-
     persistence_dir.mkdir(parents=True)
-    chain_dir.mkdir(parents=True)
 
-    yield persistence_dir, chain_dir
+    yield persistence_dir
 
     # Cleanup with retry for Windows file locking
     gc.collect()  # Force garbage collection to release handles
@@ -56,11 +53,8 @@ def temp_dirs():
 @pytest.fixture
 def storage(temp_dirs):
     """Create MemoryStorage instance for testing."""
-    persistence_dir, chain_dir = temp_dirs
-    store = MemoryStorage(
-        persistence_dir=str(persistence_dir),
-        chain_dir=str(chain_dir)
-    )
+    persistence_dir = temp_dirs
+    store = MemoryStorage(persistence_dir=str(persistence_dir))
     yield store
     # Close storage to release ChromaDB file handles
     store.close()

@@ -68,7 +68,6 @@ async def memory_manager(temp_memory_dir, temp_chroma_dir):
     manager = MemoryManager(
         base_dir=temp_memory_dir,
         chroma_dir=temp_chroma_dir,
-        blockchain_enabled=False
     )
     return manager
 

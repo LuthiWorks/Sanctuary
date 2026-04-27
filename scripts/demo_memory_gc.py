@@ -213,7 +213,6 @@ async def main():
         manager = MemoryManager(
             base_dir=memory_dir,
             chroma_dir=chroma_dir,
-            blockchain_enabled=False,
             gc_config=gc_config
         )
 

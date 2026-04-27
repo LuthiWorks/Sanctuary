@@ -37,55 +37,32 @@ class MemoryEncoder:
     def encode_experience(
         self,
         experience: Dict[str, Any],
-        block_hash: Optional[str] = None,
-        token_id: Optional[int] = None
     ) -> tuple[str, Dict[str, Any], str]:
         """
         Encode an experience for storage in episodic memory.
-        
+
         Args:
             experience: Raw experience data
-            block_hash: Optional blockchain hash
-            token_id: Optional memory token ID
-            
+
         Returns:
             Tuple of (document, metadata, doc_id)
         """
         timestamp = experience.get("timestamp", datetime.now().isoformat())
-        
-        # Prepare experience data
+
         experience_data = {
             **experience,
             "timestamp": timestamp,
             "type": "experience",
             "memory_type": "episodic"
         }
-        
-        # Add blockchain references if provided
-        if block_hash and token_id:
-            experience_data.update({
-                "block_hash": block_hash,
-                "token_id": token_id,
-                "verification": {
-                    "verified_at": timestamp,
-                    "status": "verified"
-                }
-            })
-        
-        # Create document and metadata
+
         document = json.dumps(experience_data)
         metadata = {
             "timestamp": timestamp,
             "type": "experience"
         }
-        
-        if block_hash:
-            metadata["block_hash"] = block_hash
-        if token_id:
-            metadata["token_id"] = token_id
-        
-        doc_id = f"exp_{timestamp}_{block_hash[:8] if block_hash else 'legacy'}"
-        
+        doc_id = f"exp_{timestamp}"
+
         return document, metadata, doc_id
     
     def encode_journal_entry(

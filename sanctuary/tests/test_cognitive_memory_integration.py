@@ -49,13 +49,12 @@ def memory_integration(workspace, tmp_path):
         "memory_config": {
             "base_dir": str(tmp_path / "memories"),
             "chroma_dir": str(tmp_path / "chroma"),
-            "blockchain_enabled": False,
         },
         "consolidation_threshold": 0.6,
         "retrieval_top_k": 5,
         "min_cycles": 5,  # Shorter for testing
     }
-    
+
     integration = MemoryIntegration(workspace, config)
     return integration
 
@@ -445,7 +444,6 @@ class TestIntegrationWithCognitiveCore:
                 "memory_config": {
                     "base_dir": str(tmp_path / "memories"),
                     "chroma_dir": str(tmp_path / "chroma"),
-                    "blockchain_enabled": False,
                 }
             },
             "perception": {"mock_mode": True},

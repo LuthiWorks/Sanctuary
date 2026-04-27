@@ -83,8 +83,6 @@ class MemoryIntegration:
         self.memory_manager = MemoryManager(
             base_dir=base_dir,
             chroma_dir=chroma_dir,
-            blockchain_enabled=memory_config.get("blockchain_enabled", False),
-            blockchain_config=memory_config.get("blockchain_config", {}),
             gc_config=memory_config.get("gc_config", {})
         )
         

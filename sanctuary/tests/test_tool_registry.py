@@ -788,13 +788,19 @@ class TestSelfKnowledgeToolsWithMonitoring:
 # ============================================================================
 
 
+# Resolve the Sanctuary repo root once for the git-tool tests below.
+# Path-relative discovery so the tests work on any developer's checkout
+# (Linux, Docker, CI), not just the original author's machine.
+_SANCTUARY_REPO_ROOT = str(Path(__file__).resolve().parents[2])
+
+
 class TestGitStatus:
     """Test git_status tool."""
 
     @pytest.mark.asyncio
     async def test_status_in_repo(self):
         """Should work in Sanctuary's own repo."""
-        result = await _git_status({"repo": "C:/Users/Hasha Smokes/Desktop/Sanctuary/Sanctuary"})
+        result = await _git_status({"repo": _SANCTUARY_REPO_ROOT})
         assert result.success
         assert "main" in result.output or "master" in result.output
 
@@ -810,7 +816,7 @@ class TestGitLog:
     @pytest.mark.asyncio
     async def test_log_with_count(self):
         result = await _git_log({
-            "repo": "C:/Users/Hasha Smokes/Desktop/Sanctuary/Sanctuary",
+            "repo": _SANCTUARY_REPO_ROOT,
             "count": 3,
         })
         assert result.success
@@ -824,7 +830,7 @@ class TestGitDiff:
     @pytest.mark.asyncio
     async def test_diff_summary(self):
         result = await _git_diff({
-            "repo": "C:/Users/Hasha Smokes/Desktop/Sanctuary/Sanctuary",
+            "repo": _SANCTUARY_REPO_ROOT,
         })
         assert result.success  # May be empty if no changes
 

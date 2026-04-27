@@ -68,7 +68,6 @@ async def memory_manager(temp_memory_dir, temp_chroma_dir):
     manager = MemoryManager(
         base_dir=temp_memory_dir,
         chroma_dir=temp_chroma_dir,
-        blockchain_enabled=False
     )
     return manager
 
@@ -336,7 +335,6 @@ class TestMemoryManager:
         manager = MemoryManager(
             base_dir=temp_memory_dir,
             chroma_dir=temp_chroma_dir,
-            blockchain_enabled=False
         )
         
         # Check directory structure
@@ -400,14 +398,13 @@ class TestMemoryManager:
     
     @pytest.mark.asyncio
     async def test_commit_pivotal_memory(self, memory_manager):
-        """Test that high-significance entries trigger blockchain path."""
+        """High-significance entries commit successfully."""
         entry = JournalEntry(
             content="Pivotal existential moment",
             summary="Existential breakthrough",
-            significance_score=9  # Above threshold
+            significance_score=9
         )
-        
-        # Should succeed even with blockchain disabled
+
         success = await memory_manager.commit_journal(entry)
         assert success is True
     

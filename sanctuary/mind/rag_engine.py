@@ -17,7 +17,6 @@ import torch
 import chromadb
 from chromadb.config import Settings
 
-from .sanctuary_chain import SanctuaryChain
 from .chroma_embeddings import ChromaCompatibleEmbeddings
 
 logger = logging.getLogger(__name__)
@@ -25,13 +24,12 @@ logger = logging.getLogger(__name__)
 class MindVectorDB:
     """
     MindVectorDB Component - The Architectural Sanctuary
-    Uses ChromaDB to vectorize and store the Mind for querying with hash-chain verification.
+    Uses ChromaDB to vectorize and store the Mind for querying.
     """
-    def __init__(self, db_path: str, mind_file: str, chain_dir: str = "chain", chroma_settings=None):
+    def __init__(self, db_path: str, mind_file: str, chroma_settings=None):
         self.db_path = Path(db_path)
         self.mind_file = Path(mind_file)
-        self.chain = SanctuaryChain(chain_dir)
-        
+
         # Initialize embeddings with ChromaDB-compatible wrapper
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.embeddings = ChromaCompatibleEmbeddings(
@@ -84,27 +82,20 @@ class MindVectorDB:
             chunks = []
             for section, entries in data.items():
                 for entry in entries:
-                    # Create block and token for each chunk
-                    block_hash = self.chain.add_block(entry)
-                    token_id = self.chain.token.mint_memory_token(block_hash)
-                    
                     # Split content into chunks
                     entry_chunks = self.text_splitter.split_text(json.dumps(entry))
-                    
-                    # Add each chunk with blockchain reference
+
                     for i, chunk in enumerate(entry_chunks):
                         chunks.append({
                             "page_content": chunk,
                             "metadata": {
                                 "source": f"{section}/{i}",
-                                "block_hash": block_hash,
-                                "token_id": token_id,
                                 "section": section,
                                 "timestamp": datetime.now().isoformat()
                             }
                         })
-            
-            logger.info(f"Generated {len(chunks)} verified chunks from mind file")
+
+            logger.info(f"Generated {len(chunks)} chunks from mind file")
             return chunks
             
         except Exception as e:
@@ -311,39 +302,8 @@ class RAGQueryEngine:
         logger.info("RAG chain built successfully")
         return qa_chain
 
-    async def query(self, query: str, verify_response: bool = True) -> Dict[str, Any]:
-        """
-        Queries the RAG chain with hash-chain verification of retrieved context.
-        Returns both the response and verification metadata.
-        """
+    async def query(self, query: str) -> Dict[str, Any]:
+        """Query the RAG chain and return the response."""
         logger.info(f"Querying chain: {query}")
-        
-        # Get raw response from chain
         response = await self.qa_chain.run(query)
-        
-        # If verification requested, add blockchain proof
-        if verify_response:
-            # Get source documents used in response
-            source_docs = await self.qa_chain.retriever.get_relevant_documents(query)
-            
-            # Verify each source through blockchain
-            verified_sources = []
-            for doc in source_docs:
-                if block_hash := doc.metadata.get('block_hash'):
-                    verified_data = await self.retriever.db.chain.verify_block(block_hash)
-                    if verified_data:
-                        verified_sources.append({
-                            'block_hash': block_hash,
-                            'token_id': doc.metadata.get('token_id'),
-                            'verified_at': datetime.now().isoformat()
-                        })
-            
-            return {
-                'response': response,
-                'verification': {
-                    'verified_sources': verified_sources,
-                    'verification_time': datetime.now().isoformat()
-                }
-            }
-        
         return {'response': response}

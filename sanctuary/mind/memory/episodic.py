@@ -38,107 +38,51 @@ class EpisodicMemory:
         self.encoder = encoder
         self.data_dir = data_dir
     
-    def store_experience(
-        self,
-        experience: Dict[str, Any],
-        use_blockchain: bool = True
-    ) -> Optional[Dict[str, str]]:
+    def store_experience(self, experience: Dict[str, Any]) -> None:
         """
         Store a new experience in episodic memory.
-        
+
         Args:
             experience: Experience data dictionary
-            use_blockchain: Whether to use blockchain verification
-            
-        Returns:
-            Dict with block_hash and token_id if blockchain used, None otherwise
         """
         try:
-            block_hash = None
-            token_id = None
-            
-            # Add to blockchain if requested
-            if use_blockchain:
-                logger.debug(f"Adding experience to blockchain: {experience.get('description', 'unnamed')[:50]}...")
-                block_hash, token_id = self.storage.add_to_blockchain(experience)
-            
             # Encode the experience
-            document, metadata, doc_id = self.encoder.encode_experience(
-                experience,
-                block_hash=block_hash,
-                token_id=token_id
-            )
-            
+            document, metadata, doc_id = self.encoder.encode_experience(experience)
+
             # Store in episodic memory collection
             self.storage.add_episodic(document, metadata, doc_id)
-            
+
             # Update mind file
             experience_data = json.loads(document)
             self.storage.update_mind_file(experience_data)
-            
-            logger.info(
-                f"Experience stored successfully"
-                f"{f' (block: {block_hash[:12]}..., token: {token_id})' if block_hash else ''}"
-            )
-            
-            if block_hash and token_id:
-                return {"block_hash": block_hash, "token_id": token_id}
-            return None
-            
+
+            logger.info("Experience stored successfully")
+
         except Exception as e:
             logger.error(f"Failed to store experience: {e}", exc_info=True)
             raise RuntimeError(f"Experience storage failed: {e}") from e
-    
-    def update_experience(self, experience_data: Dict[str, Any]) -> bool:
+
+    def update_experience(self, experience_data: Dict[str, Any], doc_id: str) -> bool:
         """
-        Update an existing experience while maintaining blockchain integrity.
-        
+        Update an existing experience in episodic memory.
+
         Args:
-            experience_data: Updated experience data with block_hash
-            
+            experience_data: Updated experience data
+            doc_id: Document ID of the experience to update
+
         Returns:
             True if successful, False otherwise
         """
         from datetime import datetime
-        
+
         try:
-            block_hash = experience_data.get("block_hash")
-            if not block_hash:
-                logger.error("Cannot update experience: no block hash provided")
-                return False
-
-            # Verify the original block exists
-            original_data = self.storage.verify_block(block_hash)
-            if not original_data:
-                logger.error(f"Cannot update experience: block {block_hash} not found or invalid")
-                return False
-
-            # Create new block with updated data
-            experience_data["original_block"] = block_hash
-            new_block_hash, _ = self.storage.add_to_blockchain(experience_data)
-            
-            # Add update chain metadata
-            experience_data.update({
-                "block_hash": new_block_hash,
-                "update_chain": {
-                    "original_block": block_hash,
-                    "update_time": datetime.now().isoformat()
-                }
-            })
-
-            # Update in episodic memory
             document = json.dumps(experience_data)
             metadata = {
                 "timestamp": datetime.now().isoformat(),
                 "type": "experience",
-                "block_hash": new_block_hash,
-                "original_block": block_hash
             }
-            doc_id = f"exp_{block_hash}"
-            
             self.storage.update_episodic(document, metadata, doc_id)
-            
-            logger.info(f"Experience updated: original block {block_hash}, new block {new_block_hash}")
+            logger.info(f"Experience {doc_id} updated")
             return True
 
         except Exception as e:

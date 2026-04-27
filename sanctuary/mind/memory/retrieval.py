@@ -141,25 +141,7 @@ class MemoryRetriever:
         for doc in docs:
             try:
                 content = json.loads(doc.page_content) if isinstance(doc.page_content, str) else doc.page_content
-                
-                if block_hash := doc.metadata.get("block_hash"):
-                    verified_data = self.storage.verify_block(block_hash)
-                    if verified_data:
-                        verified_data["verification"] = {
-                            "block_hash": block_hash,
-                            "token_id": doc.metadata.get("token_id"),
-                            "verified_at": datetime.now().isoformat(),
-                            "rag_score": doc.metadata.get("score", 0.0),
-                            "status": "verified"
-                        }
-                        memories.append(verified_data)
-                    else:
-                        content["verification"] = {"status": "verification_failed", "block_hash": block_hash}
-                        memories.append(content)
-                else:
-                    content["verification"] = {"status": "legacy"}
-                    memories.append(content)
-                    
+                memories.append(content)
             except (json.JSONDecodeError, AttributeError, KeyError) as e:
                 logger.warning(f"Failed to parse memory: {e}")
                 continue
@@ -210,30 +192,11 @@ class MemoryRetriever:
             for result, metadata in zip(results["documents"][0], results["metadatas"][0]):
                 try:
                     memory_data = json.loads(result) if isinstance(result, str) else result
-                    
-                    # Verify through blockchain if available
-                    if block_hash := metadata.get("block_hash"):
-                        verified_data = self.storage.verify_block(block_hash)
-                        if verified_data:
-                            verified_data["verification"] = {
-                                "block_hash": block_hash,
-                                "token_id": metadata.get("token_id"),
-                                "verified_at": datetime.now().isoformat(),
-                                "status": "verified"
-                            }
-                            memories.append(verified_data)
-                        else:
-                            logger.warning(f"Memory verification failed for block: {block_hash}")
-                            memory_data["verification"] = {"status": "verification_failed"}
-                            memories.append(memory_data)
-                    else:
-                        memory_data["verification"] = {"status": "legacy"}
-                        memories.append(memory_data)
-                        
+                    memories.append(memory_data)
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse episodic memory: {e}")
                     continue
-        
+
         return memories
     
     def _process_semantic_results(self, results: Dict[str, Any]) -> List[Dict[str, Any]]:

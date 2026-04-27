@@ -117,10 +117,6 @@ def install_mock_modules():
     transformers_mod.AutoModel = MagicMock()
     sys.modules["transformers"] = transformers_mod
 
-    # --- web3 / blockchain (optional) ---
-    for mod_name in ["web3", "web3.auto", "eth_account", "aioipfs"]:
-        sys.modules[mod_name] = types.ModuleType(mod_name)
-
     # --- sounddevice, cv2, serial (optional devices) ---
     for mod_name in ["sounddevice", "cv2", "serial", "librosa", "torchaudio", "soundfile"]:
         sys.modules[mod_name] = types.ModuleType(mod_name)

@@ -3,7 +3,6 @@ Storage Backend for Memory System
 
 Handles raw storage operations for memory data:
 - ChromaDB collections management
-- Blockchain interface for immutable memories
 - CRUD operations without retrieval logic
 
 Author: Sanctuary Team
@@ -16,46 +15,35 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-from ..sanctuary_chain import SanctuaryChain
-
 logger = logging.getLogger(__name__)
 
 
 class MemoryStorage:
     """
-    Storage backend for memory system with blockchain verification.
-    
+    Storage backend for memory system.
+
     Manages:
     - ChromaDB collections (episodic, semantic, procedural)
-    - Blockchain for memory verification
     - Mind state file persistence
     """
-    
+
     def __init__(
         self,
         persistence_dir: str = "memories",
-        chain_dir: str = "chain",
         chroma_settings: Optional[Settings] = None
     ):
         """
         Initialize storage backend.
-        
+
         Args:
             persistence_dir: Directory for persistent memory storage
-            chain_dir: Directory for blockchain verification data
             chroma_settings: Optional ChromaDB configuration
         """
         self.persistence_dir = Path(persistence_dir)
-        self.chain_dir = Path(chain_dir)
-        
-        # Create directories if they don't exist
+
+        # Create directory if it doesn't exist
         self.persistence_dir.mkdir(exist_ok=True, parents=True)
-        self.chain_dir.mkdir(exist_ok=True, parents=True)
-        
-        # Initialize blockchain for memory verification
-        logger.info("Initializing blockchain verification system...")
-        self.chain = SanctuaryChain(str(self.chain_dir))
-        
+
         # Setup mind state directory and file
         mind_state_dir = self.persistence_dir / "mind_state"
         mind_state_dir.mkdir(exist_ok=True, parents=True)
@@ -111,31 +99,6 @@ class MemoryStorage:
         logger.info(f"  - Episodic memories: {self.episodic_memory.count()}")
         logger.info(f"  - Semantic memories: {self.semantic_memory.count()}")
         logger.info(f"  - Procedural memories: {self.procedural_memory.count()}")
-    
-    def add_to_blockchain(self, data: Dict[str, Any]) -> tuple[str, int]:
-        """Add data to blockchain and mint memory token."""
-        if not data or not isinstance(data, dict):
-            raise ValueError("Data must be a non-empty dictionary")
-        
-        try:
-            block_hash = self.chain.add_block(data)
-            token_id = self.chain.token.mint_memory_token(block_hash)
-            return block_hash, token_id
-        except Exception as e:
-            logger.error(f"Blockchain operation failed: {e}")
-            raise
-    
-    def verify_block(self, block_hash: str) -> Optional[Dict[str, Any]]:
-        """Verify a memory block in the blockchain."""
-        if not block_hash or not isinstance(block_hash, str):
-            logger.warning("Invalid block hash provided")
-            return None
-        
-        try:
-            return self.chain.verify_block(block_hash)
-        except Exception as e:
-            logger.error(f"Block verification failed: {e}")
-            return None
     
     def add_episodic(self, document: str, metadata: Dict[str, Any], doc_id: str) -> None:
         """Add a document to episodic memory collection."""
@@ -266,10 +229,6 @@ class MemoryStorage:
             "semantic": self.semantic_memory.count(),
             "procedural": self.procedural_memory.count()
         }
-    
-    def get_blockchain_count(self) -> int:
-        """Get number of blocks in the blockchain."""
-        return len(self.chain.chain) if hasattr(self.chain, 'chain') else 0
     
     def _get_collection(self, collection_type: str):
         """

@@ -92,7 +92,6 @@ This project values **correct, direct code over defensive code**. Follow these p
 
 - Never commit `.env` files — use `.env.example` as template
 - API keys and model paths are configured via environment variables
-- The blockchain module (`sanctuary/mind/blockchain.py`) handles integrity verification — do not modify without understanding the chain-of-custody implications
 - GPU monitoring uses `nvidia-ml-py` — gracefully handle missing NVIDIA hardware
 
 ## Git Workflows

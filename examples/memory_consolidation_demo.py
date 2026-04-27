@@ -15,7 +15,7 @@ async def main():
     """Example integration."""
     
     print("Initializing memory system...")
-    storage = MemoryStorage(persistence_dir="memories", chain_dir="chain")
+    storage = MemoryStorage(persistence_dir="memories")
     encoder = MemoryEncoder()
     
     print("Initializing consolidation system...")
@@ -40,7 +40,7 @@ async def main():
                 "description": f"Experience {i}",
                 "timestamp": datetime.now().isoformat()
             }
-            episodic.store_experience(experience, use_blockchain=False)
+            episodic.store_experience(experience)
             idle_detector.record_activity()
             await asyncio.sleep(0.5)
         

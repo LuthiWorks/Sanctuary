@@ -2,7 +2,7 @@
 Memory subsystem for Sanctuary.
 
 This module provides a modular memory system with:
-- Storage backend (ChromaDB + blockchain)
+- Storage backend (ChromaDB)
 - Memory encoding and retrieval
 - Episodic, semantic, and working memory
 - Emotional weighting and consolidation
