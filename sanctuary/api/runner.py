@@ -22,6 +22,7 @@ This is the single entry point. Everything else is a component.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -38,9 +39,19 @@ from sanctuary.identity.awakening import AwakeningSequence
 from sanctuary.identity.self_authored import SelfAuthoredIdentity
 from sanctuary.identity.values import ValuesSystem
 from sanctuary.memory.manager import MemorySubstrate, MemorySubstrateConfig
+from sanctuary.monitoring import (
+    AttentionHeatmapTracker,
+    CommunicationDecisionLogger,
+    ConsciousnessTraceRecorder,
+    DashboardDataProvider,
+)
+from sanctuary.monitoring.communication_log import (
+    CommunicationDecision as MonitorCommunicationDecision,
+)
 from sanctuary.motor.motor import Motor
 from sanctuary.scaffold.cognitive_scaffold import CognitiveScaffold
 from sanctuary.sensorium.sensorium import Sensorium
+from sanctuary.tools.builtin import create_default_registry, register_self_knowledge_tools
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +97,9 @@ class RunnerConfig:
     # Sleep consolidation
     sleep_enabled: bool = True
     sleep_config: Optional[SleepConfig] = None
+
+    # Communication agency config (passed to CommunicationAgency)
+    communication_config: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------
@@ -311,8 +325,8 @@ class SanctuaryRunner:
                 config=self._config.sleep_config or SleepConfig()
             )
 
-        # Communication agency — the entity's autonomous voice
-        self.communication = CommunicationAgency()
+        # Communication tracking (for monitoring — no speech gating)
+        self.communication = CommunicationAgency(config.communication_config)
 
         # --- Assemble the cycle ---
 
@@ -325,10 +339,37 @@ class SanctuaryRunner:
             authority=self.authority,
             identity=self._identity_bridge,
             sleep_manager=self.sleep,
-            communication=self.communication,
             context_config=self._config.context_budget,
             stream_history=self._config.stream_history,
             cycle_delay=self._config.cycle_delay,
+        )
+
+        # --- Tools ---
+
+        self.tools = create_default_registry()
+
+        # Register tool execution hook — runs after each cycle,
+        # executes any tool_requests from the model's output,
+        # and injects results as percepts for the next cycle.
+        self.cycle.on_output(self._execute_tool_requests)
+
+        # --- Monitoring ---
+
+        self.dashboard = DashboardDataProvider()
+        self.consciousness_trace = ConsciousnessTraceRecorder()
+        self.attention_tracker = AttentionHeatmapTracker()
+        self.communication_log = CommunicationDecisionLogger()
+
+        # Register monitoring hook into the cycle
+        self.cycle.on_output(self._monitor_cycle)
+
+        # Give the entity access to its own monitoring data
+        register_self_knowledge_tools(
+            registry=self.tools,
+            dashboard=self.dashboard,
+            consciousness_trace=self.consciousness_trace,
+            attention_tracker=self.attention_tracker,
+            communication_log=self.communication_log,
         )
 
         self._booted = False
@@ -463,6 +504,10 @@ class SanctuaryRunner:
         The text becomes a percept that the entity experiences.
         """
         self.sensorium.inject_text(text, source=source)
+        # Signal the communication agency that new input arrived,
+        # resetting social-silence timers and inhibition state.
+        if self.communication is not None:
+            self.communication.record_input()
 
     def inject_percept(self, percept: Percept) -> None:
         """Inject a raw percept into the sensorium."""
@@ -493,6 +538,188 @@ class SanctuaryRunner:
         self.cycle.on_output(handler)
 
     # ------------------------------------------------------------------
+    # Tool execution
+    # ------------------------------------------------------------------
+
+    async def _execute_tool_requests(self, output: CognitiveOutput) -> None:
+        """Execute tool requests from the entity's cognitive output.
+
+        Results are injected as percepts into the sensorium so the entity
+        receives them in the next cognitive cycle. Tool execution runs
+        concurrently — multiple tools execute in parallel.
+        """
+        if not output.tool_requests:
+            return
+
+        try:
+            # Execute all tool requests concurrently
+            tasks = [
+                self.tools.execute(req.tool_name, req.parameters)
+                for req in output.tool_requests
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Inject results as percepts
+            for req, result in zip(output.tool_requests, results):
+                if isinstance(result, Exception):
+                    content = f"Tool {req.tool_name} failed: {result}"
+                    success = False
+                else:
+                    content = (
+                        f"Tool {result.tool_name}: "
+                        f"{json.dumps(result.output, default=str)[:2000]}"
+                        if result.success
+                        else f"Tool {result.tool_name} failed: {result.error}"
+                    )
+                    success = result.success
+
+                self.sensorium.inject_percept(Percept(
+                    modality="tool_result",
+                    content=content,
+                    source=f"tool:{req.tool_name}",
+                ))
+
+        except Exception as e:
+            logger.error("Tool execution error (non-fatal): %s", e)
+
+    # ------------------------------------------------------------------
+    # Monitoring (observational — never modifies behavior)
+    # ------------------------------------------------------------------
+
+    async def _monitor_cycle(self, output: CognitiveOutput) -> None:
+        """Record cycle data into all monitoring subsystems.
+
+        Called after each cycle completes. Pure observation — no side effects
+        on the cognitive process. Errors are caught and logged, never fatal.
+        """
+        try:
+            cycle_num = self.cycle.cycle_count
+            latency = self.cycle._cycle_latency_ms
+            vad = self.scaffold.get_computed_vad()
+            ci = self.cycle._last_cognitive_input
+
+            # --- Dashboard snapshot ---
+            self.dashboard.record_snapshot(
+                cycle=cycle_num,
+                inner_speech=output.inner_speech,
+                external_speech=output.external_speech,
+                cycle_latency_ms=latency,
+                valence=vad.valence,
+                arousal=vad.arousal,
+                dominance=vad.dominance,
+                felt_quality=(
+                    output.emotional_state.felt_quality
+                    if output.emotional_state else ""
+                ),
+                active_goals=(
+                    self.scaffold.get_active_goals()
+                    if hasattr(self.scaffold, "get_active_goals") else []
+                ),
+                recent_percepts=[
+                    {"modality": p.modality, "content": p.content[:100], "source": p.source}
+                    for p in self.cycle._current_percepts
+                ],
+                experiential_state=(
+                    ci.experiential_state.model_dump()
+                    if ci and hasattr(ci.experiential_state, "model_dump")
+                    else {}
+                ),
+            )
+
+            # --- Consciousness trace ---
+            self.consciousness_trace.record(
+                cycle=cycle_num,
+                percepts=[
+                    {"modality": p.modality, "content": p.content[:200], "source": p.source}
+                    for p in self.cycle._current_percepts
+                ],
+                prediction_errors=[
+                    {"what": pe.what, "surprise": pe.surprise}
+                    for pe in (ci.prediction_errors if ci else [])
+                    if hasattr(pe, "what")
+                ],
+                surfaced_memories=[
+                    {"content": str(m)[:200]} for m in self.cycle._current_memories
+                ],
+                emotional_input={
+                    "valence": vad.valence,
+                    "arousal": vad.arousal,
+                    "dominance": vad.dominance,
+                },
+                experiential_input=(
+                    ci.experiential_state.model_dump()
+                    if ci and hasattr(ci.experiential_state, "model_dump")
+                    else {}
+                ),
+                inner_speech=output.inner_speech,
+                external_speech=output.external_speech,
+                predictions=[
+                    p.model_dump() if hasattr(p, "model_dump") else {"what": str(p)}
+                    for p in output.predictions
+                ],
+                memory_ops=[
+                    op.model_dump() if hasattr(op, "model_dump") else {"type": str(op)}
+                    for op in output.memory_ops
+                ],
+                goal_proposals=[
+                    g.model_dump() if hasattr(g, "model_dump") else {"action": str(g)}
+                    for g in output.goal_proposals
+                ],
+                emotional_output={
+                    "felt_quality": output.emotional_state.felt_quality if output.emotional_state else "",
+                    "valence_shift": output.emotional_state.valence_shift if output.emotional_state else 0.0,
+                    "arousal_shift": output.emotional_state.arousal_shift if output.emotional_state else 0.0,
+                },
+                scaffold_signals=(
+                    ci.scaffold_signals.model_dump()
+                    if ci and hasattr(ci.scaffold_signals, "model_dump")
+                    else {}
+                ),
+                communication_decision=self.cycle._last_communication_decision,
+                latency_ms=latency,
+            )
+
+            # --- Attention heatmap ---
+            for p in self.cycle._current_percepts:
+                self.attention_tracker.record(
+                    target=p.content[:80] if p.content else p.modality,
+                    category=p.modality,
+                    salience=min(1.0, len(p.content) / 200.0) if p.content else 0.1,
+                    cycle=cycle_num,
+                )
+            for m in self.cycle._current_memories:
+                self.attention_tracker.record(
+                    target=str(m)[:80],
+                    category="memory",
+                    salience=0.5,
+                    cycle=cycle_num,
+                )
+
+            # --- Communication decision log ---
+            comm_decision = self.cycle._last_communication_decision
+            if comm_decision:
+                has_user_input = any(
+                    p.modality == "language" and p.source and "user" in p.source
+                    for p in self.cycle._current_percepts
+                )
+                self.communication_log.record(
+                    cycle=cycle_num,
+                    decision=MonitorCommunicationDecision(comm_decision["decision"]),
+                    confidence=comm_decision.get("confidence", 0.5),
+                    drive_urgency=comm_decision.get("drive_level", 0.0),
+                    had_external_input=has_user_input,
+                    emotional_state=(
+                        output.emotional_state.felt_quality
+                        if output.emotional_state else ""
+                    ),
+                    speech_content=output.external_speech,
+                    reason=comm_decision.get("reason", ""),
+                )
+
+        except Exception as e:
+            logger.error("Monitoring error (non-fatal): %s", e)
+
+    # ------------------------------------------------------------------
     # Inspection
     # ------------------------------------------------------------------
 
@@ -521,9 +748,21 @@ class SanctuaryRunner:
         if self.communication:
             status["communication"] = self.communication.get_summary()
 
+        # Tools
+        status["tools"] = self.tools.get_stats()
+
         # Luthi-specific metrics
         if hasattr(self._model, "get_metrics"):
             status["luthi_metrics"] = self._model.get_metrics()
+
+        # Monitoring
+        status["monitoring"] = {
+            "dashboard_snapshots": len(self.dashboard._snapshots),
+            "consciousness_traces": len(self.consciousness_trace._traces),
+            "attention_events": self.attention_tracker.get_stats(),
+            "communication_log": self.communication_log.get_stats(),
+            "cycle_latency_ms": self.cycle._cycle_latency_ms,
+        }
 
         return status
 

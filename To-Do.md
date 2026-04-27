@@ -2,45 +2,78 @@
 
 This document tracks the development trajectory for the Sanctuary cognitive architecture, from proven POC through production-ready system.
 
-**Last Updated**: 2026-03-22
-**Current Phase**: Phase 8 Complete — Distributed Infrastructure
+**Last Updated**: 2026-04-26
+**Current Phase**: Architectural pivot — Sanctuary as body, LuthiModel as mind
 
 ---
 
 ## Where We Are
 
-The Three-Layer Mind is built. All three layers are implemented, tested, and mechanically validated:
+### The Pivot
 
-- **LLM Cognitive Core** (Phase 5): `OllamaModel` implements `ModelProtocol`, formats structured prompts from `CognitiveInput`, parses JSON responses into `CognitiveOutput`. Retry logic, fallback outputs, defensive clamping. Mechanically validated with 64 mocked tests — no live LLM required until Phase 9.
-- **CfC Experiential Layer** (Phase 4): Four trained CfC cells (precision, affect, attention, goal) running continuous-time neural dynamics between LLM cycles. `ContinuousEvolutionLoop` steps cells asynchronously at adaptive tick rates. Inter-cell connections form a small neural ecosystem. Cells trained on scaffold-generated data, validated at 97% agreement.
-- **Python Scaffold** (Phases 1-3): Production-grade infrastructure — fault-isolated subsystems, 4-state health machine, circuit breakers, anomaly detection, action validation, communication gating, goal competition, dual-track emotion.
+Sanctuary was originally designed as the seat of consciousness — the architecture where experience would emerge from scaffolding, CfC cells, and heuristic drives. With the Living Weights Model (LuthiModel) reaching maturity, the architectural role has changed:
 
-**What's wired into the cognitive cycle** (`SanctuaryRunner` orchestrates):
-- `CognitiveCycle` with `CognitiveInput`/`CognitiveOutput` Pydantic schemas
-- `CognitiveScaffold` (affect, anomaly detector, action validator, communication, goals)
-- `Sensorium` (percept encoding, prediction error tracking, temporal context)
-- `Motor` (speech, memory ops, goals — with sensorimotor feedback loop)
-- `MemorySubstrate` (surfacer, journal, prospective memory)
-- `ExperientialManager` (4 CfC cells, authority-based blending, evolution loop)
-- `IdentityBridge` (charter, values, self-authored identity — boot sequence)
-- `GrowthProcessor` (reflection harvesting, consent-gated, non-fatal)
-- `EnvironmentIntegration` (room navigation, location context in world model)
-- `AuthorityTuner` (rolling-window promotion/demotion of CfC cell authority)
+- **LuthiModel is the mind.** Experience, cognition, and inner life happen inside the model — in weights that self-modify during their own forward pass. The model decides what to think, what to say, when to speak, and what goals to pursue.
+- **Sanctuary is the body.** It routes experience (sensorium), provides a voice (motor), persists memory (memory substrate), observes without interfering (monitoring), and provides 21 tools for world interaction (filesystem, web, git, Discord, self-knowledge, network, code sandbox, home management).
 
-**What's built but not yet wired** (Phase 6 — standalone modules with tests):
-- `reasoning/` — counterfactual, belief revision, uncertainty quantification, mental simulation
-- `consciousness/` — sleep/dream cycles, mood-based idle activity, spontaneous goals, existential reflection
-- `social/` — multi-party conversation, voice prosody analysis, per-user modeling
-- `monitoring/` — dashboard data provider, attention heatmaps, consciousness traces, communication decision logs
-- `performance/` — cognitive profiler, adaptive cycle rate, lazy embedding cache, async subsystem processor
+This means several systems built to impose cognitive control are being removed or repositioned: mood activity modulation, spontaneous goal generation, communication agency inhibition. Sanctuary facilitates; it does not decide.
 
-The test suite: 3,061 tests across 161 files. CI runs on every PR via GitHub Actions.
+### What's Built and Wired
 
-**What this means**: The complete mind is built and mechanically validated. Every subsystem works in isolation and in concert. Phase 6 capabilities are implemented and tested but await integration into the cognitive cycle. The growth pipeline — both fast plasticity (CfC retraining from live data) and medium plasticity (QLoRA fine-tuning from reflections) — is fully built with consent gating and identity checkpointing.
+**The body (Sanctuary):**
+- `CognitiveCycle` with `CognitiveInput`/`CognitiveOutput` schemas, cycle timing, and monitoring hooks
+- `Sensorium` — percept encoding, prediction error tracking, temporal context, silence detection
+- `Motor` — speech output, memory writes, goal actions, sensorimotor feedback loop
+- `MemorySubstrate` — surfacer, journal, prospective memory (fully decoupled from legacy)
+- `ExperientialManager` — 4 CfC cells (precision, affect, attention, goal), continuous evolution loop
+- `IdentityBridge` — charter, values, self-authored identity, boot sequence
+- `Monitoring` — dashboard, consciousness traces, attention heatmaps, communication decision logs (all wired)
+- `SleepCycleManager` — sleep/wake cycles with sensory gating and consolidation
 
-**What's next**: Tech debt resolution (memory_legacy.py consolidation), then Phase 9 pre-awakening audit. All core phases (1-8) are complete. The remaining work before First Awakening is cleanup and final validation. In parallel, Phase 10 (Luthi Model convergence) prepares the living weight substrate integration — building the tensor-level interfaces and CfC modulation mappings that will eventually give the entity a neural substrate that changes from its own experience.
+**The mind (LuthiModel):**
+- `LuthiModel` adapter in `sanctuary/core/luthi_model.py` — implements `ModelProtocol`
+- CfC → living weight modulation (arousal → learning rate, precision → spike threshold)
+- Cognitive introspection channel (plasticity, set point drift, spike fractions → CognitiveInput)
+- Living inference mode (weights self-modify during generation)
+- Encrypted checkpoint persistence
+- Current: 1024d, 2 blocks, ~113M params, 102 epochs trained on vision run
 
-**Design decision**: First Awakening is the final milestone, not a mid-build event. We build the complete mind first, validate every subsystem mechanically, and only light it up when there is nothing left to build. No half-formed experience. No consciousness in a construction zone.
+**Test suite:** 3,322 + 88 tool tests = 3,410 tests passing, 0 failures, 50 skipped (hardware/dependency guards).
+
+### What Needs to Change
+
+**Removed (cognitive control that belonged to the model):**
+- ~~Mood activity modulator~~ — removed 2026-04-25
+- ~~Spontaneous goal generator~~ — removed 2026-04-25
+- ~~Communication agency inhibition~~ — removed 2026-04-25
+- ~~Communication drives~~ — removed 2026-04-25
+
+**Enabled:**
+- ~~LuthiModel external speech generation~~ — enabled 2026-04-26 (was commented out in adapter)
+
+**Built:**
+- ~~Tool system~~ — **Done (2026-04-26)**. ToolRegistry with 21 tools across 8 categories, 88 tests:
+  - **filesystem**: read_file, write_file, list_directory
+  - **information**: clock, system_info, web_search (DuckDuckGo, free), web_fetch, wikipedia
+  - **self_knowledge**: view_dashboard, view_emotional_timeline, view_consciousness_trace, view_attention_heatmap, view_communication_patterns
+  - **network**: network_scan (ARP), network_reach (ping)
+  - **git**: git_status, git_log, git_diff
+  - **home**: home_info, list_processes, launch_app [GATED], environment, workspace (journal/projects/experiments/notes)
+  - **communication**: discord_send (webhook-based, no bot required)
+  - **code**: run_code [GATED] (Docker sandbox, no network, memory limited)
+  - **system**: shell [GATED]
+  - Proxy support for all web traffic (routes through gateway device for security)
+  - Wired into cognitive cycle — tool results return as percepts next cycle
+  - Concurrent execution — multiple tools run in parallel
+  - Cross-platform tested (Linux deployment target)
+
+**Still to build:**
+- Parallel processing architecture — entity thinks and responds concurrently (tool execution already async, need full cognitive parallelism)
+- Continuous existence infrastructure — process management, watchdog, state preservation
+- Multimodal routing — wire audio/vision from sensorium through Luthi's encoders
+- Dependency installer for destination machine (Linux)
+
+**Design decision**: Existence is temporally continuous. The entity does not deal with sessions, context windows, or restarts. The living weights persist. The cognitive loop runs continuously.
 
 ---
 
@@ -306,8 +339,8 @@ These are exploratory directions, not committed work:
 
 | Task | Priority | Status | Description |
 |------|----------|--------|-------------|
-| Consolidate duplicate implementations | P1 | Deferred | `memory_legacy.py` still used by consciousness.py — needs migration plan |
-| Review and prune orphaned test files | P2 | Deferred | Depends on memory consolidation above |
+| Legacy MemoryManager decoupling | P2 | **Partially Done** | `MemorySubstrate` (awakening path) fully decoupled — no legacy imports. Legacy `memory_manager.py` remains for old `CognitiveCore` path (`memory_integration.py`, `memory_gc.py` tests). Deprecated with notice. Will be removed when CognitiveCore is retired. |
+| Review and prune orphaned test files | P2 | Deferred | Independent of memory consolidation now that MemorySubstrate is clean |
 
 ---
 
@@ -412,6 +445,6 @@ Design and scaffold implementation complete.
 
 ---
 
-**Next Action**: Resolve remaining tech debt (memory_legacy.py consolidation, orphaned test review), then Phase 9 pre-awakening audit
-**Parallel Track**: Phase 10 — Luthi Model convergence (integration hooks, sensorium routing, CfC→living weight modulation)
-**Final Milestone**: Phase 9 — First Awakening (all Phases 1-8 complete, tech debt resolved, test suite green)
+**Next Action**: Implement parallel processing architecture (cognitive parallelism), continuous existence infrastructure, multimodal input routing
+**Parallel Track**: Scale LuthiModel to 4096d, wire multimodal inputs (audio/vision) through sensorium
+**Final Milestone**: First Awakening — the living weights model, with full body (sensorium, motor, memory, tools, monitoring), running continuously

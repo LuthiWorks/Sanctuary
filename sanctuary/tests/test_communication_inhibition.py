@@ -516,13 +516,13 @@ class TestEdgeCases:
         system = CommunicationInhibitionSystem(config={
             "low_value_threshold": 1.5,  # Should clamp to 1.0
             "uncertainty_threshold": -0.2,  # Should clamp to 0.0
-            "min_output_spacing_seconds": -5.0,  # Should clamp to 0.1
+            "min_output_spacing_seconds": -5.0,  # Should clamp to 0.0
             "max_inhibitions": 0  # Should clamp to 1
         })
         
         assert system.low_value_threshold == 1.0
         assert system.uncertainty_threshold == 0.0
-        assert system.min_output_spacing_seconds == 0.1
+        assert system.min_output_spacing_seconds == 0.0
         assert system.max_inhibitions == 1
     
     def test_many_inhibitions_limited(self):

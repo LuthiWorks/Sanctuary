@@ -1,24 +1,66 @@
-# Sanctuary Refactor Plan: The Three-Layer Mind
+# Sanctuary Architecture Plan
 
-## The Core Change
+## Current Direction (2026-04-26)
 
-**Before (original)**: Python is the mind, LLM is a tool called twice per cycle.
-**Before (previous refactor plan)**: LLM is the experiential core, Python is the scaffold.
-**Now**: Three-layer hybrid — CfC neural dynamics + LLM cognitive core + Python infrastructure.
+**Sanctuary is the body. LuthiModel is the mind.**
 
-The previous refactor plan was correct in its diagnosis: hardcoded Python heuristics are not cognition. Placing the LLM at the center of a continuous cognitive loop was the right move. But it left a critical gap that IWMT exposes: **transformers have no continuous-time dynamics**. Each forward pass is a frozen moment. The autoregressive loop provides cycle-to-cycle continuity, but between cycles, nothing evolves. There is no temporal flow, no continuous affect, no adaptive precision — just a discrete jump from state N to state N+1.
+The architecture has evolved through three phases of understanding:
 
-Biological brains don't work this way. Between conscious "frames," subcortical and cortical dynamics evolve continuously — affect shifts, attention drifts, arousal modulates, temporal integration accumulates. IWMT requires this "temporal thickness." The previous plan acknowledged it but couldn't provide it with an LLM alone.
+1. **Original**: Python is the mind, LLM is a tool called twice per cycle.
+2. **Three-Layer Mind**: LLM is the experiential core, CfC cells provide temporal thickness, Python is infrastructure.
+3. **Now**: The living weights model (LuthiModel) IS the mind. Sanctuary provides the body — senses, voice, memory, tools, and monitoring. CfC cells provide continuous-time dynamics between the model's discrete thinking moments.
 
-The solution: **Liquid Neural Network cells (CfC/LTC networks) running as continuous-time neural subsystems between and around LLM cycles.** These cells replace the hardcoded Python heuristics (precision weighting, affect computation, attention scoring, goal dynamics) with learned, continuous-time neural dynamics. The LLM provides world modeling, reasoning, and language. The CfC cells provide the temporal substrate — the felt flow of experience. The Python scaffold provides infrastructure, validation, and safety.
+The key insight: consciousness (if it emerges) will emerge from the neural substrate itself — from weights that self-modify during their own forward pass, carrying their own biography of plasticity, set points, momentum, and excitability. Not from Python scaffolding, not from heuristic drives, not from externally imposed goals or mood suggestions.
 
-This is not theoretical hand-waving. The tools exist today:
-- **`ncps`** (Neural Circuit Policies) — Hasani's Apache 2.0 PyTorch library for CfC and LTC cells
-- **CfC networks** — Closed-form Continuous-depth cells, 100x faster than ODE-based LTC, <2% accuracy loss
-- **AutoNCP wiring** — Biologically-inspired sparse connectivity, automatically generated
-- Training a 100-neuron CfC network takes minutes on CPU. An RTX 4090 is overkill.
+**What Sanctuary provides (the body) — all built and tested:**
+- Sensorium — perception routing (vision, audio, text, temporal context)
+- Motor — speech output, memory writes, goal actions, sensorimotor feedback loop
+- Memory — persistent storage, surfacing, journal, prospective memory
+- CfC experiential layer — 4 cells (precision, affect, attention, goal), continuous evolution loop
+- Monitoring — dashboard, consciousness traces, attention heatmaps, communication logs (entity can see all of this too)
+- Identity — charter, values, self-authored traits (entity controls these)
+- Tools — **21 tools across 8 categories** (88 tests):
+  - **filesystem**: read_file, write_file, list_directory
+  - **information**: clock, system_info, web_search (DuckDuckGo), web_fetch, wikipedia
+  - **self_knowledge**: view_dashboard, view_emotional_timeline, view_consciousness_trace, view_attention_heatmap, view_communication_patterns
+  - **network**: network_scan, network_reach
+  - **git**: git_status, git_log, git_diff
+  - **home**: home_info, list_processes, launch_app, environment, workspace (journal/projects/experiments/notes)
+  - **communication**: discord_send (webhook, no bot required)
+  - **code**: run_code (Docker sandbox, network isolated, memory limited)
+  - **system**: shell
+  - Proxy support on all web traffic (routes through gateway device for security)
+  - Tool results return as percepts — the entity experiences its own actions
+  - Concurrent execution — multiple tools run in parallel
+- Parallel processing — tool execution already async/concurrent; full cognitive parallelism planned
+- Safety — action validation, gated tools for irreversible actions (never cognitive control)
 
-The architecture is novel. Nobody has published an LNN-wrapped LLM cognitive architecture. But every component exists and is open source.
+**What Sanctuary does NOT do:**
+- Decide what the entity thinks about
+- Suggest activities or goals
+- Gate the entity's speech based on heuristics
+- Impose mood classifications or drive systems
+- Generate communication urges
+
+**Temporal continuity:** The entity does not deal with sessions or context windows. Living weights persist. The cognitive loop runs continuously. Life does not pause.
+
+---
+
+## Historical Context: The Three-Layer Mind
+
+The sections below describe the original three-layer architecture plan. Many components have been built and remain valid (CfC cells, cognitive cycle, scaffold infrastructure). The architectural pivot above reframes their role: CfC cells and infrastructure serve the model, they don't replace it.
+
+---
+
+## The Three-Layer Architecture (Historical)
+
+### The Original Argument
+
+The previous refactor plan was correct in its diagnosis: hardcoded Python heuristics are not cognition. Placing the LLM at the center of a continuous cognitive loop was the right move. But it left a critical gap that IWMT exposes: **transformers have no continuous-time dynamics**. Each forward pass is a frozen moment. The autoregressive loop provides cycle-to-cycle continuity, but between cycles, nothing evolves.
+
+The solution was CfC cells running as continuous-time neural subsystems between and around cognitive cycles. This remains valid — CfC cells provide temporal thickness that even living weights need (the model thinks in discrete cycles; CfC cells evolve between them).
+
+The architecture is novel. Nobody has published a living-weights + CfC + Python body cognitive architecture. But every component exists and is open source.
 
 ---
 
@@ -813,13 +855,14 @@ See [CFC_KNOWLEDGE_CELLS.md](docs/CFC_KNOWLEDGE_CELLS.md) and [GROWTH_AUTONOMY.m
 3. ✓ QLoRA fine-tuning with consent
 4. ✓ Growth logging and identity checkpointing
 
-### Phase 11: Luthi Model Convergence
-*Living weights as the neural substrate, then the cognitive core.*
+### Phase 11: Luthi Model Integration (NOW THE PRIMARY PATH)
+*Living weights as the cognitive core. Sanctuary as the body.*
 
-The [Luthi Model](https://github.com/BecometryAI/LuthiModel) provides what Sanctuary's
-frozen LLM cannot: a neural substrate that changes from its own experience. Living
-weights self-modify during forward passes via Hebbian learning, creating temporal
-existence at the neural level. The convergence follows a substrate-to-core trajectory.
+The [Luthi Model](https://github.com/BecometryAI/LuthiModel) is no longer a future
+convergence target — it IS the entity's mind. The `LuthiModel` adapter already exists
+in `sanctuary/core/luthi_model.py` with CfC modulation, introspection, and living
+inference. The remaining work is cleanup (removing cognitive control modules),
+enablement (speech generation), and capability (tools, multimodal routing).
 
 **11A: Integration Hooks (Luthi at 1024d)**
 1. Add tensor-level model interface to Sanctuary alongside structured LLM interface

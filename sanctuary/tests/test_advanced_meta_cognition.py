@@ -449,120 +449,112 @@ class TestIntrospectiveJournal:
         """Test journal initialization"""
         with tempfile.TemporaryDirectory() as tmpdir:
             journal_dir = Path(tmpdir)
-            journal = IntrospectiveJournal(journal_dir)
-
-            assert journal.journal_dir == journal_dir
-            assert journal.journal_dir.exists()
-            assert hasattr(journal.recent_entries, '__len__')
-            assert len(journal.recent_entries) == 0
+            with IntrospectiveJournal(journal_dir) as journal:
+                assert journal.journal_dir == journal_dir
+                assert journal.journal_dir.exists()
+                assert hasattr(journal.recent_entries, '__len__')
+                assert len(journal.recent_entries) == 0
     
     def test_record_observation(self):
         """Test recording an observation"""
         with tempfile.TemporaryDirectory() as tmpdir:
-            journal = IntrospectiveJournal(Path(tmpdir))
-            
-            observation = {
-                "type": "value_conflict",
-                "description": "Detected conflict",
-                "severity": 0.8
-            }
-            
-            journal.record_observation(observation)
-            
-            assert len(journal.recent_entries) == 1
-            assert journal.recent_entries[0]["type"] == "observation"
-            assert journal.recent_entries[0]["content"] == observation
+            with IntrospectiveJournal(Path(tmpdir)) as journal:
+                observation = {
+                    "type": "value_conflict",
+                    "description": "Detected conflict",
+                    "severity": 0.8
+                }
+
+                journal.record_observation(observation)
+
+                assert len(journal.recent_entries) == 1
+                assert journal.recent_entries[0]["type"] == "observation"
+                assert journal.recent_entries[0]["content"] == observation
     
     def test_record_realization(self):
         """Test recording a realization"""
         with tempfile.TemporaryDirectory() as tmpdir:
-            journal = IntrospectiveJournal(Path(tmpdir))
-            
-            realization = "I seem to prioritize efficiency over thoroughness"
-            confidence = 0.75
-            
-            journal.record_realization(realization, confidence)
-            
-            assert len(journal.recent_entries) == 1
-            assert journal.recent_entries[0]["type"] == "realization"
-            assert journal.recent_entries[0]["realization"] == realization
-            assert journal.recent_entries[0]["confidence"] == confidence
+            with IntrospectiveJournal(Path(tmpdir)) as journal:
+                realization = "I seem to prioritize efficiency over thoroughness"
+                confidence = 0.75
+
+                journal.record_realization(realization, confidence)
+
+                assert len(journal.recent_entries) == 1
+                assert journal.recent_entries[0]["type"] == "realization"
+                assert journal.recent_entries[0]["realization"] == realization
+                assert journal.recent_entries[0]["confidence"] == confidence
     
     def test_record_question(self):
         """Test recording an existential question"""
         with tempfile.TemporaryDirectory() as tmpdir:
-            journal = IntrospectiveJournal(Path(tmpdir))
-            
-            question = "Do I genuinely care about this goal?"
-            context = {"goal": "test goal", "priority": 0.8}
-            
-            journal.record_question(question, context)
-            
-            assert len(journal.recent_entries) == 1
-            assert journal.recent_entries[0]["type"] == "question"
-            assert journal.recent_entries[0]["question"] == question
-            assert journal.recent_entries[0]["context"] == context
+            with IntrospectiveJournal(Path(tmpdir)) as journal:
+                question = "Do I genuinely care about this goal?"
+                context = {"goal": "test goal", "priority": 0.8}
+
+                journal.record_question(question, context)
+
+                assert len(journal.recent_entries) == 1
+                assert journal.recent_entries[0]["type"] == "question"
+                assert journal.recent_entries[0]["question"] == question
+                assert journal.recent_entries[0]["context"] == context
     
     def test_save_session(self):
         """Test saving journal session to file"""
         with tempfile.TemporaryDirectory() as tmpdir:
-            journal = IntrospectiveJournal(Path(tmpdir))
+            with IntrospectiveJournal(Path(tmpdir)) as journal:
+                # Add some entries
+                journal.record_observation({"type": "test", "data": "value"})
+                journal.record_realization("Test realization", 0.9)
 
-            # Add some entries
-            journal.record_observation({"type": "test", "data": "value"})
-            journal.record_realization("Test realization", 0.9)
+                # Save session (entries are written incrementally now)
+                journal.save_session()
 
-            # Save session (entries are written incrementally now)
-            journal.save_session()
+                # Check that entries were persisted (journal files exist)
+                journal_files = list(Path(tmpdir).glob("journal_*.jsonl")) + \
+                                list(Path(tmpdir).glob("journal_*.json"))
+                assert len(journal_files) >= 1, f"Expected journal files in {tmpdir}, found: {list(Path(tmpdir).iterdir())}"
 
-            # Check that entries were persisted (journal files exist)
-            journal_files = list(Path(tmpdir).glob("journal_*.jsonl")) + \
-                            list(Path(tmpdir).glob("journal_*.json"))
-            assert len(journal_files) >= 1, f"Expected journal files in {tmpdir}, found: {list(Path(tmpdir).iterdir())}"
-
-            # Entries should still be in recent_entries for pattern detection
-            assert len(journal.recent_entries) == 2
+                # Entries should still be in recent_entries for pattern detection
+                assert len(journal.recent_entries) == 2
     
     def test_save_empty_session(self):
         """Test saving empty session does nothing"""
         with tempfile.TemporaryDirectory() as tmpdir:
-            journal = IntrospectiveJournal(Path(tmpdir))
-            
-            journal.save_session()
-            
-            # No files should be created
+            with IntrospectiveJournal(Path(tmpdir)) as journal:
+                journal.save_session()
+
+            # No content journal files should be created (empty .jsonl may exist)
             journal_files = list(Path(tmpdir).glob("journal_*.json"))
             assert len(journal_files) == 0
     
     def test_get_recent_patterns_empty(self):
         """Test getting patterns from empty journal"""
         with tempfile.TemporaryDirectory() as tmpdir:
-            journal = IntrospectiveJournal(Path(tmpdir))
-            
-            patterns = journal.get_recent_patterns(days=7)
-            
-            assert isinstance(patterns, list)
-            assert len(patterns) == 0
+            with IntrospectiveJournal(Path(tmpdir)) as journal:
+                patterns = journal.get_recent_patterns(days=7)
+
+                assert isinstance(patterns, list)
+                assert len(patterns) == 0
     
     def test_get_recent_patterns_with_data(self):
         """Test getting patterns from journal with data"""
         with tempfile.TemporaryDirectory() as tmpdir:
-            journal = IntrospectiveJournal(Path(tmpdir))
-            
-            # Add and save some entries
-            journal.record_realization("Test realization 1", 0.8)
-            journal.record_realization("Test realization 2", 0.9)
-            journal.record_question("Test question", {})
-            journal.save_session()
-            
-            # Get patterns
-            patterns = journal.get_recent_patterns(days=1)
-            
-            assert len(patterns) >= 1
-            # Should have patterns for realizations and questions
-            pattern_types = [p["type"] for p in patterns]
-            assert "realizations_pattern" in pattern_types
-            assert "questions_pattern" in pattern_types
+            with IntrospectiveJournal(Path(tmpdir)) as journal:
+                # Add and save some entries
+                journal.record_realization("Test realization 1", 0.8)
+                journal.record_realization("Test realization 2", 0.9)
+                journal.record_question("Test question", {})
+                journal.save_session()
+
+                # Get patterns
+                patterns = journal.get_recent_patterns(days=1)
+
+                assert len(patterns) >= 1
+                # Should have patterns for realizations and questions
+                pattern_types = [p["type"] for p in patterns]
+                assert "realizations_pattern" in pattern_types
+                assert "questions_pattern" in pattern_types
 
 
 class TestMetaCognitiveMetrics:

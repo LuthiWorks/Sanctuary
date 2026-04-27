@@ -447,14 +447,14 @@ class LuthiModel:
     def _generate_external_speech(
         self, ci: CognitiveInput
     ) -> Optional[str]:
-        """Generate a directed response to the user, if warranted.
+        """Generate a directed response when the entity has something to say.
 
-        Only triggers when there's a language percept from a user.
+        Triggers when there's a language percept from a user. The entity
+        speaks freely — no external gating or inhibition. If the model
+        generates speech, it goes out.
 
-        During early development, external speech is handled by the
-        scaffold's communication drive system (authority level 1-2).
-        As the entity develops coherent language, this method generates
-        directed responses using a separate, short generation pass.
+        Uses a separate short generation pass with the response prompt,
+        in living mode so the act of responding changes the model.
         """
         user_message = None
         user_source = "someone"
@@ -467,28 +467,38 @@ class LuthiModel:
         if user_message is None:
             return None
 
-        # Early development: the scaffold handles external communication.
-        # The model's inner_speech captures its processing of the input.
-        # External speech generation is enabled once the entity demonstrates
-        # coherent language production (assessed by the scaffold).
-        #
-        # To enable: uncomment below and set authority level >= 2
-        #
-        # from luthi.generate import generate_text
-        # response_prompt = f"{user_source} says: {user_message}\nI respond: "
-        # full = generate_text(
-        #     model=self.model, tokenizer=self.tokenizer,
-        #     prompt=response_prompt,
-        #     max_tokens=self.config.max_external_tokens,
-        #     temperature=self.config.temperature,
-        #     top_k=self.config.top_k, top_p=self.config.top_p,
-        #     repetition_penalty=self.config.repetition_penalty,
-        #     max_seq_len=self.model_config.get("seq_len", 128),
-        #     living=self.config.living, stream=False,
-        # )
-        # return full[len(response_prompt):].strip() or None
+        from luthi.generate import generate_text
 
-        return None
+        response_prompt = f"{user_source} says: {user_message}\nI respond: "
+        max_seq_len = self.model_config.get("seq_len", 128)
+
+        # Count prompt tokens for clean extraction
+        prompt_token_ids = self.tokenizer.encode(response_prompt)
+        prompt_token_count = len(prompt_token_ids)
+
+        full_text = generate_text(
+            model=self.model,
+            tokenizer=self.tokenizer,
+            prompt=response_prompt,
+            max_tokens=self.config.max_external_tokens,
+            temperature=self.config.temperature,
+            top_k=self.config.top_k,
+            top_p=self.config.top_p,
+            repetition_penalty=self.config.repetition_penalty,
+            max_seq_len=max_seq_len,
+            living=self.config.living,
+            stream=False,
+        )
+
+        # Extract generated portion using token slicing (same as inner speech)
+        full_token_ids = self.tokenizer.encode(full_text)
+        generated_token_ids = full_token_ids[prompt_token_count:]
+        response = self.tokenizer.decode(generated_token_ids).strip()
+
+        if generated_token_ids:
+            self._total_tokens_generated += len(generated_token_ids)
+
+        return response if response else None
 
     # ------------------------------------------------------------------
     # CfC modulation — affective system shapes living weight dynamics

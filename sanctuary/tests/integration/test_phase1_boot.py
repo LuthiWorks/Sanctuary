@@ -127,6 +127,10 @@ class TestPhase1Boot:
 
         logger.info("CognitiveCore instantiated successfully!")
 
+        # Close journal to release file handles (Windows temp dir cleanup)
+        if hasattr(core.subsystems, 'introspective_journal') and core.subsystems.introspective_journal:
+            core.subsystems.introspective_journal.close()
+
     @pytest.mark.asyncio
     async def test_cognitive_core_runs_cycles(self, boot_config):
         """CognitiveCore can start, run cycles, and stop without errors."""
@@ -207,6 +211,10 @@ class TestPhase1Boot:
         assert core.subsystems.iwmt_core is not None
 
         logger.info("Subsystem cross-references verified!")
+
+        # Close journal to release file handles (Windows temp dir cleanup)
+        if hasattr(core.subsystems, 'introspective_journal') and core.subsystems.introspective_journal:
+            core.subsystems.introspective_journal.close()
 
 
 class TestPhase1MockPerceptionStats:

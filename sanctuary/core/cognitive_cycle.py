@@ -19,8 +19,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import time
 from datetime import datetime
-from typing import Optional, Protocol
+from typing import Any, Dict, Optional, Protocol
 
 from sanctuary.consciousness.sleep_cycle import SleepCycleManager, SleepStage
 from sanctuary.core.authority import AuthorityManager
@@ -28,7 +29,6 @@ from sanctuary.core.context_manager import BudgetConfig, ContextManager
 from sanctuary.core.schema import (
     CognitiveInput,
     CognitiveOutput,
-    CommunicationUrgeSignal,
     EmotionalInput,
     ExperientialSignals,
     ComputedVAD,
@@ -272,7 +272,6 @@ class CognitiveCycle:
         self.authority = authority or AuthorityManager()
         self.identity = identity or NullIdentity()
         self.sleep = sleep_manager  # Optional SleepCycleManager
-        self.communication = communication  # Optional CommunicationAgency
         self.experiential = experiential  # Optional ExperientialManager
         self.growth = growth  # Optional GrowthProcessor
         self.environment = environment  # Optional EnvironmentIntegration
@@ -287,6 +286,11 @@ class CognitiveCycle:
         # Stashed per-cycle for communication agency (needs them after think())
         self._current_percepts: list = []
         self._current_memories: list = []
+
+        # Stashed per-cycle for monitoring hooks
+        self._cycle_latency_ms: float = 0.0
+        self._last_cognitive_input: Optional[CognitiveInput] = None
+        self._last_communication_decision: Optional[Dict[str, Any]] = None
 
     # -- Public API --
 
@@ -341,6 +345,8 @@ class CognitiveCycle:
 
     async def _cycle(self):
         """Execute one cycle of cognition."""
+        cycle_start = time.perf_counter()
+        self._last_communication_decision = None
 
         # 0. Advance sleep cycle (if enabled)
         if self.sleep is not None:
@@ -348,6 +354,7 @@ class CognitiveCycle:
 
         # 1. Assemble input from all sources
         cognitive_input = await self._assemble_input()
+        self._last_cognitive_input = cognitive_input
 
         # 2. Compress to fit context budget
         compressed_input = self.context_mgr.compress(cognitive_input)
@@ -355,38 +362,15 @@ class CognitiveCycle:
         # 3. LLM processes
         cognitive_output = await self.model.think(compressed_input)
 
-        # 3a. Communication agency — the entity decides whether to speak.
-        #     Drives were already computed during input assembly; now we
-        #     evaluate inhibitions and make the SPEAK/SILENCE/DEFER decision.
-        if self.communication is not None and cognitive_output.external_speech:
-            try:
-                vad = self.scaffold.get_computed_vad()
-                emotional_dict = {
-                    "valence": vad.valence,
-                    "arousal": vad.arousal,
-                    "dominance": vad.dominance,
-                }
-                goals = []
-                if hasattr(self.scaffold, "get_active_goals"):
-                    goals = self.scaffold.get_active_goals()
-
-                decision = self.communication.evaluate_speech(
-                    cognitive_output,
-                    self._current_percepts,
-                    emotional_dict,
-                    goals,
-                    self._current_memories,
-                )
-
-                if decision.decision.value != "speak":
-                    logger.debug(
-                        "Communication agency: %s (%s)",
-                        decision.decision.value,
-                        decision.reason,
-                    )
-                    cognitive_output.external_speech = None
-            except Exception as e:
-                logger.error("Communication agency error (non-fatal): %s", e)
+        # 3a. Record speech for monitoring (no gating — entity speaks freely)
+        if cognitive_output.external_speech:
+            self._last_communication_decision = {
+                "decision": "speak",
+                "confidence": 1.0,
+                "reason": "Entity chose to speak",
+                "drive_level": 1.0,
+                "inhibition_level": 0.0,
+            }
 
         # 3b. Sleep consolidation — during NREM, trigger living weight
         #     consolidation (set point adjustment, plasticity rebalancing).
@@ -440,6 +424,7 @@ class CognitiveCycle:
                 logger.error("Environment processing error (non-fatal): %s", e)
 
         # Bookkeeping
+        self._cycle_latency_ms = (time.perf_counter() - cycle_start) * 1000.0
         self.cycle_count += 1
         self._last_output = cognitive_output
 
@@ -487,15 +472,6 @@ class CognitiveCycle:
 
         # Inform scaffold about percepts (updates affect, detects user input)
         self.scaffold.notify_percepts(percepts)
-
-        # Notify communication agency of user input (resets social silence timer)
-        if self.communication is not None:
-            has_user_input = any(
-                p.modality == "language" and p.source and "user" in p.source
-                for p in percepts
-            )
-            if has_user_input:
-                self.communication.record_input()
 
         try:
             surfaced = await self.memory.surface(
@@ -564,37 +540,6 @@ class CognitiveCycle:
         self._current_percepts = percepts
         self._current_memories = surfaced
 
-        # Compute communication drives — the entity's felt urges to speak.
-        # These become part of the cognitive input so the entity is aware
-        # of its own communication pressure.
-        communication_urges = []
-        if self.communication is not None:
-            try:
-                vad = self.scaffold.get_computed_vad()
-                emotional_dict = {
-                    "valence": vad.valence,
-                    "arousal": vad.arousal,
-                    "dominance": vad.dominance,
-                }
-                goals = []
-                if hasattr(self.scaffold, "get_active_goals"):
-                    goals = self.scaffold.get_active_goals()
-
-                self.communication.compute_urges(
-                    percepts, emotional_dict, goals, surfaced,
-                )
-                communication_urges = [
-                    CommunicationUrgeSignal(
-                        drive_type=u.drive_type.value,
-                        intensity=round(u.get_current_intensity(), 3),
-                        content=u.content or "",
-                        reason=u.reason,
-                    )
-                    for u in self.communication.get_active_urges()
-                ]
-            except Exception as e:
-                logger.error("Communication drive computation error (non-fatal): %s", e)
-
         return CognitiveInput(
             previous_thought=self.stream.get_previous(),
             new_percepts=percepts,
@@ -611,7 +556,6 @@ class CognitiveCycle:
             experiential_state=experiential_signals,
             charter_summary=self.identity.get_charter_summary(),
             self_authored_identity=self.identity.get_self_authored_identity(),
-            communication_urges=communication_urges,
         )
 
     async def _execute(self, output: CognitiveOutput):

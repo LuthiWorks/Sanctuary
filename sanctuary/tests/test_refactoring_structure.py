@@ -112,27 +112,27 @@ def test_imports_syntax():
     for filename in sorted(files):
         filepath = os.path.join(core_path, filename)
         try:
-            with open(filepath, 'r') as f:
+            with open(filepath, 'r', encoding='utf-8') as f:
                 compile(f.read(), filepath, 'exec')
             print(f"  ✅ {filename}")
         except SyntaxError as e:
             print(f"  ❌ {filename} - SYNTAX ERROR: {e}")
             all_valid = False
-    
+
     return all_valid
 
 
 def test_single_responsibility():
     """Test that each module has a clear, documented responsibility."""
     core_path = 'sanctuary/mind/cognitive_core/core'
-    
+
     files = [f for f in os.listdir(core_path) if f.endswith('.py') and f != '__init__.py']
-    
+
     print("\nChecking module docstrings:")
     all_documented = True
     for filename in sorted(files):
         filepath = os.path.join(core_path, filename)
-        with open(filepath, 'r') as f:
+        with open(filepath, 'r', encoding='utf-8') as f:
             content = f.read()
             # Check if file starts with docstring
             if content.strip().startswith('"""') or content.strip().startswith("'''"):

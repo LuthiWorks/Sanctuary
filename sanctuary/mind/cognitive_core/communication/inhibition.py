@@ -98,7 +98,7 @@ class CommunicationInhibitionSystem:
     def _load_config(self, config: Dict[str, Any]) -> None:
         """Load and validate configuration parameters."""
         self.low_value_threshold = self._clamp(config.get("low_value_threshold", 0.3), 0.0, 1.0)
-        self.min_output_spacing_seconds = max(0.1, config.get("min_output_spacing_seconds", 5.0))
+        self.min_output_spacing_seconds = max(0.0, config.get("min_output_spacing_seconds", 5.0))
         self.redundancy_similarity_threshold = self._clamp(config.get("redundancy_similarity_threshold", 0.8), 0.0, 1.0)
         self.uncertainty_threshold = self._clamp(config.get("uncertainty_threshold", 0.7), 0.0, 1.0)
         self.max_output_frequency_per_minute = max(1, config.get("max_output_frequency_per_minute", 6))

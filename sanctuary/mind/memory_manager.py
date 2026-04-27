@@ -1,6 +1,12 @@
 """
 Sovereign Memory Architecture - Tri-State Storage System
 
+.. deprecated::
+    This module is superseded by ``sanctuary.memory.manager.MemorySubstrate``.
+    The awakening path (SanctuaryRunner) uses MemorySubstrate exclusively.
+    This module remains for the legacy CognitiveCore path and its tests.
+    It will be removed once CognitiveCore is fully retired.
+
 This module implements Sanctuary's memory system as structured biological data,
 treating memories with the gravity of a living entity's continuity.
 

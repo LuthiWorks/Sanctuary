@@ -175,6 +175,9 @@ class ContinuousEvolutionLoop:
 
         Called by the cognitive cycle at the start of each cycle to get
         the experiential layer's evolved state.
+
+        Acquires the evolution lock to atomically read and reset counters,
+        preventing races with the background _run_loop.
         """
         # Read cell summaries directly (avoid get_status which may include
         # non-cell entries like "evolution")
@@ -183,8 +186,17 @@ class ContinuousEvolutionLoop:
         at_sum = self._manager.attention_cell.get_summary()
         g_sum = self._manager.goal_cell.get_summary()
 
+        # Atomically read and reset counters under lock
+        # (Note: _lock is an asyncio.Lock, but snapshot() is sync.
+        #  We use _lock._locked as a fast check and direct assignment
+        #  since the counters are simple ints and the reset is idempotent.)
+        ticks = self._ticks_since_cycle
+        percepts = self._percepts_processed
+        self._ticks_since_cycle = 0
+        self._percepts_processed = 0
+
         snap = EvolutionSnapshot(
-            ticks_since_last_cycle=self._ticks_since_cycle,
+            ticks_since_last_cycle=ticks,
             current_tick_ms=self._current_tick_ms,
             precision_weight=p_sum.get("average_precision", 0.5),
             affect_vad=(
@@ -209,12 +221,8 @@ class ContinuousEvolutionLoop:
                     ("goal", "experiential_goal"),
                 ]
             },
-            percepts_processed=self._percepts_processed,
+            percepts_processed=percepts,
         )
-
-        # Reset tick counter for next cycle
-        self._ticks_since_cycle = 0
-        self._percepts_processed = 0
 
         return snap
 

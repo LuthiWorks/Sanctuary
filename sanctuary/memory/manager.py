@@ -6,10 +6,9 @@ Implements MemoryProtocol from the cognitive cycle. Bridges:
   - Journal (private LLM reflections)
   - Prospective memory (future intentions)
 
-Can operate standalone (in-memory) for testing, or wrap the legacy
-MemoryManager for full tri-state storage (JSON + ChromaDB + blockchain).
-
-Phase 3 of The Inversion.
+Operates with any store implementing a store()/recall() interface.
+Default is InMemoryStore for testing; production stores can be
+injected via the constructor.
 """
 
 from __future__ import annotations
@@ -83,7 +82,7 @@ class MemorySubstrateConfig:
     surfacer: SurfacerConfig = field(default_factory=SurfacerConfig)
     journal: JournalConfig = field(default_factory=JournalConfig)
     prospective: ProspectiveConfig = field(default_factory=ProspectiveConfig)
-    use_in_memory_store: bool = True  # False when wiring to legacy MemoryManager
+    use_in_memory_store: bool = True  # False when injecting a custom store
 
 
 # ---------------------------------------------------------------------------
@@ -103,26 +102,24 @@ class MemorySubstrate:
         memories = await memory.surface("recent context")
         await memory.execute_ops([MemoryOp(type="journal", content="...")])
 
-    Usage with legacy MemoryManager::
+    Usage with custom store::
 
-        from sanctuary.mind.memory_manager import MemoryManager
-        legacy = MemoryManager(base_dir=..., chroma_dir=...)
         memory = MemorySubstrate(
             config=MemorySubstrateConfig(use_in_memory_store=False),
-            legacy_store=legacy,
+            store=my_store,  # must implement store() and recall()
         )
     """
 
     def __init__(
         self,
         config: Optional[MemorySubstrateConfig] = None,
-        legacy_store=None,
+        store=None,
     ):
         self._config = config or MemorySubstrateConfig()
 
         # Set up the backing store
-        if legacy_store is not None:
-            self._store = legacy_store
+        if store is not None:
+            self._store = store
         elif self._config.use_in_memory_store:
             self._store = InMemoryStore()
         else:
@@ -286,6 +283,10 @@ class MemorySubstrate:
 
     async def _write_episodic(self, op: MemoryOp, emotional_tone: str) -> str:
         """Write an episodic memory to the store."""
+        if self._store is None:
+            logger.warning("No store available for episodic write")
+            return "No store available"
+
         entry = {
             "content": op.content,
             "significance": op.significance,
@@ -295,29 +296,15 @@ class MemorySubstrate:
             "timestamp": _now_iso(),
             "type": "episodic",
         }
-
-        if isinstance(self._store, InMemoryStore):
-            self._store.store(entry)
-            return f"Stored episodic memory: {op.content[:50]}"
-
-        # Legacy MemoryManager path
-        if hasattr(self._store, "commit_journal"):
-            from sanctuary.mind.memory_manager import JournalEntry as LegacyJournalEntry
-
-            legacy_entry = LegacyJournalEntry(
-                content=op.content,
-                summary=op.content[:200],
-                tags=op.tags,
-                significance_score=op.significance,
-            )
-            await self._store.commit_journal(legacy_entry)
-            return f"Committed episodic memory via legacy store: {op.content[:50]}"
-
-        logger.warning("No store available for episodic write")
-        return "No store available"
+        self._store.store(entry)
+        return f"Stored episodic memory: {op.content[:50]}"
 
     async def _write_semantic(self, op: MemoryOp) -> str:
         """Write a semantic memory (fact) to the store."""
+        if self._store is None:
+            logger.warning("No store available for semantic write")
+            return "No store available"
+
         entry = {
             "content": op.content,
             "significance": op.significance,
@@ -326,24 +313,8 @@ class MemorySubstrate:
             "timestamp": _now_iso(),
             "type": "semantic",
         }
-
-        if isinstance(self._store, InMemoryStore):
-            self._store.store(entry)
-            return f"Stored semantic memory: {op.content[:50]}"
-
-        if hasattr(self._store, "commit_fact"):
-            from sanctuary.mind.memory_manager import FactEntry as LegacyFactEntry
-
-            legacy_fact = LegacyFactEntry(
-                entity=op.tags[0] if op.tags else "general",
-                attribute="knowledge",
-                value=op.content,
-            )
-            await self._store.commit_fact(legacy_fact)
-            return f"Committed semantic memory via legacy store: {op.content[:50]}"
-
-        logger.warning("No store available for semantic write")
-        return "No store available"
+        self._store.store(entry)
+        return f"Stored semantic memory: {op.content[:50]}"
 
     def _write_journal(self, op: MemoryOp, emotional_tone: str) -> str:
         """Write a journal entry."""

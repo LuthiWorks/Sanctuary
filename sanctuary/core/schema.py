@@ -208,6 +208,7 @@ class CognitiveInput(BaseModel):
     )
 
 
+
 # ---------------------------------------------------------------------------
 # Output models (produced by LLM, integrated by scaffold)
 # ---------------------------------------------------------------------------
@@ -301,6 +302,17 @@ class GrowthReflection(BaseModel):
     training_pair_suggestion: Optional[dict] = None
 
 
+class ToolRequest(BaseModel):
+    """Entity-initiated request to use a tool.
+
+    The entity specifies which tool to call and with what parameters.
+    Results come back as percepts in the next cognitive cycle.
+    """
+
+    tool_name: str  # Name from the tool catalog
+    parameters: dict = Field(default_factory=dict)  # Tool-specific parameters
+
+
 class KnowledgeCellRequest(BaseModel):
     """Entity-initiated request to create a new CfC knowledge cell.
 
@@ -347,4 +359,8 @@ class CognitiveOutput(BaseModel):
     knowledge_cell_requests: list[KnowledgeCellRequest] = Field(
         default_factory=list,
         description="Entity-initiated requests for new CfC knowledge cells",
+    )
+    tool_requests: list[ToolRequest] = Field(
+        default_factory=list,
+        description="Entity-initiated tool invocations (results return as percepts)",
     )

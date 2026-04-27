@@ -73,7 +73,9 @@ class TestContinuousEvolutionLoop:
     async def test_snapshot_resets_counters(self):
         """Taking a snapshot should reset tick and percept counters."""
         mgr = ExperientialManager()
-        loop = ContinuousEvolutionLoop(mgr, EvolutionConfig(base_tick_ms=10))
+        loop = ContinuousEvolutionLoop(
+            mgr, EvolutionConfig(base_tick_ms=10, adaptive=False)
+        )
         await loop.start()
 
         await asyncio.sleep(0.05)
