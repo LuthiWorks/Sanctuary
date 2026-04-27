@@ -61,11 +61,13 @@ async def sandbox_python_execution(code: str, timeout: int = 30) -> str:
             container.kill()
             return "Execution timed out"
             
-    except Exception as e:
+    except docker.errors.DockerException as e:
         logger.error(f"Sandbox execution error: {e}")
         return f"Error in sandbox execution: {str(e)}"
     finally:
         try:
             container.remove(force=True)
-        except:
+        except docker.errors.APIError:
+            # Container may already be removed (auto-remove=True) or
+            # never created — both are fine in cleanup.
             pass

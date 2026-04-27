@@ -15,7 +15,21 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
+import chromadb.errors
+
 logger = logging.getLogger(__name__)
+
+# Errors expected when the remote ChromaDB server is unreachable or the
+# request fails for transport/operational reasons. Caught at fallback
+# boundaries so the cognitive cycle can degrade to local cache instead
+# of crashing. Programming errors (AttributeError, KeyError, etc.) are
+# intentionally NOT in this set — those should propagate.
+_REMOTE_TRANSIENT_ERRORS = (
+    ConnectionError,
+    TimeoutError,
+    OSError,
+    chromadb.errors.ChromaError,
+)
 
 
 @dataclass
@@ -169,7 +183,7 @@ class RemoteMemoryStore:
             )
             return True
 
-        except Exception as e:
+        except _REMOTE_TRANSIENT_ERRORS as e:
             self._connected = False
             logger.warning("Failed to connect to remote ChromaDB: %s", e)
             return False
@@ -184,7 +198,7 @@ class RemoteMemoryStore:
             try:
                 self._store_remote(entry)
                 self._consecutive_failures = 0
-            except Exception as e:
+            except _REMOTE_TRANSIENT_ERRORS as e:
                 self._consecutive_failures += 1
                 logger.warning("Remote store failed, caching locally: %s", e)
                 if self._consecutive_failures >= self._config.max_retries:
@@ -212,7 +226,7 @@ class RemoteMemoryStore:
                 results = self._recall_remote(query, n_results, min_significance)
                 self._consecutive_failures = 0
                 return results
-            except Exception as e:
+            except _REMOTE_TRANSIENT_ERRORS as e:
                 self._consecutive_failures += 1
                 logger.warning("Remote recall failed, falling back to cache: %s", e)
                 if self._consecutive_failures >= self._config.max_retries:
@@ -241,7 +255,7 @@ class RemoteMemoryStore:
             try:
                 self._store_remote(entry)
                 synced += 1
-            except Exception as e:
+            except _REMOTE_TRANSIENT_ERRORS as e:
                 logger.warning("Sync failed for entry: %s", e)
                 failed.append(entry)
 
@@ -274,7 +288,7 @@ class RemoteMemoryStore:
                     self._connected = True
                     self._consecutive_failures = 0
                     logger.info("Remote ChromaDB reconnected")
-            except Exception:
+            except _REMOTE_TRANSIENT_ERRORS:
                 status["remote_healthy"] = False
 
         # Collection counts
@@ -284,7 +298,7 @@ class RemoteMemoryStore:
                     name: col.count()
                     for name, col in self._collections.items()
                 }
-            except Exception:
+            except _REMOTE_TRANSIENT_ERRORS:
                 status["collections"] = {}
 
         return status
@@ -299,7 +313,7 @@ class RemoteMemoryStore:
         if self._connected:
             try:
                 return sum(col.count() for col in self._collections.values())
-            except Exception:
+            except _REMOTE_TRANSIENT_ERRORS:
                 pass
         return self._cache.entry_count if self._cache else 0
 
@@ -373,7 +387,7 @@ class RemoteMemoryStore:
                     if "tags" in result and isinstance(result["tags"], str):
                         result["tags"] = result["tags"].split(",")
                     all_results.append(result)
-            except Exception as e:
+            except _REMOTE_TRANSIENT_ERRORS as e:
                 logger.warning("Query failed for collection %s: %s", name, e)
 
         # Sort by significance descending, take top n

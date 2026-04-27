@@ -11,7 +11,21 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+import chromadb.errors
+
 logger = logging.getLogger(__name__)
+
+# Same exception set as episodic memory: storage / I/O / encoding errors
+# that should be logged and either swallowed (per-entry skip) or re-raised
+# as RuntimeError. Programming errors propagate unchanged.
+_STORAGE_OP_ERRORS = (
+    chromadb.errors.ChromaError,
+    json.JSONDecodeError,
+    OSError,
+    ValueError,
+    TypeError,
+    KeyError,
+)
 
 
 class SemanticMemory:
@@ -49,7 +63,7 @@ class SemanticMemory:
             document, metadata, doc_id = self.encoder.encode_concept(concept)
             self.storage.add_semantic(document, metadata, doc_id)
             logger.info(f"Concept stored: {doc_id}")
-        except Exception as e:
+        except _STORAGE_OP_ERRORS as e:
             logger.error(f"Failed to store concept: {e}")
             raise
     
@@ -92,23 +106,23 @@ class SemanticMemory:
                         if not existing['ids']:
                             self.storage.add_semantic(document, metadata, doc_id)
                             protocols_loaded += 1
-                    except Exception as get_err:
+                    except _STORAGE_OP_ERRORS as get_err:
                         logger.debug("get_semantic failed for %s, attempting add: %s", doc_id, get_err)
                         try:
                             self.storage.add_semantic(document, metadata, doc_id)
                             protocols_loaded += 1
-                        except Exception as add_err:
+                        except _STORAGE_OP_ERRORS as add_err:
                             if "already exists" not in str(add_err).lower():
                                 raise
                     
-                except Exception as e:
+                except _STORAGE_OP_ERRORS as e:
                     logger.error(f"Failed to load protocol {protocol_file.name}: {e}")
                     continue
             
             logger.info(f"Successfully loaded {protocols_loaded} protocols into semantic memory")
             return protocols_loaded
             
-        except Exception as e:
+        except _STORAGE_OP_ERRORS as e:
             logger.error(f"Failed to load protocols: {e}", exc_info=True)
             raise RuntimeError(f"Protocol loading failed: {e}") from e
     
@@ -146,14 +160,14 @@ class SemanticMemory:
                     else:
                         entries_loaded += self._load_generic_lexicon(lexicon_data, lexicon_file.name)
                         
-                except Exception as e:
+                except _STORAGE_OP_ERRORS as e:
                     logger.error(f"Failed to load lexicon {lexicon_file.name}: {e}")
                     continue
             
             logger.info(f"Successfully loaded {entries_loaded} lexicon entries into semantic memory")
             return entries_loaded
             
-        except Exception as e:
+        except _STORAGE_OP_ERRORS as e:
             logger.error(f"Failed to load lexicon: {e}", exc_info=True)
             raise RuntimeError(f"Lexicon loading failed: {e}") from e
     
@@ -170,11 +184,11 @@ class SemanticMemory:
                     if not existing['ids']:
                         self.storage.add_semantic(document, metadata, doc_id)
                         entries_loaded += 1
-                except Exception:
+                except _STORAGE_OP_ERRORS:
                     try:
                         self.storage.add_semantic(document, metadata, doc_id)
                         entries_loaded += 1
-                    except Exception as add_err:
+                    except _STORAGE_OP_ERRORS as add_err:
                         if "already exists" not in str(add_err).lower():
                             logger.error(f"Failed to add symbol {term}: {add_err}")
         
@@ -193,11 +207,11 @@ class SemanticMemory:
                     if not existing['ids']:
                         self.storage.add_semantic(document, metadata, doc_id)
                         entries_loaded += 1
-                except Exception:
+                except _STORAGE_OP_ERRORS:
                     try:
                         self.storage.add_semantic(document, metadata, doc_id)
                         entries_loaded += 1
-                    except Exception as add_err:
+                    except _STORAGE_OP_ERRORS as add_err:
                         if "already exists" not in str(add_err).lower():
                             logger.error(f"Failed to add tone {tone}: {add_err}")
         
@@ -214,11 +228,11 @@ class SemanticMemory:
             if not existing['ids']:
                 self.storage.add_semantic(document, metadata, doc_id)
                 entries_loaded += 1
-        except Exception:
+        except _STORAGE_OP_ERRORS:
             try:
                 self.storage.add_semantic(document, metadata, doc_id)
                 entries_loaded += 1
-            except Exception as add_err:
+            except _STORAGE_OP_ERRORS as add_err:
                 if "already exists" not in str(add_err).lower():
                     logger.error(f"Failed to add lexicon {filename}: {add_err}")
         

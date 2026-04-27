@@ -11,7 +11,23 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
+import chromadb.errors
+
 logger = logging.getLogger(__name__)
+
+# Storage operations against ChromaDB can fail for transport/state reasons;
+# JSON encoding/decoding can fail on malformed data; file I/O can fail for
+# the usual reasons. These are the legitimate "operation failed" cases that
+# should be logged and either swallowed (per-entry skip) or re-raised as
+# RuntimeError. Programming errors (AttributeError, etc.) propagate.
+_STORAGE_OP_ERRORS = (
+    chromadb.errors.ChromaError,
+    json.JSONDecodeError,
+    OSError,
+    ValueError,
+    TypeError,
+    KeyError,
+)
 
 
 class EpisodicMemory:
@@ -58,7 +74,7 @@ class EpisodicMemory:
 
             logger.info("Experience stored successfully")
 
-        except Exception as e:
+        except _STORAGE_OP_ERRORS as e:
             logger.error(f"Failed to store experience: {e}", exc_info=True)
             raise RuntimeError(f"Experience storage failed: {e}") from e
 
@@ -85,7 +101,7 @@ class EpisodicMemory:
             logger.info(f"Experience {doc_id} updated")
             return True
 
-        except Exception as e:
+        except _STORAGE_OP_ERRORS as e:
             logger.error(f"Failed to update experience: {e}")
             return False
     
@@ -144,22 +160,22 @@ class EpisodicMemory:
                                     if not existing['ids']:
                                         self.storage.add_episodic(document, metadata, doc_id)
                                         entries_loaded += 1
-                                except Exception:
+                                except _STORAGE_OP_ERRORS:
                                     # If get fails, try to add
                                     try:
                                         self.storage.add_episodic(document, metadata, doc_id)
                                         entries_loaded += 1
-                                    except Exception as add_err:
+                                    except _STORAGE_OP_ERRORS as add_err:
                                         if "already exists" not in str(add_err).lower():
                                             logger.error(f"Failed to add journal entry: {add_err}")
-                                
-                except Exception as e:
+
+                except _STORAGE_OP_ERRORS as e:
                     logger.error(f"Failed to load journal {journal_file.name}: {e}")
                     continue
-            
+
             logger.info(f"Successfully loaded {entries_loaded} journal entries into episodic memory")
             return entries_loaded
-            
-        except Exception as e:
+
+        except _STORAGE_OP_ERRORS as e:
             logger.error(f"Failed to load journal entries: {e}", exc_info=True)
             raise RuntimeError(f"Journal loading failed: {e}") from e
