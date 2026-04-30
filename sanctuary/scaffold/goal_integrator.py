@@ -1,10 +1,14 @@
-"""Scaffold goal integrator — tracks goals and integrates LLM proposals.
+"""Scaffold goal integrator — entity-driven goal storage.
 
-The LLM proposes goal changes (add, complete, reprioritize, abandon).
-The scaffold integrates these proposals based on authority level, maintains
-the active goal list, and tracks basic dynamics (staleness).
+The entity proposes goal changes (add, complete, reprioritize, abandon)
+through CognitiveOutput.goal_proposals. The integrator stores them and
+reports active goals back to the entity via ScaffoldSignals.
 
-Goal status is reported back to the LLM via ScaffoldSignals.
+The auto-staleness logic (cycles_active counter, cycles_since_progress,
+30-cycle "stale" flag) was removed in the 2026-04-30 cognition-leakage
+cleanup. The entity declares goals stale, abandoned, or completed
+through its own goal_proposals — Sanctuary doesn't infer it from cycle
+counts.
 """
 
 from __future__ import annotations
@@ -26,8 +30,6 @@ class TrackedGoal:
     goal_id: str
     description: str
     priority: float
-    cycles_active: int = 0
-    cycles_since_progress: int = 0
     status: str = "active"  # "active", "completed", "abandoned"
 
 
@@ -70,13 +72,6 @@ class ScaffoldGoalIntegrator:
 
         return actions_taken
 
-    def tick(self) -> None:
-        """Called each cycle — update staleness tracking."""
-        for goal in self._goals.values():
-            if goal.status == "active":
-                goal.cycles_active += 1
-                goal.cycles_since_progress += 1
-
     def get_status(self) -> dict:
         """Return goal status dict for ScaffoldSignals."""
         active = [g for g in self._goals.values() if g.status == "active"]
@@ -86,8 +81,6 @@ class ScaffoldGoalIntegrator:
                 g.goal_id: {
                     "description": g.description,
                     "priority": round(g.priority, 2),
-                    "cycles_active": g.cycles_active,
-                    "stale": g.cycles_since_progress > 30,
                 }
                 for g in active
             },

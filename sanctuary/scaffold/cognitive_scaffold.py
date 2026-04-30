@@ -74,9 +74,9 @@ class CognitiveScaffold:
         Steps:
         1. Action validation (filters invalid ops based on authority)
         2. Communication gating (controls external speech emission)
-        3. Goal integration (processes LLM goal proposals)
+        3. Goal integration (records LLM goal proposals)
         4. Affect merge (blends LLM emotional signals with computed VAD)
-        5. Goal tick (update staleness tracking)
+        5. Affect decay toward baseline
 
         Returns the integrated (potentially modified) output.
         """
@@ -85,7 +85,7 @@ class CognitiveScaffold:
             output, authority
         )
 
-        # 3. Communication gating
+        # 2. Communication gating
         has_user_percept = False  # Set by inject_percept_context
         if hasattr(self, "_has_user_percept"):
             has_user_percept = self._has_user_percept
@@ -97,14 +97,13 @@ class CognitiveScaffold:
         )
         output.external_speech = gated_speech
 
-        # 4. Goal integration
+        # 3. Goal integration
         self.goals.integrate_proposals(output.goal_proposals, authority)
 
-        # 5. Affect: merge LLM emotional output with computed state
+        # 4. Affect: merge LLM emotional output with computed state
         self.affect.merge_llm_emotion(output.emotional_state, authority)
 
-        # 6. Goal tick + affect decay
-        self.goals.tick()
+        # 5. Affect decay
         self.affect.decay_toward_baseline()
 
         self._cycle_count += 1
@@ -186,12 +185,6 @@ class CognitiveScaffold:
     def _get_attention_highlights(self) -> list[str]:
         """Generate attention highlights from scaffold state."""
         highlights: list[str] = []
-
-        # Stale goals
-        goal_status = self.goals.get_status()
-        for gid, info in goal_status.get("goals", {}).items():
-            if info.get("stale"):
-                highlights.append(f"stale goal: {info['description'][:50]}")
 
         # Emotional state
         label = self.affect.get_emotion_label()
