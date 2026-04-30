@@ -24,7 +24,6 @@ from typing import Optional
 from sanctuary.core.authority import AuthorityManager
 from sanctuary.core.schema import (
     CognitiveOutput,
-    Percept,
     ScaffoldSignals,
 )
 
@@ -140,13 +139,6 @@ class CognitiveScaffold:
         Handler signature: async def handler(output: CognitiveOutput) -> None
         """
         self._broadcast_handlers.append(handler)
-
-    def notify_percepts(self, percepts: list[Percept]) -> None:
-        """Called by the cycle to inform scaffold about incoming percepts.
-
-        Updates affect from percept content (computed-VAD track).
-        """
-        self.affect.update_from_percepts(percepts)
 
     def get_computed_vad(self):
         """Return the scaffold's current computed VAD."""
