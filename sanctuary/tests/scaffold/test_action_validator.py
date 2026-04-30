@@ -95,14 +95,20 @@ class TestActionValidator:
         assert len(validated.goal_proposals) == 0
 
     def test_scaffold_only_blocks_world_model(self):
+        from sanctuary.core.schema import AddEntity, EntityQuery
+
         validator = ScaffoldActionValidator()
         authority = AuthorityManager({"world_model": AuthorityLevel.SCAFFOLD_ONLY})
         output = CognitiveOutput(
             inner_speech="test",
-            world_model_updates={"alice": {"mood": "happy"}},
+            world_model_updates=[
+                AddEntity(name="alice", properties={"mood": "happy"}),
+            ],
+            world_model_queries=[EntityQuery(name="alice")],
         )
         validated, issues = validator.validate(output, authority)
-        assert validated.world_model_updates == {}
+        assert validated.world_model_updates == []
+        assert validated.world_model_queries == []
 
     def test_mixed_valid_and_invalid(self):
         validator = ScaffoldActionValidator()

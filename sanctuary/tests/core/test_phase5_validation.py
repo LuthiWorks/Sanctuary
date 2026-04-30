@@ -48,8 +48,6 @@ from sanctuary.core.schema import (
     SelfModel,
     SurfacedMemory,
     TemporalContext,
-    WorldEntity,
-    WorldModel,
 )
 from sanctuary.experiential.manager import ExperientialManager, ExperientialState
 
@@ -319,10 +317,6 @@ class TestContextBudget:
                               "maintain coherence", "explore curiosity"],
                 uncertainties=["what the user wants", "my own nature"],
             ),
-            world_model=WorldModel(
-                entities={"user": WorldEntity(name="user", properties={"role": "conversationalist"})},
-                environment={"setting": "text-based conversation"},
-            ),
             scaffold_signals=ScaffoldSignals(
                 attention_highlights=["novel input pattern", "emotional shift"],
                 anomalies=["unusually long inner speech"],
@@ -432,7 +426,7 @@ class TestStressCycles:
             "attention_guidance": {"focus_on": [], "deprioritize": []},
             "memory_ops": [],
             "self_model_updates": {"current_state": f"cycle {cycle}"},
-            "world_model_updates": {},
+            "world_model_updates": [],
             "goal_proposals": [],
             "emotional_state": {
                 "felt_quality": "stable",
@@ -756,7 +750,7 @@ class TestCycleLatency:
                 {"type": "write_episodic", "content": "m", "significance": 5}
             ],
             "self_model_updates": {"current_state": "active"},
-            "world_model_updates": {},
+            "world_model_updates": [],
             "goal_proposals": [{"action": "add", "goal": "learn"}],
             "emotional_state": {"felt_quality": "ok", "valence_shift": 0.1},
             "growth_reflection": None,

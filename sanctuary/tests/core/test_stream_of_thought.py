@@ -123,51 +123,6 @@ class TestStreamOfThought:
 
         assert len(stream.get_self_model().uncertainties) <= 5
 
-    def test_world_model_accumulates(self):
-        stream = StreamOfThought()
-
-        stream.update(
-            CognitiveOutput(
-                world_model_updates={"alice": {"mood": "happy"}}
-            )
-        )
-        stream.update(
-            CognitiveOutput(
-                world_model_updates={"alice": {"topic": "weather"}}
-            )
-        )
-
-        wm = stream.get_world_model()
-        assert "alice" in wm.entities
-        assert wm.entities["alice"].properties["mood"] == "happy"
-        assert wm.entities["alice"].properties["topic"] == "weather"
-
-    def test_world_model_new_entity(self):
-        stream = StreamOfThought()
-
-        stream.update(
-            CognitiveOutput(
-                world_model_updates={"bob": {"role": "friend"}}
-            )
-        )
-
-        wm = stream.get_world_model()
-        assert "bob" in wm.entities
-        assert wm.entities["bob"].properties["role"] == "friend"
-
-    def test_world_model_bounded(self):
-        """World model should not grow beyond 50 entities."""
-        stream = StreamOfThought()
-
-        for i in range(60):
-            stream.update(
-                CognitiveOutput(
-                    world_model_updates={f"entity_{i}": {"data": i}}
-                )
-            )
-
-        assert len(stream.get_world_model().entities) <= 50
-
     def test_recent_context(self):
         stream = StreamOfThought()
 

@@ -23,6 +23,8 @@ import time
 from datetime import datetime
 from typing import Any, Dict, Optional, Protocol
 
+from pathlib import Path
+
 from sanctuary.consciousness.sleep_cycle import SleepCycleManager, SleepStage
 from sanctuary.core.authority import AuthorityManager
 from sanctuary.core.context_manager import BudgetConfig, ContextManager
@@ -35,8 +37,10 @@ from sanctuary.core.schema import (
     Percept,
     ScaffoldSignals,
     TemporalContext,
+    WorldQueryResult,
 )
 from sanctuary.core.stream_of_thought import StreamOfThought
+from sanctuary.memory.world_graph import WorldGraph
 from sanctuary.motor.motor import Motor
 
 logger = logging.getLogger(__name__)
@@ -258,6 +262,8 @@ class CognitiveCycle:
         context_config: Optional[BudgetConfig] = None,
         stream_history: int = 10,
         cycle_delay: float = 0.1,
+        world_graph: Optional[WorldGraph] = None,
+        world_graph_path: Optional[Path] = None,
     ):
         self.model = model
         self.scaffold = scaffold or NullScaffold()
@@ -273,6 +279,16 @@ class CognitiveCycle:
         self.context_mgr = ContextManager(context_config)
         self.stream = StreamOfThought(max_history=stream_history)
 
+        # World graph: typed-relation storage for entity-driven recall.
+        # If a path is provided and the file exists, load it; otherwise
+        # start empty. Mutations save back to the path after each cycle.
+        self.world_graph = world_graph or WorldGraph()
+        self.world_graph_path: Optional[Path] = (
+            Path(world_graph_path) if world_graph_path else None
+        )
+        if self.world_graph_path is not None:
+            self.world_graph.load(self.world_graph_path)
+
         self.running = False
         self.cycle_count = 0
         self._cycle_delay = cycle_delay
@@ -281,6 +297,10 @@ class CognitiveCycle:
         # Stashed per-cycle for communication agency (needs them after think())
         self._current_percepts: list = []
         self._current_memories: list = []
+        # Query results from the previous cycle's world_model_queries; flow
+        # into the next CognitiveInput.world_model_query_results. Apply-then-
+        # resolve: queries see the post-mutation graph state.
+        self._pending_query_results: list[WorldQueryResult] = []
 
         # Stashed per-cycle for monitoring hooks
         self._cycle_latency_ms: float = 0.0
@@ -394,6 +414,54 @@ class CognitiveCycle:
                 self.identity.process_value_updates(cognitive_output.self_model_updates)
             except Exception as e:
                 logger.error("Identity value update error (non-fatal): %s", e)
+
+        # 5c. Apply entity-driven world-graph mutations and resolve queries.
+        #     Apply-then-resolve order: queries see the post-mutation graph
+        #     state, so the entity can ask about something it just added.
+        if cognitive_output.world_model_updates:
+            for op in cognitive_output.world_model_updates:
+                try:
+                    self.world_graph.apply_update(op, self.cycle_count)
+                except Exception as e:
+                    logger.error(
+                        "World-graph update error (non-fatal): %s — op=%r",
+                        e, op,
+                    )
+            if self.world_graph_path is not None:
+                try:
+                    self.world_graph.save(self.world_graph_path)
+                except Exception as e:
+                    logger.error("World-graph save error (non-fatal): %s", e)
+
+        if cognitive_output.world_model_queries:
+            for q in cognitive_output.world_model_queries:
+                try:
+                    result = self.world_graph.resolve_query(q, self.cycle_count)
+                    self._pending_query_results.append(result)
+                except Exception as e:
+                    logger.error(
+                        "World-graph query error (non-fatal): %s — query=%r",
+                        e, q,
+                    )
+
+        # 5d. Surface a size-warning percept if the graph just crossed
+        #     the configured threshold. The entity decides what to retract;
+        #     Sanctuary doesn't auto-evict.
+        size_warning = self.world_graph.emit_size_warning()
+        if size_warning is not None and hasattr(self.sensorium, "inject_percept"):
+            try:
+                self.sensorium.inject_percept(
+                    Percept(
+                        modality="system",
+                        content=size_warning.message,
+                        source="world_graph",
+                    )
+                )
+            except Exception as e:
+                logger.error(
+                    "World-graph warning percept injection failed (non-fatal): %s",
+                    e,
+                )
 
         # 6. Execute actions
         try:
@@ -520,17 +588,17 @@ class CognitiveCycle:
         if identity_values:
             self_model.values = identity_values
 
-        # Inject environment location context into world model
-        world_model = self.stream.get_world_model()
-        if self.environment is not None:
-            location_ctx = self.environment.get_location_context()
-            if location_ctx:
-                world_model.environment.update(location_ctx)
-
         # Stash percepts and memories for the communication evaluation step
         # (evaluate_speech runs after model.think() and needs these)
         self._current_percepts = percepts
         self._current_memories = surfaced
+
+        # Drain pending world-graph query results from the previous cycle.
+        # The entity gets results one cycle after asking — apply-then-
+        # resolve order means each result reflects the graph state after
+        # the issuing cycle's mutations were applied.
+        query_results = self._pending_query_results
+        self._pending_query_results = []
 
         return CognitiveInput(
             previous_thought=self.stream.get_previous(),
@@ -543,7 +611,7 @@ class CognitiveCycle:
             ),
             temporal_context=temporal,
             self_model=self_model,
-            world_model=world_model,
+            world_model_query_results=query_results,
             scaffold_signals=self.scaffold.get_signals(),
             experiential_state=experiential_signals,
             charter_summary=self.identity.get_charter_summary(),

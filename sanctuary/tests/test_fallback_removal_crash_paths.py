@@ -622,13 +622,18 @@ class TestCycleInteriorCrashPaths:
         cycle._last_output = None
         cycle._output_handlers = []
 
-        # Mock _assemble_input to return a MagicMock (skips Pydantic)
+        # Mock _assemble_input to return a MagicMock (skips Pydantic).
+        # The mocked CognitiveOutput has empty world-graph fields so
+        # _cycle's apply/resolve step is a no-op.
         cycle._assemble_input = AsyncMock(return_value=MagicMock())
         cycle.context_mgr = MagicMock()
         cycle.model = AsyncMock()
         cycle.model.think = AsyncMock(return_value=MagicMock(
             self_model_updates={"values": "test"},
-            predictions=[]
+            predictions=[],
+            world_model_updates=[],
+            world_model_queries=[],
+            external_speech=None,
         ))
         cycle.scaffold = MagicMock()
         cycle.scaffold.integrate = AsyncMock(return_value=MagicMock())
@@ -641,8 +646,12 @@ class TestCycleInteriorCrashPaths:
         cycle.communication = None
         cycle._current_percepts = []
         cycle._current_memories = []
+        cycle._pending_query_results = []
         cycle.environment = None
         cycle.growth = None
+        cycle.world_graph = MagicMock()
+        cycle.world_graph.emit_size_warning = MagicMock(return_value=None)
+        cycle.world_graph_path = None
         cycle._execute = AsyncMock()
 
         return cycle

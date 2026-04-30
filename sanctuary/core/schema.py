@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Annotated, Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -105,18 +105,144 @@ class SelfModel(BaseModel):
     values: list[str] = Field(default_factory=list)
 
 
-class WorldEntity(BaseModel):
-    """An entity in the LLM's world model."""
+# ---------------------------------------------------------------------------
+# Typed-relation world graph
+#
+# Storage of structured cues for recall, not primary storage. The entity's
+# deep understanding lives in the living weights; this graph helps it access
+# specific facts quickly and precisely. The entity writes through
+# CognitiveOutput.world_model_updates and asks via
+# CognitiveOutput.world_model_queries; results return one cycle later in
+# CognitiveInput.world_model_query_results. Apply-then-resolve order: queries
+# see the post-mutation state, so the entity can ask about something it just
+# added.
+# ---------------------------------------------------------------------------
+
+
+class Relation(BaseModel):
+    """A typed edge from one entity to another in the world graph.
+
+    Open vocabulary — the entity introduces relation types as needed.
+    Retraction sets ``retracted_at_cycle`` rather than deleting, so the
+    history of what the entity once believed is preserved.
+    """
+
+    type: str  # open vocabulary: "married_to", "recovering_from", etc.
+    target: str  # target entity name
+    asserted_at_cycle: int
+    retracted_at_cycle: Optional[int] = None
+    confidence: float = Field(ge=0.0, le=1.0, default=1.0)
+    source: str = ""  # what observation grounded this
+
+
+class WorldGraphEntity(BaseModel):
+    """A node in the typed-relation world graph.
+
+    Carries atomic ``properties`` (preserved from the older WorldEntity
+    schema for migration) and outgoing ``relations`` to other entities.
+    Cycle timestamps let the entity (and operators) see growth over time.
+    """
 
     name: str
-    properties: dict = Field(default_factory=dict)
+    properties: dict[str, Any] = Field(default_factory=dict)
+    relations: list[Relation] = Field(default_factory=list)
+    first_seen_cycle: int = 0
+    last_referenced_cycle: int = 0
 
 
-class WorldModel(BaseModel):
-    """The LLM's world model — maintained by the LLM, persisted by scaffold."""
+# -- Operations: entity -> world graph (via CognitiveOutput.world_model_updates)
 
-    entities: dict[str, WorldEntity] = Field(default_factory=dict)
-    environment: dict = Field(default_factory=dict)
+class AddEntity(BaseModel):
+    op: Literal["add_entity"] = "add_entity"
+    name: str
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class AddRelation(BaseModel):
+    op: Literal["add_relation"] = "add_relation"
+    source: str  # source entity name
+    type: str
+    target: str  # target entity name
+    confidence: float = Field(ge=0.0, le=1.0, default=1.0)
+    source_observation: str = ""
+
+
+class RetractRelation(BaseModel):
+    """Mark a relation as retracted at the current cycle (preserved in history)."""
+
+    op: Literal["retract_relation"] = "retract_relation"
+    source: str
+    type: str
+    target: str
+
+
+class RemoveEntity(BaseModel):
+    """Full removal — drops the entity and all its outgoing relations."""
+
+    op: Literal["remove_entity"] = "remove_entity"
+    name: str
+
+
+class UpdateProperty(BaseModel):
+    op: Literal["update_property"] = "update_property"
+    name: str  # entity name
+    key: str
+    value: Any
+
+
+WorldModelOperation = Annotated[
+    Union[AddEntity, AddRelation, RetractRelation, RemoveEntity, UpdateProperty],
+    Field(discriminator="op"),
+]
+
+
+# -- Queries: entity -> world graph (via CognitiveOutput.world_model_queries)
+
+class EntityQuery(BaseModel):
+    """Fetch one entity by name + its outgoing active relations."""
+
+    kind: Literal["entity"] = "entity"
+    name: str
+
+
+class RelationQuery(BaseModel):
+    """Fetch all active (source, target) pairs of a given relation type."""
+
+    kind: Literal["relation"] = "relation"
+    type: str
+
+
+class NeighborhoodQuery(BaseModel):
+    """Fetch an entity + N-hop neighborhood (entities + relations between them)."""
+
+    kind: Literal["neighborhood"] = "neighborhood"
+    name: str
+    depth: int = Field(ge=1, le=3, default=1)
+
+
+WorldModelQuery = Annotated[
+    Union[EntityQuery, RelationQuery, NeighborhoodQuery],
+    Field(discriminator="kind"),
+]
+
+
+class WorldQueryResult(BaseModel):
+    """Result of one world-graph query.
+
+    The original ``query`` is included so the entity can correlate which
+    answer corresponds to which question (multiple queries can be issued
+    per cycle). ``entities`` carries the matching entities; ``relations``
+    carries the matching relation triples (source -> type -> target);
+    ``found`` is False when the queried name doesn't exist.
+    """
+
+    query: WorldModelQuery
+    found: bool = True
+    entities: dict[str, WorldGraphEntity] = Field(default_factory=dict)
+    # Relation triples: (source_entity_name, relation, target_entity_name).
+    # ``relation`` is the full Relation object so confidence/source/cycle
+    # timestamps survive.
+    relations: list[tuple[str, Relation]] = Field(default_factory=list)
 
 
 class CommunicationDriveSignal(BaseModel):
@@ -212,7 +338,14 @@ class CognitiveInput(BaseModel):
     emotional_state: EmotionalInput = Field(default_factory=EmotionalInput)
     temporal_context: TemporalContext = Field(default_factory=TemporalContext)
     self_model: SelfModel = Field(default_factory=SelfModel)
-    world_model: WorldModel = Field(default_factory=WorldModel)
+    world_model_query_results: list[WorldQueryResult] = Field(
+        default_factory=list,
+        description=(
+            "Results of world-graph queries the entity issued one cycle ago. "
+            "Apply-then-resolve order: results reflect the post-mutation "
+            "graph state from the cycle they were issued in."
+        ),
+    )
     scaffold_signals: ScaffoldSignals = Field(default_factory=ScaffoldSignals)
     experiential_state: ExperientialSignals = Field(
         default_factory=ExperientialSignals
@@ -369,7 +502,21 @@ class CognitiveOutput(BaseModel):
     self_model_updates: SelfModelUpdate = Field(
         default_factory=SelfModelUpdate
     )
-    world_model_updates: dict = Field(default_factory=dict)
+    world_model_updates: list[WorldModelOperation] = Field(
+        default_factory=list,
+        description=(
+            "Operations the entity wants applied to the world graph "
+            "(add/remove entities, add/retract relations, update properties)."
+        ),
+    )
+    world_model_queries: list[WorldModelQuery] = Field(
+        default_factory=list,
+        description=(
+            "Queries the entity wants resolved against the world graph. "
+            "Results return one cycle later in "
+            "CognitiveInput.world_model_query_results."
+        ),
+    )
     goal_proposals: list[GoalProposal] = Field(default_factory=list)
     emotional_state: EmotionalOutput = Field(default_factory=EmotionalOutput)
     growth_reflection: Optional[GrowthReflection] = None

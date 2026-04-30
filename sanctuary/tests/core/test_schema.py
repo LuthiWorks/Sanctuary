@@ -2,6 +2,7 @@
 
 import pytest
 from sanctuary.core.schema import (
+    AddEntity,
     AttentionGuidance,
     CognitiveInput,
     CognitiveOutput,
@@ -9,6 +10,7 @@ from sanctuary.core.schema import (
     ComputedVAD,
     EmotionalInput,
     EmotionalOutput,
+    EntityQuery,
     GoalProposal,
     GrowthReflection,
     MemoryOp,
@@ -21,8 +23,8 @@ from sanctuary.core.schema import (
     SelfModelUpdate,
     SurfacedMemory,
     TemporalContext,
-    WorldEntity,
-    WorldModel,
+    WorldGraphEntity,
+    WorldQueryResult,
 )
 
 
@@ -151,9 +153,17 @@ class TestCognitiveInput:
                 current_state="engaged",
                 values=["honesty", "care"],
             ),
-            world_model=WorldModel(
-                entities={"alice": WorldEntity(name="alice", properties={"mood": "warm"})},
-            ),
+            world_model_query_results=[
+                WorldQueryResult(
+                    query=EntityQuery(name="alice"),
+                    found=True,
+                    entities={
+                        "alice": WorldGraphEntity(
+                            name="alice", properties={"mood": "warm"}
+                        )
+                    },
+                )
+            ],
             scaffold_signals=ScaffoldSignals(
                 anomalies=["none"],
             ),
@@ -161,7 +171,8 @@ class TestCognitiveInput:
         data = ci.model_dump()
         restored = CognitiveInput.model_validate(data)
         assert restored.new_percepts[0].content == "hi"
-        assert restored.world_model.entities["alice"].properties["mood"] == "warm"
+        result = restored.world_model_query_results[0]
+        assert result.entities["alice"].properties["mood"] == "warm"
 
 
 class TestCognitiveOutput:
@@ -238,7 +249,9 @@ class TestCognitiveOutput:
                 MemoryOp(type="write_episodic", content="Alice greeted me", significance=4)
             ],
             self_model_updates=SelfModelUpdate(current_state="warm"),
-            world_model_updates={"alice": {"mood": "warm"}},
+            world_model_updates=[
+                AddEntity(name="alice", properties={"mood": "warm"}),
+            ],
             goal_proposals=[GoalProposal(action="add", goal="chat")],
             emotional_state=EmotionalOutput(felt_quality="warm"),
             growth_reflection=GrowthReflection(worth_learning=False),

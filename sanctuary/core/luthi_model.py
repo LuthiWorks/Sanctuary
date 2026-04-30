@@ -1011,7 +1011,7 @@ class LuthiModel:
             self_model_updates=SelfModelUpdate(
                 current_state=felt_quality,
             ),
-            world_model_updates={},
+            world_model_updates=[],
             goal_proposals=[],
             emotional_state=EmotionalOutput(
                 felt_quality=felt_quality,
