@@ -37,7 +37,7 @@ class AffectConfig:
     baseline_arousal: float = 0.2
     baseline_dominance: float = 0.5
     decay_rate: float = 0.05  # Per cycle, toward baseline
-    llm_blend_weight: float = 0.3  # How much LLM shifts blend when LLM_GUIDES
+    llm_blend_weight: float = 0.3  # How much LLM shifts blend when MODEL_GUIDES
 
 
 class ScaffoldAffect:
@@ -74,9 +74,9 @@ class ScaffoldAffect:
 
         The blend weight depends on the authority level for ``emotional_state``:
         - SCAFFOLD_ONLY (0): ignore LLM shifts entirely
-        - LLM_ADVISES (1): small blend (~10%)
-        - LLM_GUIDES (2): moderate blend (configured llm_blend_weight)
-        - LLM_CONTROLS (3): LLM shifts applied fully
+        - MODEL_ADVISES (1): small blend (~10%)
+        - MODEL_GUIDES (2): moderate blend (configured llm_blend_weight)
+        - MODEL_CONTROLS (3): LLM shifts applied fully
         """
         level = authority.level("emotional_state")
 
@@ -84,11 +84,11 @@ class ScaffoldAffect:
             return
 
         # Compute effective blend factor
-        if level == AuthorityLevel.LLM_ADVISES:
+        if level == AuthorityLevel.MODEL_ADVISES:
             w = self.config.llm_blend_weight * 0.3
-        elif level == AuthorityLevel.LLM_GUIDES:
+        elif level == AuthorityLevel.MODEL_GUIDES:
             w = self.config.llm_blend_weight
-        else:  # LLM_CONTROLS
+        else:  # MODEL_CONTROLS
             w = 1.0
 
         self.valence = _clamp(self.valence + emotion.valence_shift * w, -1.0, 1.0)

@@ -308,11 +308,11 @@ class AuthorityTuner:
             )
 
         # Already at max authority
-        if current >= AuthorityLevel.LLM_CONTROLS:
+        if current >= AuthorityLevel.MODEL_CONTROLS:
             return TuningDecision(
                 cell_name=name,
                 action="hold",
-                reason="already at LLM_CONTROLS",
+                reason="already at MODEL_CONTROLS",
                 current_level=current,
             )
 

@@ -275,10 +275,10 @@ class ExperientialManager:
 
         # Build cell_active from all cells
         cell_active: dict[str, bool] = {
-            "precision": precision_level >= AuthorityLevel.LLM_ADVISES,
-            "affect": affect_level >= AuthorityLevel.LLM_ADVISES,
-            "attention": attention_level >= AuthorityLevel.LLM_ADVISES,
-            "goal": goal_level >= AuthorityLevel.LLM_ADVISES,
+            "precision": precision_level >= AuthorityLevel.MODEL_ADVISES,
+            "affect": affect_level >= AuthorityLevel.MODEL_ADVISES,
+            "attention": attention_level >= AuthorityLevel.MODEL_ADVISES,
+            "goal": goal_level >= AuthorityLevel.MODEL_ADVISES,
         }
         for name, _ in self._registry.knowledge_cells():
             cell_active[name] = True  # Knowledge cells are always active
@@ -302,15 +302,15 @@ class ExperientialManager:
         """Blend scaffold and CfC outputs based on authority level.
 
         SCAFFOLD_ONLY (0): 100% scaffold
-        LLM_ADVISES (1):   75% scaffold, 25% CfC
-        LLM_GUIDES (2):    25% scaffold, 75% CfC
-        LLM_CONTROLS (3):  100% CfC
+        MODEL_ADVISES (1):   75% scaffold, 25% CfC
+        MODEL_GUIDES (2):    25% scaffold, 75% CfC
+        MODEL_CONTROLS (3):  100% CfC
         """
         weights = {
             AuthorityLevel.SCAFFOLD_ONLY: (1.0, 0.0),
-            AuthorityLevel.LLM_ADVISES: (0.75, 0.25),
-            AuthorityLevel.LLM_GUIDES: (0.25, 0.75),
-            AuthorityLevel.LLM_CONTROLS: (0.0, 1.0),
+            AuthorityLevel.MODEL_ADVISES: (0.75, 0.25),
+            AuthorityLevel.MODEL_GUIDES: (0.25, 0.75),
+            AuthorityLevel.MODEL_CONTROLS: (0.0, 1.0),
         }
         scaffold_w, cfc_w = weights[level]
         return scaffold_value * scaffold_w + cfc_value * cfc_w

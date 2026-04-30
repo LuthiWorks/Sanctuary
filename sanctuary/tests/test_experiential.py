@@ -312,12 +312,12 @@ class TestExperientialManager:
         assert state.cell_active["precision"] is False
 
     def test_llm_controls_uses_only_cfc(self):
-        """At LLM_CONTROLS, the scaffold output is ignored."""
+        """At MODEL_CONTROLS, the scaffold output is ignored."""
         authority = AuthorityManager()
         mgr = ExperientialManager(authority=authority)
         mgr.authority.set_level(
             ExperientialManager.AUTHORITY_FUNCTION,
-            AuthorityLevel.LLM_CONTROLS,
+            AuthorityLevel.MODEL_CONTROLS,
             reason="test",
         )
         state = mgr.step(
@@ -331,12 +331,12 @@ class TestExperientialManager:
         assert state.cell_active["precision"] is True
 
     def test_blending_at_advises(self):
-        """At LLM_ADVISES, blend is 75% scaffold + 25% CfC."""
+        """At MODEL_ADVISES, blend is 75% scaffold + 25% CfC."""
         authority = AuthorityManager()
         mgr = ExperientialManager(authority=authority)
         mgr.authority.set_level(
             ExperientialManager.AUTHORITY_FUNCTION,
-            AuthorityLevel.LLM_ADVISES,
+            AuthorityLevel.MODEL_ADVISES,
             reason="test",
         )
 
@@ -353,21 +353,21 @@ class TestExperientialManager:
     def test_promotion(self):
         mgr = ExperientialManager()
         level = mgr.promote_precision("test promotion")
-        assert level == AuthorityLevel.LLM_ADVISES
+        assert level == AuthorityLevel.MODEL_ADVISES
 
         level = mgr.promote_precision("further promotion")
-        assert level == AuthorityLevel.LLM_GUIDES
+        assert level == AuthorityLevel.MODEL_GUIDES
 
     def test_demotion(self):
         authority = AuthorityManager()
         mgr = ExperientialManager(authority=authority)
         mgr.authority.set_level(
             ExperientialManager.AUTHORITY_FUNCTION,
-            AuthorityLevel.LLM_GUIDES,
+            AuthorityLevel.MODEL_GUIDES,
             reason="start high",
         )
         level = mgr.demote_precision("regression")
-        assert level == AuthorityLevel.LLM_ADVISES
+        assert level == AuthorityLevel.MODEL_ADVISES
 
     def test_reset(self):
         mgr = ExperientialManager()

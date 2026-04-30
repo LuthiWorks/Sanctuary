@@ -81,7 +81,7 @@ class TestCognitiveScaffoldIntegrate:
         )
         initial_v = scaffold.affect.valence
         await scaffold.integrate(output, authority)
-        # At LLM_GUIDES (default for emotional_state), valence should increase
+        # At MODEL_GUIDES (default for emotional_state), valence should increase
         assert scaffold.affect.valence > initial_v
 
     @pytest.mark.asyncio

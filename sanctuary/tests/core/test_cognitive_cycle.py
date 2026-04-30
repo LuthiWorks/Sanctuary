@@ -178,7 +178,7 @@ class TestAuthorityIntegration:
         )
         await cycle.run(max_cycles=1)
 
-        assert cycle.authority.level("inner_speech") == AuthorityLevel.LLM_CONTROLS
+        assert cycle.authority.level("inner_speech") == AuthorityLevel.MODEL_CONTROLS
         assert cycle.authority.level("attention") == AuthorityLevel.SCAFFOLD_ONLY
 
 

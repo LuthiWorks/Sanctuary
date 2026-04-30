@@ -85,7 +85,7 @@ class TestAuthorityTuner:
         applied = tuner.apply(decisions)
         assert len(applied) == 4
         for d in applied:
-            assert d.new_level == AuthorityLevel.LLM_ADVISES
+            assert d.new_level == AuthorityLevel.MODEL_ADVISES
 
     def test_demote_on_nan(self):
         """NaN output should trigger immediate demotion."""
@@ -93,7 +93,7 @@ class TestAuthorityTuner:
 
         # Promote precision first so we can demote it
         mgr.promote("precision", "test setup")
-        assert mgr.authority.level("experiential_precision") == AuthorityLevel.LLM_ADVISES
+        assert mgr.authority.level("experiential_precision") == AuthorityLevel.MODEL_ADVISES
 
         # One NaN observation
         nan_state = ExperientialState(
@@ -149,14 +149,14 @@ class TestAuthorityTuner:
         assert "divergence" in att_decision.reason.lower()
 
     def test_hold_at_max_authority(self):
-        """Cells already at LLM_CONTROLS should hold, not promote further."""
+        """Cells already at MODEL_CONTROLS should hold, not promote further."""
         tuner, mgr = self._make_tuner(window=5, min_cycles=3)
 
         # Promote precision to max
         mgr.promote("precision", "step 1")
         mgr.promote("precision", "step 2")
         mgr.promote("precision", "step 3")
-        assert mgr.authority.level("experiential_precision") == AuthorityLevel.LLM_CONTROLS
+        assert mgr.authority.level("experiential_precision") == AuthorityLevel.MODEL_CONTROLS
 
         for _ in range(5):
             tuner.observe(self._stable_state())
@@ -164,7 +164,7 @@ class TestAuthorityTuner:
         decisions = tuner.evaluate()
         prec = next(d for d in decisions if d.cell_name == "precision")
         assert prec.action == "hold"
-        assert "LLM_CONTROLS" in prec.reason
+        assert "MODEL_CONTROLS" in prec.reason
 
     def test_hold_when_variance_too_high(self):
         """High output variance prevents promotion."""
@@ -197,17 +197,17 @@ class TestAuthorityTuner:
         """Cells can be promoted step by step through authority levels."""
         tuner, mgr = self._make_tuner(window=5, min_cycles=5)
 
-        # SCAFFOLD_ONLY → LLM_ADVISES
+        # SCAFFOLD_ONLY → MODEL_ADVISES
         for _ in range(5):
             tuner.observe(self._stable_state())
         tuner.apply(tuner.evaluate())
-        assert mgr.authority.level("experiential_precision") == AuthorityLevel.LLM_ADVISES
+        assert mgr.authority.level("experiential_precision") == AuthorityLevel.MODEL_ADVISES
 
-        # LLM_ADVISES → LLM_GUIDES (need fresh observations)
+        # MODEL_ADVISES → MODEL_GUIDES (need fresh observations)
         for _ in range(5):
             tuner.observe(self._stable_state())
         tuner.apply(tuner.evaluate())
-        assert mgr.authority.level("experiential_precision") == AuthorityLevel.LLM_GUIDES
+        assert mgr.authority.level("experiential_precision") == AuthorityLevel.MODEL_GUIDES
 
     def test_cell_stats_rolling_window(self):
         """Older observations fall off the rolling window."""

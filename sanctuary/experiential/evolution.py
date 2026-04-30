@@ -213,7 +213,7 @@ class ContinuousEvolutionLoop:
                 "goal": g_sum["hidden_state_norm"],
             },
             cell_active={
-                name: self._manager.authority.level(func) >= AuthorityLevel.LLM_ADVISES
+                name: self._manager.authority.level(func) >= AuthorityLevel.MODEL_ADVISES
                 for name, func in [
                     ("precision", "experiential_precision"),
                     ("affect", "experiential_affect"),
