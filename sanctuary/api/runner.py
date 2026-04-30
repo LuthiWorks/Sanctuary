@@ -402,11 +402,6 @@ class SanctuaryRunner:
             # Defer load() to boot() — don't fail __init__ on load errors
             return model
 
-        elif backend == "ollama":
-            from sanctuary.core.ollama_model import OllamaModel
-
-            return OllamaModel()
-
         else:
             return PlaceholderModel()
 

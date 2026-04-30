@@ -83,8 +83,8 @@ def parse_args(argv=None) -> argparse.Namespace:
         "--model-backend",
         type=str,
         default="placeholder",
-        choices=["placeholder", "ollama", "luthi"],
-        help="Model backend: placeholder (testing), ollama (external LLM), luthi (living weights)",
+        choices=["placeholder", "luthi"],
+        help="Model backend: placeholder (no-model testing) or luthi (living weights)",
     )
     parser.add_argument(
         "--luthi-checkpoint",
