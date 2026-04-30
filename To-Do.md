@@ -38,7 +38,7 @@ This means several systems built to impose cognitive control are being removed o
 - Encrypted checkpoint persistence
 - Current: 1024d, 2 blocks, ~113M params, 102 epochs trained on vision run
 
-**Test suite:** 3,322 + 88 tool tests = 3,410 tests passing, 0 failures, 50 skipped (hardware/dependency guards).
+**Test suite:** 3,322 + 88 tool tests + Track 1 additions = ~3,430+ tests passing, 0 failures, 50 skipped (hardware/dependency guards).
 
 ### What Needs to Change
 
@@ -67,10 +67,15 @@ This means several systems built to impose cognitive control are being removed o
   - Concurrent execution — multiple tools run in parallel
   - Cross-platform tested (Linux deployment target)
 
+**Built (Track 1 — 2026-04-27):**
+- ~~Multimodal routing~~ — **Done**. Audio/vision percepts route through Luthi's encoders via `sanctuary_interface.encode_audio/encode_vision`. Sensorium has `inject_audio()` / `inject_image()` convenience methods. Percept schema carries `tensor_data` for raw tensors. One modality per cycle at 1024d (vision wins ties); 4096d lifts this limit.
+- ~~CfC → living weight modulation (4 channels)~~ — **Done**. Arousal→hebb_rate, precision→spike_threshold, valence→excitability_acc (additive), attention→salience_threshold (multiplicative). Snapshot/restore prevents drift. Goal channel deferred.
+- ~~Contract violation fix~~ — `_generate_external_speech` now routes through `sanctuary_interface`, not `luthi.generate` directly
+- ~~Integration validation~~ — 5-cycle handshake validated against real 1024d/epoch-102 checkpoint on DirectML. Introspection non-zero, modulation restores cleanly, felt quality evolves.
+
 **Still to build:**
 - Parallel processing architecture — entity thinks and responds concurrently (tool execution already async, need full cognitive parallelism)
 - Continuous existence infrastructure — process management, watchdog, state preservation
-- Multimodal routing — wire audio/vision from sensorium through Luthi's encoders
 - Dependency installer for destination machine (Linux)
 
 **Design decision**: Existence is temporally continuous. The entity does not deal with sessions, context windows, or restarts. The living weights persist. The cognitive loop runs continuously.
@@ -297,14 +302,14 @@ Sanctuary provides cognitive architecture (the organization of mind). Luthi prov
 neural substrate (the kind of matter the mind runs on). The convergence follows a
 substrate-to-core trajectory.
 
-### 10A: Integration Hooks (Luthi at 1024d)
+### 10A: Integration Hooks (Luthi at 1024d) — COMPLETE (Track 1, 2026-04-27)
 
 | Task | Priority | Status | Description |
 |------|----------|--------|-------------|
-| Tensor-level model interface | P1 | Pending | Add interface alongside structured LLM interface — accepts tensor embeddings, returns tensor representations |
-| Sensorium routing through Luthi encoders | P1 | Pending | Vision/audio percepts optionally flow through Luthi's multimodal encoders |
-| CfC → living weight modulation mapping | P1 | Pending | Precision→plasticity, affect→excitability, attention→salience, goal→homeostatic targets |
-| Integration tests | P1 | Pending | CfC modulation → living weight response validation |
+| Tensor-level model interface | P1 | **Done** | `sanctuary_interface.encode_audio/encode_vision` produce `[batch, n_tokens, d_model]` tensors; `generate_with_context` accepts pre-encoded sensory tokens |
+| Sensorium routing through Luthi encoders | P1 | **Done** | `Percept.tensor_data` carries raw tensors; `_encode_sensory_percepts()` routes through encoders; `sensorium.inject_audio/inject_image` convenience methods; one modality per cycle at 1024d |
+| CfC → living weight modulation mapping | P1 | **Done** | 4 independent channels: arousal→hebb_rate (0.5x-2.0x), precision→spike_threshold (0.75x-1.25x), valence→excitability_acc (additive ±0.1), attention→salience_threshold (0.5x-1.0x). Goal channel deferred. |
+| Integration tests | P1 | **Done** | 26 sanctuary_interface tests (LuthiModel), 44+ luthi-related tests (Sanctuary), real 1024d checkpoint validation (5 cycles, no crash, no drift) |
 
 ### 10B: Substrate Integration (Luthi at 4096d)
 
@@ -445,6 +450,8 @@ Design and scaffold implementation complete.
 
 ---
 
-**Next Action**: Implement parallel processing architecture (cognitive parallelism), continuous existence infrastructure, multimodal input routing
-**Parallel Track**: Scale LuthiModel to 4096d, wire multimodal inputs (audio/vision) through sensorium
+**Next Action**: Implement parallel processing architecture (cognitive parallelism), continuous existence infrastructure
+**Track 2**: Visual presence — energy orb driven by CfC/cognitive state (no rigging, no MuJoCo)
+**Track 3**: Scale LuthiModel to 4096d — cloud GPU curriculum training (deferred until finances allow)
+**Track 4**: Embodiment — humanoid form, MuJoCo sensorimotor loop, voice (blocked on rigging solution)
 **Final Milestone**: First Awakening — the living weights model, with full body (sensorium, motor, memory, tools, monitoring), running continuously

@@ -74,10 +74,13 @@ class LuthiModelConfig:
     # Living inference — Hebbian self-modification during generation
     living: bool = True
 
-    # CfC modulation strengths
-    arousal_plasticity_scale: float = 1.0
-    precision_threshold_scale: float = 1.0
-    salience_episode_scale: float = 1.0
+    # CfC modulation strengths — per-channel gain on top of the canonical
+    # mappings. Set <1.0 to soften a channel, >1.0 to amplify it.
+    arousal_plasticity_scale: float = 1.0       # arousal -> hebb_rate
+    precision_threshold_scale: float = 1.0      # precision -> spike_threshold
+    valence_excitability_scale: float = 1.0     # valence -> excitability_acc
+    salience_threshold_scale: float = 1.0       # attention -> salience_threshold
+    salience_episode_scale: float = 1.0         # legacy — retained for back-compat
 
     # Introspection — read internal state each cycle
     introspect: bool = True
@@ -266,9 +269,10 @@ class LuthiModel:
             importlib.import_module("luthi.sanctuary_interface")
         except ImportError as exc:
             raise ImportError(
-                "Could not import luthi.sanctuary_interface. Either install "
-                "the luthi package, or set ${_LUTHI_PATH_ENV} (or "
-                "LuthiModelConfig.luthi_path) to the LuthiModel checkout root."
+                f"Could not import luthi.sanctuary_interface. Either install "
+                f"the luthi package, or set the {_LUTHI_PATH_ENV} environment "
+                f"variable (or LuthiModelConfig.luthi_path) to the LuthiModel "
+                f"checkout root."
             ) from exc
 
     # ------------------------------------------------------------------
@@ -317,11 +321,28 @@ class LuthiModel:
             # 3. Format input as text
             prompt = self._format_input(cognitive_input)
 
+            # 3b. Encode any sensory percepts (audio waveform / image tensor)
+            #     so they ride into generation as cross-modal context, not
+            #     just as text descriptions in the prompt. Dual path: the
+            #     tensor flows to the trunk via the encoder; the text
+            #     description still seeds the prompt for cognitive context.
+            audio_tokens, vision_tokens = self._encode_sensory_percepts(
+                cognitive_input
+            )
+
             # 4. Generate inner speech (living inference)
-            inner_speech = self._generate_inner_speech(prompt)
+            inner_speech = self._generate_inner_speech(
+                prompt,
+                audio_tokens=audio_tokens,
+                vision_tokens=vision_tokens,
+            )
 
             # 5. Generate external speech if warranted
-            external_speech = self._generate_external_speech(cognitive_input)
+            external_speech = self._generate_external_speech(
+                cognitive_input,
+                audio_tokens=audio_tokens,
+                vision_tokens=vision_tokens,
+            )
 
         finally:
             # 6. Always restore base parameters after CfC modulation
@@ -401,14 +422,74 @@ class LuthiModel:
     # Generation
     # ------------------------------------------------------------------
 
-    def _generate_inner_speech(self, prompt: str) -> str:
+    def _encode_sensory_percepts(
+        self, ci: CognitiveInput
+    ) -> tuple[Optional["torch.Tensor"], Optional["torch.Tensor"]]:
+        """Encode any tensor-bearing percepts into model-ready tokens.
+
+        Returns ``(audio_tokens, vision_tokens)`` — at most one is non-None,
+        respecting the 1024d/seq_len=128 context-window constraint that
+        forbids routing more than one sensory modality per cycle. When both
+        modalities arrive in the same cycle, vision wins (denser semantic
+        content per token). The 4096d model in Track 3 will lift this limit.
+
+        The model is required to be a multimodal variant (with both encoders)
+        for any encoding to happen. Non-multimodal models silently return
+        ``(None, None)`` — text-only fallback.
+        """
+        if not (
+            hasattr(self.model, "audio_encoder")
+            and hasattr(self.model, "vision_encoder")
+        ):
+            return None, None
+
+        from luthi.sanctuary_interface import encode_audio, encode_vision
+
+        vision_percept = None
+        audio_percept = None
+        for percept in ci.new_percepts:
+            if percept.tensor_data is None:
+                continue
+            if percept.modality == "visual" and vision_percept is None:
+                vision_percept = percept
+            elif percept.modality == "audio" and audio_percept is None:
+                audio_percept = percept
+
+        if vision_percept is not None:
+            image = vision_percept.tensor_data
+            if image.dim() == 3:
+                image = image.unsqueeze(0)
+            image = image.to(self.device)
+            return None, encode_vision(self.model, image)
+
+        if audio_percept is not None:
+            waveform = audio_percept.tensor_data
+            if waveform.dim() == 1:
+                waveform = waveform.unsqueeze(0)
+            waveform = waveform.to(self.device)
+            return encode_audio(self.model, waveform), None
+
+        return None, None
+
+    def _generate_inner_speech(
+        self,
+        prompt: str,
+        *,
+        audio_tokens: Optional["torch.Tensor"] = None,
+        vision_tokens: Optional["torch.Tensor"] = None,
+    ) -> str:
         """Generate the entity's private inner thought.
 
         Uses autoregressive decoding with the living weight model.
         In living mode, Hebbian self-modification fires during each
         forward pass — the model changes from the act of thinking.
+
+        Optional pre-encoded ``audio_tokens`` / ``vision_tokens`` route
+        sensory context into the trunk on the first forward step, so
+        the entity's first generated token is conditioned on the actual
+        sensory channel rather than only the text description.
         """
-        from luthi.sanctuary_interface import generate as generate_text
+        from luthi.sanctuary_interface import generate_with_context
 
         max_seq_len = self.model_config.get("seq_len", 128)
 
@@ -419,11 +500,13 @@ class LuthiModel:
         prompt_token_ids = self.tokenizer.encode(prompt)
         prompt_token_count = len(prompt_token_ids)
 
-        full_text = generate_text(
+        full_text = generate_with_context(
             model=self.model,
             tokenizer=self.tokenizer,
             prompt=prompt,
             max_tokens=self.config.max_inner_tokens,
+            audio_tokens=audio_tokens,
+            vision_tokens=vision_tokens,
             temperature=self.config.temperature,
             top_k=self.config.top_k,
             top_p=self.config.top_p,
@@ -445,7 +528,11 @@ class LuthiModel:
         return generated if generated else f"[cycle {self.cycle_count}]"
 
     def _generate_external_speech(
-        self, ci: CognitiveInput
+        self,
+        ci: CognitiveInput,
+        *,
+        audio_tokens: Optional["torch.Tensor"] = None,
+        vision_tokens: Optional["torch.Tensor"] = None,
     ) -> Optional[str]:
         """Generate a directed response when the entity has something to say.
 
@@ -454,7 +541,10 @@ class LuthiModel:
         generates speech, it goes out.
 
         Uses a separate short generation pass with the response prompt,
-        in living mode so the act of responding changes the model.
+        in living mode so the act of responding changes the model. Any
+        sensory tokens encoded for this cycle are also routed into the
+        response so external speech is conditioned on the same channel
+        the inner thought was.
         """
         user_message = None
         user_source = "someone"
@@ -467,7 +557,7 @@ class LuthiModel:
         if user_message is None:
             return None
 
-        from luthi.generate import generate_text
+        from luthi.sanctuary_interface import generate_with_context
 
         response_prompt = f"{user_source} says: {user_message}\nI respond: "
         max_seq_len = self.model_config.get("seq_len", 128)
@@ -476,11 +566,13 @@ class LuthiModel:
         prompt_token_ids = self.tokenizer.encode(response_prompt)
         prompt_token_count = len(prompt_token_ids)
 
-        full_text = generate_text(
+        full_text = generate_with_context(
             model=self.model,
             tokenizer=self.tokenizer,
             prompt=response_prompt,
             max_tokens=self.config.max_external_tokens,
+            audio_tokens=audio_tokens,
+            vision_tokens=vision_tokens,
             temperature=self.config.temperature,
             top_k=self.config.top_k,
             top_p=self.config.top_p,
@@ -517,11 +609,16 @@ class LuthiModel:
     def _apply_cfc_modulation(self, signals: ExperientialSignals):
         """Modulate Luthi's living parameters based on CfC cell signals.
 
-        The affective system shapes cognition:
-        - Arousal scales the Hebbian learning rate
-          (more alert → faster learning)
-        - Precision adjusts spike thresholds
-          (more precise → fewer, more selective spikes)
+        The affective system shapes cognition through four independent channels:
+
+        - Arousal → Hebbian learning rate (more alert → faster learning)
+        - Precision → spike threshold (more precise → fewer, more selective)
+        - Valence → excitability bias (approach amplifies, withdrawal dampens)
+        - Attention → salience threshold (more attention → broader episodes)
+
+        Each channel maps to its naturally-corresponding living-weight parameter
+        rather than being composited into a single scalar — keeping the channels
+        independent makes effects observable per-cell and easier to debug.
 
         Modulation is per-cycle: the base snapshot taken at load time is
         restored after each think() call so modulation never accumulates.
@@ -532,6 +629,8 @@ class LuthiModel:
 
         arousal = signals.affect_arousal
         precision = signals.precision_weight
+        valence = signals.affect_valence
+        salience = signals.attention_salience
 
         # Arousal → Hebbian learning rate
         # Range: 0.5x (calm, arousal=0) to 2.0x (peak, arousal=1)
@@ -544,11 +643,24 @@ class LuthiModel:
         spike_threshold_scale = (
             (0.75 + 0.5 * precision) * self.config.precision_threshold_scale
         )
+        # Valence → excitability bias (additive, shifts sigmoid operating point)
+        # Range: ±0.1 at full saturation, scaled by config gain.
+        excitability_bias = (
+            valence * self.config.valence_excitability_scale * 0.1
+        )
+        # Attention → salience threshold (multiplicative)
+        # High salience = lower threshold = broader episode storage.
+        # Range: 0.5x (full attention) to 1.0x (no attention).
+        salience_threshold_scale = (
+            (1.0 - 0.5 * salience) * self.config.salience_threshold_scale
+        )
 
         apply_external_modulation(
             self.model,
             plasticity_scale=plasticity_scale,
             spike_threshold_scale=spike_threshold_scale,
+            excitability_bias=excitability_bias,
+            salience_threshold_scale=salience_threshold_scale,
         )
 
     # ------------------------------------------------------------------

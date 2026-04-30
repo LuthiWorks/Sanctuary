@@ -110,6 +110,8 @@ data/environment/
 data/chroma/
 data/introspection/
 data/identity/evolution/
+data/identity/awakening_record.json
+data/identity/values_history.jsonl
 
 # Test output and temporary files
 test_chain/

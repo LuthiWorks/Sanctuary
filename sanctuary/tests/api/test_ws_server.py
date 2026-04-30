@@ -292,3 +292,186 @@ class TestWebSocketConnection:
                     assert msg["type"] == "system"
         finally:
             await server.stop()
+
+
+# ---------------------------------------------------------------------------
+# Tests: /ws/world endpoint (Godot SanctuaryWorld bridge)
+# ---------------------------------------------------------------------------
+
+
+def _fake_cognitive_output(
+    inner: str = "thinking quietly",
+    external: Optional[str] = None,
+    felt: str = "calm",
+) -> CognitiveOutput:
+    from sanctuary.core.schema import EmotionalOutput
+
+    return CognitiveOutput(
+        inner_speech=inner,
+        external_speech=external,
+        emotional_state=EmotionalOutput(felt_quality=felt),
+    )
+
+
+class TestWorldWebSocket:
+    """The /ws/world endpoint serves the Godot SanctuaryWorld client."""
+
+    @pytest.mark.asyncio
+    async def test_world_connect_and_receive_hello(self, booted_runner):
+        """World client receives a connected status on connect."""
+        port = next_port()
+        server = SanctuaryWebServer(runner=booted_runner, port=port)
+        await server.start()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(
+                    f"http://localhost:{port}/ws/world"
+                ) as ws:
+                    msg = await asyncio.wait_for(ws.receive_json(), timeout=2.0)
+                    assert msg["type"] == "status"
+                    assert msg["status"] == "connected"
+                    assert server.world_client_count >= 1
+        finally:
+            await server.stop()
+
+    @pytest.mark.asyncio
+    async def test_world_state_broadcast(self, booted_runner):
+        """A CognitiveOutput drives a state_update on the world channel."""
+        port = next_port()
+        server = SanctuaryWebServer(runner=booted_runner, port=port)
+        await server.start()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(
+                    f"http://localhost:{port}/ws/world"
+                ) as ws:
+                    await asyncio.wait_for(ws.receive_json(), timeout=2.0)  # hello
+
+                    output = _fake_cognitive_output(
+                        inner="hello world", felt="curious"
+                    )
+                    await server._broadcast_world_state(output)
+
+                    msg = await asyncio.wait_for(ws.receive_json(), timeout=2.0)
+                    assert msg["type"] == "state_update"
+                    assert msg["inner_speech"] == "hello world"
+                    assert msg["felt_quality"] == "curious"
+                    assert "vad" in msg
+                    assert {"valence", "arousal", "dominance"} <= set(msg["vad"])
+                    assert "cycle" in msg
+                    assert "cycle_latency_ms" in msg
+        finally:
+            await server.stop()
+
+    @pytest.mark.asyncio
+    async def test_world_external_speech_is_separate_message(
+        self, booted_runner
+    ):
+        """external_speech goes out as its own message after state_update."""
+        port = next_port()
+        server = SanctuaryWebServer(runner=booted_runner, port=port)
+        await server.start()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(
+                    f"http://localhost:{port}/ws/world"
+                ) as ws:
+                    await asyncio.wait_for(ws.receive_json(), timeout=2.0)  # hello
+
+                    output = _fake_cognitive_output(external="Hello, world.")
+                    await server._broadcast_world_state(output)
+
+                    state = await asyncio.wait_for(ws.receive_json(), timeout=2.0)
+                    speech = await asyncio.wait_for(ws.receive_json(), timeout=2.0)
+                    assert state["type"] == "state_update"
+                    assert speech["type"] == "external_speech"
+                    assert speech["content"] == "Hello, world."
+        finally:
+            await server.stop()
+
+    @pytest.mark.asyncio
+    async def test_world_scene_state_injects_environment_percept(
+        self, booted_runner
+    ):
+        """Godot's scene_state report becomes an environment percept."""
+        port = next_port()
+        server = SanctuaryWebServer(runner=booted_runner, port=port)
+        await server.start()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(
+                    f"http://localhost:{port}/ws/world"
+                ) as ws:
+                    await asyncio.wait_for(ws.receive_json(), timeout=2.0)  # hello
+                    await ws.send_json({
+                        "type": "scene_state",
+                        "objects": [
+                            {"id": "obj_1", "type": "cube", "name": "Red Cube"},
+                            {"id": "obj_2", "type": "sphere", "name": "Blue Sphere"},
+                        ],
+                        "entity_position": [0.0, 1.0, 0.0],
+                    })
+                    await asyncio.sleep(0.1)
+                    percepts = await booted_runner.sensorium.drain_percepts()
+                    env = [p for p in percepts if p.modality == "environment"]
+                    assert env, "No environment percept was injected"
+                    content = env[0].content
+                    assert "2 object" in content
+                    assert "Red Cube" in content
+                    assert "I am at" in content
+        finally:
+            await server.stop()
+
+    @pytest.mark.asyncio
+    async def test_world_invalid_json_returns_error(self, booted_runner):
+        port = next_port()
+        server = SanctuaryWebServer(runner=booted_runner, port=port)
+        await server.start()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(
+                    f"http://localhost:{port}/ws/world"
+                ) as ws:
+                    await asyncio.wait_for(ws.receive_json(), timeout=2.0)  # hello
+                    await ws.send_str("not json")
+                    msg = await asyncio.wait_for(ws.receive_json(), timeout=2.0)
+                    assert msg["type"] == "error"
+        finally:
+            await server.stop()
+
+    @pytest.mark.asyncio
+    async def test_world_and_gui_channels_isolated(self, booted_runner):
+        """A state_update on /ws/world does NOT reach GUI clients on /ws."""
+        port = next_port()
+        server = SanctuaryWebServer(runner=booted_runner, port=port)
+        await server.start()
+        try:
+            async with aiohttp.ClientSession() as session:
+                gui = await session.ws_connect(f"http://localhost:{port}/ws")
+                world = await session.ws_connect(
+                    f"http://localhost:{port}/ws/world"
+                )
+                try:
+                    # Drain initial hellos.
+                    await asyncio.wait_for(gui.receive_json(), timeout=2.0)
+                    await asyncio.wait_for(gui.receive_json(), timeout=2.0)
+                    await asyncio.wait_for(world.receive_json(), timeout=2.0)
+
+                    output = _fake_cognitive_output(inner="quiet")
+                    await server._broadcast_world_state(output)
+
+                    # World gets the state_update.
+                    msg = await asyncio.wait_for(
+                        world.receive_json(), timeout=2.0
+                    )
+                    assert msg["type"] == "state_update"
+
+                    # GUI must not receive a state_update — only the inner
+                    # broadcast it already gets via on_output.
+                    with pytest.raises(asyncio.TimeoutError):
+                        await asyncio.wait_for(gui.receive_json(), timeout=0.3)
+                finally:
+                    await gui.close()
+                    await world.close()
+        finally:
+            await server.stop()

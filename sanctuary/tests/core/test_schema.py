@@ -26,6 +26,44 @@ from sanctuary.core.schema import (
 )
 
 
+class TestPercept:
+    """The Percept schema, including the optional tensor_data carrier."""
+
+    def test_default_tensor_data_is_none(self):
+        p = Percept(modality="language", content="hello")
+        assert p.tensor_data is None
+
+    def test_accepts_arbitrary_tensor_payload(self):
+        """``arbitrary_types_allowed`` is on so torch.Tensor flows through."""
+        torch = pytest.importorskip("torch")
+        waveform = torch.zeros(16000)
+        p = Percept(
+            modality="audio",
+            content="silence",
+            tensor_data=waveform,
+        )
+        assert p.tensor_data is waveform
+        assert p.tensor_data.shape == (16000,)
+
+    def test_tensor_data_is_excluded_from_dump(self):
+        """``exclude=True`` keeps the tensor out of serialized output."""
+        torch = pytest.importorskip("torch")
+        waveform = torch.zeros(8)
+        p = Percept(
+            modality="audio",
+            content="silence",
+            tensor_data=waveform,
+        )
+        dumped = p.model_dump()
+        assert "tensor_data" not in dumped, (
+            "tensor_data must be excluded from model_dump so percepts can "
+            "round-trip through JSON/logs without trying to serialize tensors"
+        )
+        # The text channel still serializes normally.
+        assert dumped["modality"] == "audio"
+        assert dumped["content"] == "silence"
+
+
 class TestCognitiveInput:
     def test_empty_input(self):
         """CognitiveInput with all defaults should be valid."""

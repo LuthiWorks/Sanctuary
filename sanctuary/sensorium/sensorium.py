@@ -127,6 +127,59 @@ class Sensorium:
         )
         self.inject_percept(percept)
 
+    def inject_audio(
+        self,
+        waveform,
+        description: str = "",
+        source: str = "audio",
+    ) -> None:
+        """Convenience: inject an audio percept with raw waveform.
+
+        The waveform is attached as ``tensor_data`` so the cognitive
+        adapter can route it through Luthi's audio encoder. The text
+        ``description`` (if any) populates the prompt-context channel
+        — keep it short, e.g. "background hum" or "speech detected".
+
+        Args:
+            waveform: ``torch.Tensor`` shaped ``[samples]`` or
+                ``[batch, samples]``, sampled at the model's expected
+                sample rate (16 kHz by default).
+            description: Optional short text description for the prompt.
+            source: Source label, default ``"audio"``.
+        """
+        percept = Percept(
+            modality="audio",
+            content=description,
+            source=source,
+            tensor_data=waveform,
+        )
+        self.inject_percept(percept)
+
+    def inject_image(
+        self,
+        image,
+        description: str = "",
+        source: str = "vision",
+    ) -> None:
+        """Convenience: inject a visual percept with raw image tensor.
+
+        The image is attached as ``tensor_data`` so the cognitive
+        adapter can route it through Luthi's vision encoder.
+
+        Args:
+            image: ``torch.Tensor`` shaped ``[3, H, W]`` or
+                ``[batch, 3, H, W]``, normalized as the model expects.
+            description: Optional short text description for the prompt.
+            source: Source label, default ``"vision"``.
+        """
+        percept = Percept(
+            modality="visual",
+            content=description,
+            source=source,
+            tensor_data=image,
+        )
+        self.inject_percept(percept)
+
     def inject_motor_feedback(
         self,
         action_type: str,

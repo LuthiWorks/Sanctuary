@@ -12,9 +12,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------------------------------------------------------------------------
@@ -23,13 +23,30 @@ from pydantic import BaseModel, Field
 
 
 class Percept(BaseModel):
-    """A single unit of sensory input."""
+    """A single unit of sensory input.
 
-    modality: str  # "language", "temporal", "sensor", "visual", etc.
+    The ``tensor_data`` field carries an optional raw tensor payload —
+    e.g. a 1-second audio waveform from a microphone, or a normalized
+    image from a camera. Sensory devices that produce raw signal attach
+    the tensor here so the cognitive adapter can route it through Luthi's
+    audio/vision encoders directly, preserving the actual sensory channel
+    rather than degrading it into a text description. The text ``content``
+    field still holds a description for the prompt context (dual path:
+    tensor for the trunk, text for the LLM-facing prompt).
+
+    ``tensor_data`` is excluded from serialization (``exclude=True``) so
+    Percepts that move through APIs/logs/JSON don't try to ship tensors
+    over the wire — the field is in-memory only.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    modality: str  # "language", "temporal", "sensor", "visual", "audio", etc.
     content: str
     source: str = ""
     embedding_summary: str = ""
     timestamp: datetime = Field(default_factory=datetime.now)
+    tensor_data: Optional[Any] = Field(default=None, exclude=True, repr=False)
 
 
 class PredictionError(BaseModel):
