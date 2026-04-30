@@ -1,40 +1,32 @@
 """Scaffold affect computation — the computed track of dual-track emotion.
 
 Maintains a VAD (Valence-Arousal-Dominance) state that decays toward baseline
-and responds to percepts and LLM emotional reports. This is the scaffold's
-"objective" emotional reading. The LLM's felt_quality is the experiential track.
+and responds to entity-reported emotional shifts. The CfC affect cell is the
+authoritative source of computed VAD; this module just smooths and persists.
 
-Divergence between computed VAD and felt quality is informative, not a bug.
+The LLM's felt_quality is the experiential track. Divergence between computed
+VAD and felt quality is informative, not a bug.
 
-When CfC cells are ready (Phase 8), this module delegates to the affect CfC cell
-instead of running heuristics.
+The keyword-matching heuristic (_POSITIVE_KW / _NEGATIVE_KW / _AROUSING_KW)
+that shifted VAD by scanning percept text was removed in the 2026-04-30
+cognition-leakage cleanup. Sanctuary doesn't infer the entity's emotion
+from words it sees; the entity reports its own shifts via
+CognitiveOutput.emotional_state.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from sanctuary.core.authority import AuthorityLevel, AuthorityManager
 from sanctuary.core.schema import (
     ComputedVAD,
     EmotionalOutput,
-    Percept,
 )
 
 logger = logging.getLogger(__name__)
-
-# Keywords used for simple percept-based affect updates
-_POSITIVE_KW = frozenset(
-    ["happy", "joy", "love", "great", "excellent", "wonderful", "thank", "good"]
-)
-_NEGATIVE_KW = frozenset(
-    ["sad", "angry", "fear", "bad", "terrible", "hate", "error", "fail", "wrong"]
-)
-_AROUSING_KW = frozenset(
-    ["urgent", "exciting", "crisis", "emergency", "surprise", "unexpected"]
-)
 
 
 @dataclass
@@ -45,15 +37,16 @@ class AffectConfig:
     baseline_arousal: float = 0.2
     baseline_dominance: float = 0.5
     decay_rate: float = 0.05  # Per cycle, toward baseline
-    sensitivity: float = 0.15  # How strongly percepts move VAD
     llm_blend_weight: float = 0.3  # How much LLM shifts blend when LLM_GUIDES
 
 
 class ScaffoldAffect:
-    """Simplified affect computation for the cognitive scaffold.
+    """Computed-VAD track storage for dual-track affect.
 
-    Maintains computed VAD, responds to percepts via keyword heuristics,
-    and merges LLM emotional output based on authority level.
+    Maintains computed VAD, decays toward baseline, and merges entity-
+    reported emotional shifts based on authority level. The keyword-
+    based percept scanning was removed in the 2026-04-30 cognition-
+    leakage cleanup.
     """
 
     def __init__(self, config: Optional[AffectConfig] = None):
@@ -71,29 +64,6 @@ class ScaffoldAffect:
             arousal=round(self.arousal, 3),
             dominance=round(self.dominance, 3),
         )
-
-    def update_from_percepts(self, percepts: list[Percept]) -> None:
-        """Shift VAD based on percept content (keyword heuristics)."""
-        dv, da, dd = 0.0, 0.0, 0.0
-
-        for p in percepts:
-            text = p.content.lower()
-            words = set(text.split())
-
-            if words & _POSITIVE_KW:
-                dv += 0.2
-                da += 0.1
-            if words & _NEGATIVE_KW:
-                dv -= 0.2
-                da += 0.15
-                dd -= 0.1
-            if words & _AROUSING_KW:
-                da += 0.3
-
-        s = self.config.sensitivity
-        self.valence = _clamp(self.valence + dv * s, -1.0, 1.0)
-        self.arousal = _clamp(self.arousal + da * s, 0.0, 1.0)
-        self.dominance = _clamp(self.dominance + dd * s, 0.0, 1.0)
 
     def merge_llm_emotion(
         self,

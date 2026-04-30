@@ -1,7 +1,7 @@
 """Integration test: CognitiveScaffold + PlaceholderModel + CognitiveCycle.
 
 Verifies that the full cognitive cycle works end-to-end with the scaffold
-providing validation, affect computation, communication gating, and signals.
+providing action validation, dual-track affect, goal storage, and signals.
 """
 
 import pytest
@@ -52,17 +52,6 @@ class TestScaffoldCycleIntegration:
         assert cycle.cycle_count == 2
 
     @pytest.mark.asyncio
-    async def test_affect_responds_to_percepts(self, cycle, scaffold):
-        """Injecting emotional percepts should affect the scaffold's VAD."""
-        initial_v = scaffold.affect.valence
-        cycle.inject_percept(
-            Percept(modality="language", content="wonderful great news", source="user:alice")
-        )
-        await cycle.run(max_cycles=1)
-        # Valence should have increased from positive percept
-        assert scaffold.affect.valence > initial_v
-
-    @pytest.mark.asyncio
     async def test_computed_vad_in_input(self, cycle, scaffold):
         """The scaffold's computed VAD should appear in the cognitive input."""
         scaffold.affect.valence = 0.7
@@ -73,27 +62,16 @@ class TestScaffoldCycleIntegration:
         assert cycle.last_output is not None
 
     @pytest.mark.asyncio
-    async def test_communication_gating_no_user(self, cycle, scaffold):
-        """Without user percepts, external speech should be gated."""
-        await cycle.run(max_cycles=1)
-        # PlaceholderModel generates external speech for language percepts,
-        # but without user input, the scaffold should gate it
-        output = cycle.last_output
-        # The placeholder generates no external speech without language percepts
-        # and even if it did, the scaffold would gate it without user input
-        assert output is not None
-
-    @pytest.mark.asyncio
-    async def test_communication_passes_with_user(self, cycle, scaffold):
-        """With user percept, external speech should pass through."""
+    async def test_external_speech_unchanged_by_scaffold(self, cycle, scaffold):
+        """external_speech flows through unchanged — no gating."""
         cycle.inject_percept(
             Percept(modality="language", content="Hello!", source="user:alice")
         )
         await cycle.run(max_cycles=1)
-        # PlaceholderModel generates external speech for language percepts
-        # and the scaffold should pass it (user input detected)
         output = cycle.last_output
         assert output is not None
+        # Whatever the model produces (None or string), the scaffold doesn't
+        # rewrite or null it.
 
     @pytest.mark.asyncio
     async def test_multiple_cycles_continuity(self, cycle, scaffold):
@@ -119,13 +97,10 @@ class TestScaffoldCycleIntegration:
         assert "active_count" in status
 
     @pytest.mark.asyncio
-    async def test_anomalies_reported_in_signals(self, cycle, scaffold):
-        """If the model produces anomalous output, signals should reflect it."""
-        # Run a cycle — placeholder produces clean output
+    async def test_signals_have_anomalies_field(self, cycle, scaffold):
+        """ScaffoldSignals.anomalies carries action-validator issues."""
         await cycle.run(max_cycles=1)
         signals = scaffold.get_signals()
-        # PlaceholderModel produces clean output, so no anomalies expected
-        # (but this verifies the signals path works)
         assert isinstance(signals.anomalies, list)
 
     @pytest.mark.asyncio

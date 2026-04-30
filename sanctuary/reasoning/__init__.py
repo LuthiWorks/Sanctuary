@@ -1,20 +1,16 @@
-"""Advanced reasoning subsystems for Phase 6.1.
+"""Reasoning storage subsystems.
 
-Four cognitive capabilities that deepen the mind's reasoning:
-- Counterfactual reasoning: "What if I had chosen differently?"
-- Belief revision: Detecting and resolving contradictions
-- Uncertainty quantification: Tracking confidence on beliefs and predictions
-- Mental simulation: Simulating outcomes before acting
+Light-weight storage for entity-driven reasoning records. The entity
+itself does the reasoning; this package just preserves what it produces.
+
+- ``CounterfactualReasoner``: stores DecisionPoints, outcomes, and
+  counterfactuals the entity records through its CognitiveOutput.
+  Methods that prompted the entity to reflect were removed in the
+  2026-04-30 cognition-leakage cleanup.
 """
 
 from sanctuary.reasoning.counterfactual import CounterfactualReasoner
-from sanctuary.reasoning.belief_revision import BeliefRevisionTracker
-from sanctuary.reasoning.uncertainty import UncertaintyQuantifier
-from sanctuary.reasoning.mental_simulation import MentalSimulator
 
 __all__ = [
     "CounterfactualReasoner",
-    "BeliefRevisionTracker",
-    "UncertaintyQuantifier",
-    "MentalSimulator",
 ]

@@ -68,8 +68,6 @@ class ScaffoldProtocol(Protocol):
 
     async def broadcast(self, output: CognitiveOutput) -> None: ...
 
-    def notify_percepts(self, percepts: list[Percept]) -> None: ...
-
     def get_computed_vad(self) -> ComputedVAD: ...
 
 
@@ -158,9 +156,6 @@ class NullScaffold:
         return ScaffoldSignals()
 
     async def broadcast(self, output: CognitiveOutput) -> None:
-        pass
-
-    def notify_percepts(self, percepts: list[Percept]) -> None:
         pass
 
     def get_computed_vad(self) -> ComputedVAD:
@@ -469,9 +464,6 @@ class CognitiveCycle:
         prediction_errors = self.sensorium.get_prediction_errors()
         temporal = self.sensorium.get_temporal_context()
         temporal.interactions_this_session = self.cycle_count
-
-        # Inform scaffold about percepts (updates affect, detects user input)
-        self.scaffold.notify_percepts(percepts)
 
         try:
             surfaced = await self.memory.surface(

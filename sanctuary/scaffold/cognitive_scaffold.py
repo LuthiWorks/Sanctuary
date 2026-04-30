@@ -1,18 +1,19 @@
 """CognitiveScaffold — the ScaffoldProtocol implementation.
 
-Orchestrates all scaffold subsystems to validate, integrate, and broadcast
-LLM cognitive output. This is the main entry point for Phase 2.
+Orchestrates the remaining scaffold subsystems to validate, integrate,
+and broadcast cognitive output.
 
 The scaffold's job:
-  1. Detect anomalies in LLM output
-  2. Validate actions based on authority levels
-  3. Gate external speech through communication system
-  4. Integrate goal proposals
-  5. Merge LLM emotional output with computed VAD (dual-track)
-  6. Report scaffold signals back to the LLM next cycle
-  7. Broadcast integrated output (GWT ignition)
+  1. Validate actions against authority levels
+  2. Record entity-driven goal proposals
+  3. Track dual-track emotion (computed VAD + LLM-reported felt quality)
+  4. Report scaffold signals back to the entity next cycle
+  5. Broadcast integrated output
 
 The scaffold does NOT do cognition. It validates, persists, and mediates.
+The 2026-04-30 cognition-leakage cleanup removed anomaly detection,
+communication gating, and auto-staleness inference — Sanctuary doesn't
+judge, gate, or infer on the entity's behalf.
 """
 
 from __future__ import annotations
@@ -23,14 +24,11 @@ from typing import Optional
 from sanctuary.core.authority import AuthorityManager
 from sanctuary.core.schema import (
     CognitiveOutput,
-    Percept,
     ScaffoldSignals,
 )
 
 from sanctuary.scaffold.affect import AffectConfig, ScaffoldAffect
-from sanctuary.scaffold.anomaly_detector import ScaffoldAnomalyDetector
 from sanctuary.scaffold.action_validator import ScaffoldActionValidator
-from sanctuary.scaffold.communication import CommunicationConfig, ScaffoldCommunication
 from sanctuary.scaffold.goal_integrator import ScaffoldGoalIntegrator
 
 logger = logging.getLogger(__name__)
@@ -49,16 +47,12 @@ class CognitiveScaffold:
     def __init__(
         self,
         affect_config: Optional[AffectConfig] = None,
-        communication_config: Optional[CommunicationConfig] = None,
         max_goals: int = 10,
     ):
         self.affect = ScaffoldAffect(affect_config)
-        self.communication = ScaffoldCommunication(communication_config)
         self.goals = ScaffoldGoalIntegrator(max_goals=max_goals)
-        self.anomaly_detector = ScaffoldAnomalyDetector()
         self.action_validator = ScaffoldActionValidator()
 
-        self._last_anomalies: list[str] = []
         self._last_validation_issues: list[str] = []
         self._broadcast_handlers: list = []
         self._cycle_count = 0
@@ -72,50 +66,34 @@ class CognitiveScaffold:
         output: CognitiveOutput,
         authority: AuthorityManager,
     ) -> CognitiveOutput:
-        """Validate and integrate LLM output with scaffold subsystems.
+        """Validate and integrate cognitive output with scaffold subsystems.
 
         Steps:
-        1. Anomaly detection (non-blocking — flags, doesn't stop)
-        2. Action validation (filters invalid ops based on authority)
-        3. Communication gating (controls external speech emission)
-        4. Goal integration (processes LLM goal proposals)
-        5. Affect merge (blends LLM emotional signals with computed VAD)
-        6. Goal tick (update staleness tracking)
+        1. Action validation (filters invalid ops based on authority)
+        2. Goal integration (records entity goal proposals)
+        3. Affect merge (blends entity-reported emotional shifts with computed VAD)
+        4. Affect decay toward baseline
+
+        external_speech flows through unchanged — the entity speaks when
+        it produces speech. Period.
 
         Returns the integrated (potentially modified) output.
         """
-        # 1. Anomaly detection
-        self._last_anomalies = self.anomaly_detector.check(output)
-
-        # 2. Validate actions
+        # 1. Validate actions
         output, self._last_validation_issues = self.action_validator.validate(
             output, authority
         )
 
-        # 3. Communication gating
-        has_user_percept = False  # Set by inject_percept_context
-        if hasattr(self, "_has_user_percept"):
-            has_user_percept = self._has_user_percept
-
-        gated_speech = self.communication.evaluate(
-            output.external_speech,
-            has_user_percept=has_user_percept,
-            authority=authority,
-        )
-        output.external_speech = gated_speech
-
-        # 4. Goal integration
+        # 2. Goal integration
         self.goals.integrate_proposals(output.goal_proposals, authority)
 
-        # 5. Affect: merge LLM emotional output with computed state
+        # 3. Affect: merge entity-reported emotional shifts with computed state
         self.affect.merge_llm_emotion(output.emotional_state, authority)
 
-        # 6. Goal tick + affect decay
-        self.goals.tick()
+        # 4. Affect decay
         self.affect.decay_toward_baseline()
 
         self._cycle_count += 1
-        self._has_user_percept = False  # Reset for next cycle
 
         return output
 
@@ -128,16 +106,10 @@ class CognitiveScaffold:
 
         These are terse, structured signals — not prose.
         """
-        # Combine anomalies and validation issues
-        all_anomalies = list(self._last_anomalies)
-        if self._last_validation_issues:
-            all_anomalies.extend(self._last_validation_issues)
-
         return ScaffoldSignals(
             attention_highlights=self._get_attention_highlights(),
-            communication_drives=self.communication.get_signal(),
             goal_status=self.goals.get_status(),
-            anomalies=all_anomalies,
+            anomalies=list(self._last_validation_issues),
         )
 
     # -----------------------------------------------------------------
@@ -168,21 +140,6 @@ class CognitiveScaffold:
         """
         self._broadcast_handlers.append(handler)
 
-    def notify_percepts(self, percepts: list[Percept]) -> None:
-        """Called by the cycle to inform scaffold about incoming percepts.
-
-        This allows the scaffold to:
-        - Update affect from percept content
-        - Detect user language percepts for communication gating
-        """
-        self.affect.update_from_percepts(percepts)
-
-        # Check if any percept is from a user (language modality)
-        self._has_user_percept = any(
-            p.modality == "language" and p.source.startswith("user")
-            for p in percepts
-        )
-
     def get_computed_vad(self):
         """Return the scaffold's current computed VAD."""
         return self.affect.get_computed_vad()
@@ -198,17 +155,6 @@ class CognitiveScaffold:
     def _get_attention_highlights(self) -> list[str]:
         """Generate attention highlights from scaffold state."""
         highlights: list[str] = []
-
-        # High anomaly rate
-        recent_count = self.anomaly_detector.get_recent_anomaly_count()
-        if recent_count > 5:
-            highlights.append(f"high anomaly rate ({recent_count} in last 5 cycles)")
-
-        # Stale goals
-        goal_status = self.goals.get_status()
-        for gid, info in goal_status.get("goals", {}).items():
-            if info.get("stale"):
-                highlights.append(f"stale goal: {info['description'][:50]}")
 
         # Emotional state
         label = self.affect.get_emotion_label()

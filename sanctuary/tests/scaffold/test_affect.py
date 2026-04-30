@@ -1,7 +1,7 @@
 """Tests for scaffold affect module."""
 
 from sanctuary.core.authority import AuthorityLevel, AuthorityManager
-from sanctuary.core.schema import EmotionalOutput, Percept
+from sanctuary.core.schema import EmotionalOutput
 from sanctuary.scaffold.affect import AffectConfig, ScaffoldAffect
 
 
@@ -26,46 +26,6 @@ class TestScaffoldAffect:
         assert vad.valence == 0.3
         assert vad.arousal == 0.5
         assert vad.dominance == 0.7
-
-    def test_positive_percept_increases_valence(self):
-        affect = ScaffoldAffect()
-        initial_v = affect.valence
-        percept = Percept(modality="language", content="That is great wonderful news")
-        affect.update_from_percepts([percept])
-        assert affect.valence > initial_v
-
-    def test_negative_percept_decreases_valence(self):
-        affect = ScaffoldAffect()
-        initial_v = affect.valence
-        percept = Percept(modality="language", content="This is terrible bad news")
-        affect.update_from_percepts([percept])
-        assert affect.valence < initial_v
-
-    def test_arousing_percept_increases_arousal(self):
-        affect = ScaffoldAffect()
-        initial_a = affect.arousal
-        percept = Percept(modality="language", content="urgent emergency crisis")
-        affect.update_from_percepts([percept])
-        assert affect.arousal > initial_a
-
-    def test_empty_percepts_no_change(self):
-        affect = ScaffoldAffect()
-        vad_before = affect.get_computed_vad()
-        affect.update_from_percepts([])
-        vad_after = affect.get_computed_vad()
-        assert vad_before == vad_after
-
-    def test_vad_clamped(self):
-        affect = ScaffoldAffect(AffectConfig(sensitivity=10.0))
-        # Many positive percepts
-        percepts = [
-            Percept(modality="language", content="wonderful great excellent love joy")
-            for _ in range(20)
-        ]
-        affect.update_from_percepts(percepts)
-        vad = affect.get_computed_vad()
-        assert vad.valence <= 1.0
-        assert vad.arousal <= 1.0
 
     def test_decay_toward_baseline(self):
         affect = ScaffoldAffect()

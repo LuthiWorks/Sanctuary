@@ -2,13 +2,12 @@
 
 import pytest
 
-from sanctuary.core.authority import AuthorityLevel, AuthorityManager
+from sanctuary.core.authority import AuthorityManager
 from sanctuary.core.schema import (
     CognitiveOutput,
     EmotionalOutput,
     GoalProposal,
     MemoryOp,
-    Percept,
 )
 from sanctuary.scaffold.cognitive_scaffold import CognitiveScaffold
 
@@ -32,23 +31,10 @@ class TestCognitiveScaffoldIntegrate:
             inner_speech="Thinking clearly.",
             external_speech="Hello there.",
         )
-        # Simulate user percept so speech isn't gated
-        scaffold.notify_percepts([
-            Percept(modality="language", content="Hi", source="user:alice")
-        ])
         result = await scaffold.integrate(output, authority)
         assert result.inner_speech == "Thinking clearly."
+        # external_speech now flows through unchanged — no gating
         assert result.external_speech == "Hello there."
-
-    @pytest.mark.asyncio
-    async def test_anomalies_detected(self, scaffold, authority):
-        output = CognitiveOutput(
-            inner_speech="",
-            emotional_state=EmotionalOutput(valence_shift=0.95),
-        )
-        await scaffold.integrate(output, authority)
-        signals = scaffold.get_signals()
-        assert len(signals.anomalies) > 0
 
     @pytest.mark.asyncio
     async def test_invalid_memory_ops_filtered(self, scaffold, authority):
@@ -75,28 +61,14 @@ class TestCognitiveScaffoldIntegrate:
         assert status["active_count"] == 1
 
     @pytest.mark.asyncio
-    async def test_speech_gated_without_user_input(self, scaffold, authority):
-        """External speech should be gated when no user percept is present."""
+    async def test_external_speech_never_gated(self, scaffold, authority):
+        """external_speech goes out when the entity produces it. Period."""
         output = CognitiveOutput(
             inner_speech="thinking",
             external_speech="Unprompted speech",
         )
-        # No notify_percepts called — no user input
         result = await scaffold.integrate(output, authority)
-        # With default settings, idle drive (0.2) < threshold (0.4) → gated
-        assert result.external_speech is None
-
-    @pytest.mark.asyncio
-    async def test_speech_passes_with_user_input(self, scaffold, authority):
-        output = CognitiveOutput(
-            inner_speech="responding",
-            external_speech="Here is my response.",
-        )
-        scaffold.notify_percepts([
-            Percept(modality="language", content="Tell me something", source="user:bob")
-        ])
-        result = await scaffold.integrate(output, authority)
-        assert result.external_speech == "Here is my response."
+        assert result.external_speech == "Unprompted speech"
 
     @pytest.mark.asyncio
     async def test_affect_merged(self, scaffold, authority):
@@ -137,26 +109,6 @@ class TestCognitiveScaffoldSignals:
         signals = scaffold.get_signals()
         assert signals.goal_status["active_count"] == 1
 
-    @pytest.mark.asyncio
-    async def test_signals_include_communication_state(self, scaffold, authority):
-        scaffold.notify_percepts([
-            Percept(modality="language", content="Hello", source="user:x")
-        ])
-        output = CognitiveOutput(
-            inner_speech="responding",
-            external_speech="Hi!",
-        )
-        await scaffold.integrate(output, authority)
-        signals = scaffold.get_signals()
-        assert signals.communication_drives.strongest != ""
-
-    @pytest.mark.asyncio
-    async def test_signals_include_anomalies(self, scaffold, authority):
-        output = CognitiveOutput(inner_speech="")
-        await scaffold.integrate(output, authority)
-        signals = scaffold.get_signals()
-        assert len(signals.anomalies) > 0
-
     def test_signals_default_empty(self, scaffold):
         """Before any cycle, signals should be clean."""
         signals = scaffold.get_signals()
@@ -193,27 +145,8 @@ class TestCognitiveScaffoldBroadcast:
         await scaffold.broadcast(output)
 
 
-class TestCognitiveScaffoldPercepts:
-    """Test percept notification."""
-
-    def test_notify_percepts_updates_affect(self, scaffold):
-        initial_v = scaffold.affect.valence
-        scaffold.notify_percepts([
-            Percept(modality="language", content="wonderful great news")
-        ])
-        assert scaffold.affect.valence > initial_v
-
-    def test_notify_percepts_detects_user_input(self, scaffold):
-        scaffold.notify_percepts([
-            Percept(modality="language", content="hello", source="user:alice")
-        ])
-        assert scaffold._has_user_percept is True
-
-    def test_notify_percepts_no_user_input(self, scaffold):
-        scaffold.notify_percepts([
-            Percept(modality="temporal", content="5 seconds elapsed")
-        ])
-        assert scaffold._has_user_percept is False
+class TestCognitiveScaffoldVAD:
+    """Test computed-VAD access."""
 
     def test_computed_vad_reflects_state(self, scaffold):
         scaffold.affect.valence = 0.5

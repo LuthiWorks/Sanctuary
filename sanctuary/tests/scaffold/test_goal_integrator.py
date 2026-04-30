@@ -110,32 +110,6 @@ class TestGoalIntegrator:
             )
         assert gi.get_status()["active_count"] == 3
 
-    def test_tick_increments_cycles(self):
-        gi = ScaffoldGoalIntegrator()
-        authority = AuthorityManager()
-        gi.integrate_proposals(
-            [GoalProposal(action="add", goal="Watch", priority=0.5)],
-            authority,
-        )
-        for _ in range(10):
-            gi.tick()
-        status = gi.get_status()
-        goal = list(status["goals"].values())[0]
-        assert goal["cycles_active"] == 10
-
-    def test_staleness_detection(self):
-        gi = ScaffoldGoalIntegrator()
-        authority = AuthorityManager()
-        gi.integrate_proposals(
-            [GoalProposal(action="add", goal="Stale goal", priority=0.5)],
-            authority,
-        )
-        for _ in range(31):
-            gi.tick()
-        status = gi.get_status()
-        goal = list(status["goals"].values())[0]
-        assert goal["stale"] is True
-
     def test_active_goal_descriptions(self):
         gi = ScaffoldGoalIntegrator()
         authority = AuthorityManager()
