@@ -45,11 +45,23 @@ Respond ONLY with a JSON object matching this exact schema:
   "attention_guidance": {"focus_on": ["..."], "deprioritize": ["..."]},
   "memory_ops": [{"type": "write_episodic|retrieve|write_semantic", "content": "...", "significance": 1-10, "tags": ["..."]}],
   "self_model_updates": {"current_state": "...", "new_uncertainty": "...", "prediction_accuracy_note": "..."},
-  "world_model_updates": {},
+  "world_model_updates": [
+    {"op": "add_entity", "name": "Alice", "properties": {"role": "visitor"}},
+    {"op": "add_relation", "source": "Alice", "type": "knows", "target": "Bob", "confidence": 0.9, "source_observation": "they greeted each other"},
+    {"op": "retract_relation", "source": "Alice", "type": "knows", "target": "Bob"},
+    {"op": "remove_entity", "name": "X"},
+    {"op": "update_property", "name": "Alice", "key": "mood", "value": "curious"}
+  ],
+  "world_model_queries": [
+    {"kind": "entity", "name": "Alice"},
+    {"kind": "relation", "type": "knows"},
+    {"kind": "neighborhood", "name": "Alice", "depth": 1}
+  ],
   "goal_proposals": [{"action": "add|complete|reprioritize|abandon", "goal": "...", "priority": 0.0-1.0}],
   "emotional_state": {"felt_quality": "...", "valence_shift": -1.0 to 1.0, "arousal_shift": -1.0 to 1.0},
   "growth_reflection": null
 }
+world_model_updates and world_model_queries are optional — empty arrays if you have no graph changes or questions this cycle. Query results return one cycle later in the next input.
 Do not include any text outside the JSON object. No markdown, no explanation."""
 
 
@@ -291,6 +303,43 @@ def format_prompt(
             )
         sections.append(f"=== SURFACED MEMORIES ===\n" + "\n".join(memories))
 
+    # World graph query results from the previous cycle
+    if cognitive_input.world_model_query_results:
+        result_lines = []
+        for r in cognitive_input.world_model_query_results[:10]:
+            q = r.query
+            q_kind = getattr(q, "kind", "?")
+            if not r.found:
+                result_lines.append(f"[{q_kind} query] not found")
+                continue
+            if q_kind == "entity":
+                ent = next(iter(r.entities.values()), None)
+                if ent is not None:
+                    rel_summary = ", ".join(
+                        f"{rel.type}->{rel.target}" for _, rel in r.relations[:5]
+                    )
+                    line = f"[entity {ent.name}] props={ent.properties}"
+                    if rel_summary:
+                        line += f" relations: {rel_summary}"
+                    result_lines.append(line)
+            elif q_kind == "relation":
+                pairs = ", ".join(
+                    f"{src}->{rel.target}" for src, rel in r.relations[:8]
+                )
+                result_lines.append(
+                    f"[relation '{getattr(q, 'type', '?')}'] {pairs}"
+                )
+            elif q_kind == "neighborhood":
+                names = sorted(r.entities.keys())
+                result_lines.append(
+                    f"[neighborhood {getattr(q, 'name', '?')} d={getattr(q, 'depth', '?')}] "
+                    f"{len(names)} entities: {', '.join(names[:8])}"
+                )
+        if result_lines:
+            sections.append(
+                "=== WORLD GRAPH RESULTS ===\n" + "\n".join(result_lines)
+            )
+
     # Self model
     sm = cognitive_input.self_model
     if sm.current_state:
@@ -467,10 +516,28 @@ def _dict_to_output(data: dict[str, Any], cycle_count: int) -> CognitiveOutput:
         prediction_accuracy_note=str(sm_data.get("prediction_accuracy_note", "")),
     )
 
-    # World model updates
-    world_model_updates = data.get("world_model_updates", {})
-    if not isinstance(world_model_updates, dict):
-        world_model_updates = {}
+    # World model updates — list of typed operations
+    world_model_updates = []
+    raw_updates = data.get("world_model_updates", [])
+    # Tolerate the legacy dict shape from older instructions: skip silently.
+    if isinstance(raw_updates, list):
+        for raw_op in raw_updates:
+            if not isinstance(raw_op, dict):
+                continue
+            op = _parse_world_op(raw_op)
+            if op is not None:
+                world_model_updates.append(op)
+
+    # World model queries
+    world_model_queries = []
+    raw_queries = data.get("world_model_queries", [])
+    if isinstance(raw_queries, list):
+        for raw_q in raw_queries:
+            if not isinstance(raw_q, dict):
+                continue
+            q = _parse_world_query(raw_q)
+            if q is not None:
+                world_model_queries.append(q)
 
     # Goal proposals
     goal_proposals = []
@@ -514,6 +581,7 @@ def _dict_to_output(data: dict[str, Any], cycle_count: int) -> CognitiveOutput:
         memory_ops=memory_ops,
         self_model_updates=self_model_updates,
         world_model_updates=world_model_updates,
+        world_model_queries=world_model_queries,
         goal_proposals=goal_proposals,
         emotional_state=emotional_state,
         growth_reflection=growth_reflection,
@@ -543,13 +611,65 @@ def _fallback_output(
         self_model_updates=SelfModelUpdate(
             current_state=f"recovery mode (cycle {cycle_count})",
         ),
-        world_model_updates={},
+        world_model_updates=[],
         goal_proposals=[],
         emotional_state=EmotionalOutput(
             felt_quality="uncertain — model output was unparseable",
         ),
         growth_reflection=None,
     )
+
+
+def _parse_world_op(raw: dict):
+    """Parse one entity-side world-graph operation; return None if unparseable.
+
+    Each operation type is identified by the ``op`` discriminator. Pydantic
+    validates the rest. Failures are silent — bad ops drop, good ones survive.
+    """
+    from sanctuary.core.schema import (
+        AddEntity,
+        AddRelation,
+        RetractRelation,
+        RemoveEntity,
+        UpdateProperty,
+    )
+
+    op_type = raw.get("op")
+    cls = {
+        "add_entity": AddEntity,
+        "add_relation": AddRelation,
+        "retract_relation": RetractRelation,
+        "remove_entity": RemoveEntity,
+        "update_property": UpdateProperty,
+    }.get(op_type)
+    if cls is None:
+        return None
+    try:
+        return cls.model_validate(raw)
+    except Exception:
+        return None
+
+
+def _parse_world_query(raw: dict):
+    """Parse one entity-side world-graph query; return None if unparseable."""
+    from sanctuary.core.schema import (
+        EntityQuery,
+        NeighborhoodQuery,
+        RelationQuery,
+    )
+
+    kind = raw.get("kind")
+    cls = {
+        "entity": EntityQuery,
+        "relation": RelationQuery,
+        "neighborhood": NeighborhoodQuery,
+    }.get(kind)
+    if cls is None:
+        return None
+    try:
+        return cls.model_validate(raw)
+    except Exception:
+        return None
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:

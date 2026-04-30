@@ -155,10 +155,10 @@ class TestFirstAwakeningInput:
         assert input_.emotional_state.computed.arousal == pytest.approx(0.3)
         assert input_.emotional_state.felt_quality == ""
 
-    def test_world_model_is_empty(self, loaded_charter, seed_values):
-        """World model should be empty — entity builds it."""
+    def test_world_query_results_empty(self, loaded_charter, seed_values):
+        """No prior queries on first awakening — entity builds the graph."""
         input_ = build_first_awakening(loaded_charter, seed_values)
-        assert len(input_.world_model.entities) == 0
+        assert input_.world_model_query_results == []
 
     def test_temporal_context_is_zero(self, loaded_charter, seed_values):
         """Temporal context should reflect the beginning."""

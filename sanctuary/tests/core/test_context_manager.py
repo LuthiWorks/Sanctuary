@@ -5,13 +5,14 @@ from sanctuary.core.context_manager import BudgetConfig, ContextManager
 from sanctuary.core.schema import (
     CognitiveInput,
     EmotionalInput,
+    EntityQuery,
     Percept,
     PreviousThought,
     ScaffoldSignals,
     SelfModel,
     SurfacedMemory,
-    WorldEntity,
-    WorldModel,
+    WorldGraphEntity,
+    WorldQueryResult,
 )
 
 
@@ -119,23 +120,30 @@ class TestContextManager:
         assert len(compressed.self_model.current_state) <= 200
         assert len(compressed.self_model.active_goals) <= 5
 
-    def test_world_model_entity_limit(self):
-        """World model with too many entities should be trimmed."""
-        config = BudgetConfig(world_model=100, chars_per_token=1)
+    def test_query_results_dropped_to_fit_budget(self):
+        """Many query results: oldest are dropped first to fit budget."""
+        config = BudgetConfig(world_model_query_results=80, chars_per_token=1)
         mgr = ContextManager(config)
 
-        entities = {
-            f"entity_{i}": WorldEntity(
-                name=f"entity_{i}",
-                properties={"data": "x" * 50},
+        # Each result carries the query plus a sizeable entity, putting any
+        # individual result well over a tight budget when concatenated.
+        results = [
+            WorldQueryResult(
+                query=EntityQuery(name=f"entity_{i}"),
+                found=True,
+                entities={
+                    f"entity_{i}": WorldGraphEntity(
+                        name=f"entity_{i}",
+                        properties={"data": "x" * 30},
+                    )
+                },
             )
-            for i in range(50)
-        }
-        ci = CognitiveInput(
-            world_model=WorldModel(entities=entities)
-        )
+            for i in range(20)
+        ]
+        ci = CognitiveInput(world_model_query_results=results)
         compressed = mgr.compress(ci)
-        assert len(compressed.world_model.entities) <= 10
+        # Should drop oldest first; at most a handful survive.
+        assert len(compressed.world_model_query_results) < len(results)
 
     def test_no_stats_before_compress(self):
         mgr = ContextManager()

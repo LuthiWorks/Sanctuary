@@ -117,6 +117,7 @@ class ScaffoldActionValidator:
         level = authority.level("world_model")
 
         if level == AuthorityLevel.SCAFFOLD_ONLY:
-            if output.world_model_updates:
+            if output.world_model_updates or output.world_model_queries:
                 issues.append("Filtered world model updates (authority: SCAFFOLD_ONLY)")
-                output.world_model_updates = {}
+                output.world_model_updates = []
+                output.world_model_queries = []

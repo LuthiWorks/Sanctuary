@@ -25,7 +25,6 @@ from sanctuary.core.schema import (
     SelfModel,
     SurfacedMemory,
     TemporalContext,
-    WorldModel,
 )
 from sanctuary.core.ollama_model import (
     OllamaModel,
@@ -223,7 +222,7 @@ class TestParseResponse:
                 }
             ],
             "self_model_updates": {"current_state": "processing"},
-            "world_model_updates": {},
+            "world_model_updates": [],
             "goal_proposals": [],
             "emotional_state": {
                 "felt_quality": "curious",
@@ -501,7 +500,7 @@ class TestCognitiveCycleIntegration:
             "attention_guidance": {"focus_on": [], "deprioritize": []},
             "memory_ops": [],
             "self_model_updates": {"current_state": "active"},
-            "world_model_updates": {},
+            "world_model_updates": [],
             "goal_proposals": [],
             "emotional_state": {"felt_quality": "stable", "valence_shift": 0.0, "arousal_shift": 0.0},
             "growth_reflection": None,

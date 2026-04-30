@@ -185,7 +185,7 @@ class PlaceholderModel:
             attention_guidance=attention_guidance,
             memory_ops=memory_ops,
             self_model_updates=self_model_updates,
-            world_model_updates={},
+            world_model_updates=[],
             goal_proposals=goal_proposals,
             emotional_state=emotional_state,
             growth_reflection=growth_reflection,

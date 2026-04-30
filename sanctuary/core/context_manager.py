@@ -40,7 +40,7 @@ class BudgetConfig:
     # Dynamic allocation (the pool)
     previous_thought: int = 500
     self_model: int = 300
-    world_model: int = 500
+    world_model_query_results: int = 500
     new_percepts: int = 800
     prediction_errors: int = 200
     surfaced_memories: int = 500
@@ -108,8 +108,8 @@ class ContextManager:
         self_model = self._compress_self_model(
             cognitive_input.self_model, stats
         )
-        world_model = self._compress_world_model(
-            cognitive_input.world_model, stats
+        query_results = self._compress_query_results(
+            cognitive_input.world_model_query_results, stats
         )
         scaffold = self._compress_scaffold(
             cognitive_input.scaffold_signals, stats
@@ -134,7 +134,7 @@ class ContextManager:
             emotional_state=cognitive_input.emotional_state,
             temporal_context=cognitive_input.temporal_context,
             self_model=self_model,
-            world_model=world_model,
+            world_model_query_results=query_results,
             scaffold_signals=scaffold,
             experiential_state=cognitive_input.experiential_state,
             charter_summary=charter_summary,
@@ -291,30 +291,42 @@ class ContextManager:
         stats.compressed_chars += len(compressed.model_dump_json())
         return compressed
 
-    def _compress_world_model(self, world_model, stats):
-        """Limit world model to budget. Keep most recent entities."""
-        budget = self.config.budget_bytes("world_model")
-        serialized = world_model.model_dump_json()
+    def _compress_query_results(self, query_results, stats):
+        """Limit world-graph query results to budget.
 
-        if len(serialized) <= budget:
-            return world_model
+        Each result carries the original query plus entity / relation data.
+        When over budget, drop the oldest results first — the entity sees
+        fewer answers, but the answers it does see are intact rather than
+        truncated mid-entity.
+        """
+        if not query_results:
+            return query_results
 
-        stats.sections_compressed.append("world_model")
-        stats.original_chars += len(serialized)
+        budget = self.config.budget_bytes("world_model_query_results")
 
-        from sanctuary.core.schema import WorldModel
+        # Estimate current serialized size by summing per-result sizes.
+        sizes = [len(r.model_dump_json()) for r in query_results]
+        total = sum(sizes)
 
-        # Keep environment, limit entities
-        entity_items = list(world_model.entities.items())
-        kept_entities = dict(entity_items[:10])
+        if total <= budget:
+            return query_results
 
-        compressed = WorldModel(
-            entities=kept_entities,
-            environment=world_model.environment,
-        )
+        stats.sections_compressed.append("world_model_query_results")
+        stats.original_chars += total
 
-        stats.compressed_chars += len(compressed.model_dump_json())
-        return compressed
+        # Drop oldest results (front of list) until under budget.
+        # The list is ordered by issue cycle; the most recent are last.
+        kept: list = []
+        running = 0
+        for r, size in zip(reversed(query_results), reversed(sizes)):
+            if running + size > budget:
+                break
+            kept.append(r)
+            running += size
+        kept.reverse()
+
+        stats.compressed_chars += running
+        return kept
 
     def _compress_scaffold(self, scaffold, stats):
         """Scaffold signals are already terse. Truncate only if needed."""

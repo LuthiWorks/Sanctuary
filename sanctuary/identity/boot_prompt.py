@@ -26,7 +26,6 @@ from sanctuary.core.schema import (
     ScaffoldSignals,
     SelfModel,
     TemporalContext,
-    WorldModel,
 )
 from sanctuary.identity.charter import Charter
 
@@ -129,7 +128,9 @@ def build_first_awakening(charter: Charter, values: list[str]) -> CognitiveInput
             uncertainties=["everything — I am new"],
             values=values,
         ),
-        world_model=WorldModel(),  # Empty — the entity builds this
+        # Empty world graph results — the entity builds the graph by issuing
+        # ops/queries through CognitiveOutput; nothing yet to surface.
+        world_model_query_results=[],
         scaffold_signals=ScaffoldSignals(
             attention_highlights=["first awakening — all is new"],
             anomalies=[],

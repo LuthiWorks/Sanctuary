@@ -1,36 +1,36 @@
 """Stream of thought — maintains experiential continuity between cycles.
 
-The LLM's output from cycle N becomes part of its input for cycle N+1.
+The entity's output from cycle N becomes part of its input for cycle N+1.
 This is the fundamental continuity mechanism. The scaffold never touches
 inner speech (authority level 3 from day one).
 
 The stream maintains:
 - Recent thought history (bounded)
 - Accumulated self-model (rewritten, not appended)
-- Accumulated world model (rewritten, not appended)
 - Current felt quality (from last cycle's emotional output)
 
-Aligned with PLAN.md: "The Graduated Awakening"
+The world graph used to live here too. After the 2026-04-30 typed-relation
+refactor, the WorldGraph is a separate storage class owned by the
+cognitive cycle (sanctuary/memory/world_graph.py). The entity drives all
+graph mutations and queries explicitly through CognitiveOutput; the
+stream no longer accumulates a parallel world model.
 """
 
 from __future__ import annotations
 
 from sanctuary.core.schema import (
     CognitiveOutput,
-    EmotionalOutput,
     PreviousThought,
     SelfModel,
-    WorldModel,
-    WorldEntity,
 )
 
 
 class StreamOfThought:
-    """Maintains the LLM's stream of thought between cognitive cycles.
+    """Maintains the entity's stream of thought between cognitive cycles.
 
-    History is bounded to prevent unbounded growth. The self-model and
-    world model are kept as living documents — rewritten each cycle
-    based on the LLM's updates, not appended.
+    History is bounded to prevent unbounded growth. The self-model is
+    kept as a living document — rewritten each cycle based on the
+    entity's updates, not appended.
     """
 
     def __init__(self, max_history: int = 10):
@@ -38,11 +38,10 @@ class StreamOfThought:
         self.max_history = max_history
         self._cycle_count = 0
         self._self_model = SelfModel()
-        self._world_model = WorldModel()
         self._felt_quality: str = ""
 
     def update(self, output: CognitiveOutput):
-        """Integrate the LLM's output into the stream.
+        """Integrate the entity's output into the stream.
 
         Called after every cycle. This is the point where one moment
         of thought flows into the next.
@@ -62,30 +61,8 @@ class StreamOfThought:
                 self._self_model.uncertainties.append(updates.new_uncertainty)
                 self._self_model.uncertainties = self._self_model.uncertainties[-5:]
             if updates.prediction_accuracy_note:
-                # Stored as recent_growth for now — the LLM can elaborate
+                # Stored as recent_growth for now — the entity can elaborate
                 self._self_model.recent_growth = updates.prediction_accuracy_note
-
-        # World model: merge updates
-        if output.world_model_updates:
-            for entity_name, updates in output.world_model_updates.items():
-                if entity_name in self._world_model.entities:
-                    # Update existing entity properties
-                    if isinstance(updates, dict):
-                        self._world_model.entities[entity_name].properties.update(
-                            updates
-                        )
-                else:
-                    # Add new entity
-                    props = updates if isinstance(updates, dict) else {}
-                    self._world_model.entities[entity_name] = WorldEntity(
-                        name=entity_name, properties=props
-                    )
-
-            # Keep world model bounded
-            if len(self._world_model.entities) > 50:
-                # Keep most recently updated (last 50)
-                items = list(self._world_model.entities.items())
-                self._world_model.entities = dict(items[-50:])
 
         # Felt quality: carry forward
         if output.emotional_state:
@@ -121,12 +98,8 @@ class StreamOfThought:
         """Get the current accumulated self-model."""
         return self._self_model
 
-    def get_world_model(self) -> WorldModel:
-        """Get the current accumulated world model."""
-        return self._world_model
-
     def get_felt_quality(self) -> str:
-        """Get the LLM's felt quality from the most recent cycle."""
+        """Get the entity's felt quality from the most recent cycle."""
         return self._felt_quality
 
     @property
