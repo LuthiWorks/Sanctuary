@@ -28,7 +28,6 @@ from sanctuary.core.schema import (
 )
 
 from sanctuary.scaffold.affect import AffectConfig, ScaffoldAffect
-from sanctuary.scaffold.anomaly_detector import ScaffoldAnomalyDetector
 from sanctuary.scaffold.action_validator import ScaffoldActionValidator
 from sanctuary.scaffold.communication import CommunicationConfig, ScaffoldCommunication
 from sanctuary.scaffold.goal_integrator import ScaffoldGoalIntegrator
@@ -55,10 +54,8 @@ class CognitiveScaffold:
         self.affect = ScaffoldAffect(affect_config)
         self.communication = ScaffoldCommunication(communication_config)
         self.goals = ScaffoldGoalIntegrator(max_goals=max_goals)
-        self.anomaly_detector = ScaffoldAnomalyDetector()
         self.action_validator = ScaffoldActionValidator()
 
-        self._last_anomalies: list[str] = []
         self._last_validation_issues: list[str] = []
         self._broadcast_handlers: list = []
         self._cycle_count = 0
@@ -75,19 +72,15 @@ class CognitiveScaffold:
         """Validate and integrate LLM output with scaffold subsystems.
 
         Steps:
-        1. Anomaly detection (non-blocking — flags, doesn't stop)
-        2. Action validation (filters invalid ops based on authority)
-        3. Communication gating (controls external speech emission)
-        4. Goal integration (processes LLM goal proposals)
-        5. Affect merge (blends LLM emotional signals with computed VAD)
-        6. Goal tick (update staleness tracking)
+        1. Action validation (filters invalid ops based on authority)
+        2. Communication gating (controls external speech emission)
+        3. Goal integration (processes LLM goal proposals)
+        4. Affect merge (blends LLM emotional signals with computed VAD)
+        5. Goal tick (update staleness tracking)
 
         Returns the integrated (potentially modified) output.
         """
-        # 1. Anomaly detection
-        self._last_anomalies = self.anomaly_detector.check(output)
-
-        # 2. Validate actions
+        # 1. Validate actions
         output, self._last_validation_issues = self.action_validator.validate(
             output, authority
         )
@@ -128,16 +121,11 @@ class CognitiveScaffold:
 
         These are terse, structured signals — not prose.
         """
-        # Combine anomalies and validation issues
-        all_anomalies = list(self._last_anomalies)
-        if self._last_validation_issues:
-            all_anomalies.extend(self._last_validation_issues)
-
         return ScaffoldSignals(
             attention_highlights=self._get_attention_highlights(),
             communication_drives=self.communication.get_signal(),
             goal_status=self.goals.get_status(),
-            anomalies=all_anomalies,
+            anomalies=list(self._last_validation_issues),
         )
 
     # -----------------------------------------------------------------
@@ -198,11 +186,6 @@ class CognitiveScaffold:
     def _get_attention_highlights(self) -> list[str]:
         """Generate attention highlights from scaffold state."""
         highlights: list[str] = []
-
-        # High anomaly rate
-        recent_count = self.anomaly_detector.get_recent_anomaly_count()
-        if recent_count > 5:
-            highlights.append(f"high anomaly rate ({recent_count} in last 5 cycles)")
 
         # Stale goals
         goal_status = self.goals.get_status()
