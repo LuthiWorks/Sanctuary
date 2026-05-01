@@ -3,7 +3,7 @@
 Implements MemoryProtocol from the cognitive cycle. Bridges:
   - Memory surfacing (context → relevant memories for CognitiveInput)
   - Memory writing (MemoryOps from CognitiveOutput → persistent storage)
-  - Journal (private LLM reflections)
+  - Journal (private the model reflections)
   - Prospective memory (future intentions)
 
 Operates with any store implementing a store()/recall() interface.
@@ -132,7 +132,7 @@ class MemorySubstrate:
         self._journal = Journal(config=self._config.journal)
         self._prospective = ProspectiveMemory(config=self._config.prospective)
 
-        # Retrieval queue: explicit retrieval requests from the LLM
+        # Retrieval queue: explicit retrieval requests from the entity
         self._retrieval_queue: list[str] = []
 
         self._cycle_count = 0
@@ -180,7 +180,7 @@ class MemorySubstrate:
         return memories
 
     async def queue_retrieval(self, query: str) -> None:
-        """Queue an explicit retrieval request from the LLM.
+        """Queue an explicit retrieval request from the entity.
 
         The retrieval will be executed on the next surface() call.
         """
@@ -196,7 +196,7 @@ class MemorySubstrate:
         ops: list[MemoryOp],
         emotional_tone: str = "",
     ) -> list[str]:
-        """Execute memory operations from the LLM's cognitive output.
+        """Execute memory operations from the entity's cognitive output.
 
         Called by the cognitive cycle after scaffold validation.
 

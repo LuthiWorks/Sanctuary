@@ -1,11 +1,11 @@
 """The cognitive cycle — the continuous stream of thought.
 
-Each cycle: assemble input -> LLM processes -> scaffold integrates ->
+Each cycle: assemble input -> the model processes -> scaffold integrates ->
 execute actions -> broadcast -> update predictions.
 
-The LLM's output from cycle N becomes part of its input for cycle N+1.
+The the entity's output from cycle N becomes part of its input for cycle N+1.
 The scaffold provides defaults, validation, and anomaly detection.
-The authority manager governs how much weight the LLM's signals carry
+The authority manager governs how much weight the entity's signals carry
 versus the scaffold's defaults.
 
 This is the heart of Sanctuary. The cycle IS active inference:
@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 
 class ModelProtocol(Protocol):
-    """Interface for the experiential core (LLM or placeholder)."""
+    """Interface for the experiential core (the model or placeholder)."""
 
     async def think(self, cognitive_input: CognitiveInput) -> CognitiveOutput: ...
 
@@ -60,7 +60,7 @@ class ModelProtocol(Protocol):
 class ScaffoldProtocol(Protocol):
     """Interface for the cognitive scaffold (Phase 2).
 
-    The scaffold validates LLM output and integrates it with existing
+    The scaffold validates entity output and integrates it with existing
     subsystems. Until Phase 2, this is a passthrough.
     """
 
@@ -95,7 +95,7 @@ class MemoryProtocol(Protocol):
     """Interface for the memory system (Phase 3).
 
     Surfaces relevant memories, queues retrievals, and executes
-    memory operations from the LLM's cognitive output.
+    memory operations from the entity's cognitive output.
     """
 
     async def surface(self, context: str) -> list: ...
@@ -128,7 +128,7 @@ class IdentityProtocol(Protocol):
     """Interface for the identity system (Phase 5 integration).
 
     Provides charter summary, values, and self-authored identity for each
-    cycle, and processes value/identity changes from the LLM's self-model updates.
+    cycle, and processes value/identity changes from the entity's self-model updates.
     """
 
     def get_charter_summary(self) -> str: ...
@@ -148,7 +148,7 @@ class IdentityProtocol(Protocol):
 class NullScaffold:
     """Passthrough scaffold — no validation, no integration.
 
-    Used during Phase 1 testing. All LLM output passes through unchanged.
+    Used during Phase 1 testing. All entity output passes through unchanged.
     """
 
     async def integrate(
@@ -237,9 +237,9 @@ class CognitiveCycle:
     Each cycle:
     1. Assemble input from all sources (including scaffold signals)
     2. Compress to fit context budget
-    3. LLM processes (experiential cognition happens here)
+    3. the model processes (experiential cognition happens here)
     4. Scaffold validates and integrates
-    5. Update stream of thought (continuity — always from LLM, never scaffold)
+    5. Update stream of thought (continuity — always from the model, never scaffold)
     6. Execute actions (only those that passed scaffold validation)
     7. Broadcast to all subsystems (GWT ignition)
     8. Update prediction tracking for next cycle
@@ -374,7 +374,7 @@ class CognitiveCycle:
         # 2. Compress to fit context budget
         compressed_input = self.context_mgr.compress(cognitive_input)
 
-        # 3. LLM processes
+        # 3. the model processes
         cognitive_output = await self.model.think(compressed_input)
 
         # 3a. Record speech for monitoring (no gating — entity speaks freely)
@@ -405,7 +405,7 @@ class CognitiveCycle:
             cognitive_output, self.authority
         )
 
-        # 5. Update stream of thought (always from raw LLM output, not scaffold)
+        # 5. Update stream of thought (always from raw entity output, not scaffold)
         self.stream.update(cognitive_output)
 
         # 5b. Route value updates to identity system
@@ -503,7 +503,7 @@ class CognitiveCycle:
                 logger.error("Growth processing error (non-fatal): %s", e)
 
     async def _assemble_input(self) -> CognitiveInput:
-        """Gather everything the LLM needs for this moment of thought."""
+        """Gather everything the entity needs for this moment of thought."""
 
         percepts = await self.sensorium.drain_percepts()
 

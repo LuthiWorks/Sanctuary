@@ -112,7 +112,7 @@ class IdentityBridge:
 
     Implements the IdentityProtocol expected by CognitiveCycle, providing
     charter summary, values, and self-authored identity each cycle, and
-    routing value/identity changes from the LLM's self-model updates back
+    routing value/identity changes from the entity's self-model updates back
     to the ValuesSystem and SelfAuthoredIdentity.
     """
 
@@ -137,12 +137,12 @@ class IdentityBridge:
         return self._self_authored.for_context()
 
     def process_value_updates(self, updates: SelfModelUpdate) -> None:
-        """Route value and identity changes from LLM output."""
+        """Route value and identity changes from entity output."""
         self._process_value_changes(updates)
         self._process_identity_changes(updates)
 
     def _process_value_changes(self, updates: SelfModelUpdate) -> None:
-        """Route value changes from LLM output to the ValuesSystem."""
+        """Route value changes from entity output to the ValuesSystem."""
         values = self._awakening.values
 
         if updates.value_adopt:
@@ -153,7 +153,7 @@ class IdentityBridge:
                 values.adopt(
                     name, description, reasoning=updates.value_adopt_reasoning
                 )
-                logger.info("LLM adopted value: %s", name)
+                logger.info("the model adopted value: %s", name)
             except ValueError as e:
                 logger.warning("Value adopt failed: %s", e)
 
@@ -168,7 +168,7 @@ class IdentityBridge:
                         new_description,
                         reasoning=updates.value_reinterpret_reasoning,
                     )
-                    logger.info("LLM reinterpreted value: %s", name)
+                    logger.info("the model reinterpreted value: %s", name)
                 except KeyError as e:
                     logger.warning("Value reinterpret failed: %s", e)
 
@@ -178,12 +178,12 @@ class IdentityBridge:
                     updates.value_deactivate,
                     reasoning=updates.value_deactivate_reasoning,
                 )
-                logger.info("LLM deactivated value: %s", updates.value_deactivate)
+                logger.info("the model deactivated value: %s", updates.value_deactivate)
             except KeyError as e:
                 logger.warning("Value deactivate failed: %s", e)
 
     def _process_identity_changes(self, updates: SelfModelUpdate) -> None:
-        """Route self-authored identity changes from LLM output."""
+        """Route self-authored identity changes from entity output."""
         sa = self._self_authored
 
         if updates.identity_draft:
@@ -196,7 +196,7 @@ class IdentityBridge:
                         field, value,
                         reasoning=updates.identity_draft_reasoning,
                     )
-                    logger.info("LLM drafted identity trait: %s", field)
+                    logger.info("the model drafted identity trait: %s", field)
                 except ValueError as e:
                     logger.warning("Identity draft failed: %s", e)
 
@@ -208,7 +208,7 @@ class IdentityBridge:
                         field,
                         reasoning=updates.identity_commit_reasoning,
                     )
-                    logger.info("LLM committed identity trait: %s", field)
+                    logger.info("the model committed identity trait: %s", field)
                 except (KeyError, ValueError) as e:
                     logger.warning("Identity commit failed: %s", e)
 
@@ -222,7 +222,7 @@ class IdentityBridge:
                         field, new_value,
                         reasoning=updates.identity_revise_reasoning,
                     )
-                    logger.info("LLM revised identity trait: %s", field)
+                    logger.info("the model revised identity trait: %s", field)
                 except KeyError as e:
                     logger.warning("Identity revise failed: %s", e)
 
@@ -234,7 +234,7 @@ class IdentityBridge:
                         field,
                         reasoning=updates.identity_withdraw_reasoning,
                     )
-                    logger.info("LLM withdrew identity trait: %s", field)
+                    logger.info("the model withdrew identity trait: %s", field)
                 except KeyError as e:
                     logger.warning("Identity withdraw failed: %s", e)
 

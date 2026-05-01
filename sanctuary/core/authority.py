@@ -1,14 +1,14 @@
 """Authority level management for the cognitive scaffold.
 
-Authority levels govern how much influence the LLM has over each cognitive
+Authority levels govern how much influence the entity has over each cognitive
 function relative to the Python scaffold. Each subsystem starts at a configured
 level and can be promoted/demoted independently.
 
 Levels:
-    0 — SCAFFOLD ONLY: Python decides. LLM is not consulted.
-    1 — LLM ADVISES: LLM output is one signal among many. Scaffold retains final say.
-    2 — LLM GUIDES: LLM is the primary signal. Scaffold validates and can veto.
-    3 — LLM CONTROLS: LLM has full authority. Scaffold only logs and monitors.
+    0 — SCAFFOLD ONLY: Python decides. the model is not consulted.
+    1 — the model ADVISES: entity output is one signal among many. Scaffold retains final say.
+    2 — the model GUIDES: the model is the primary signal. Scaffold validates and can veto.
+    3 — the model CONTROLS: the model has full authority. Scaffold only logs and monitors.
 
 Aligned with PLAN.md: "The Graduated Awakening"
 """
@@ -20,7 +20,7 @@ from typing import Optional
 
 
 class AuthorityLevel(IntEnum):
-    """Authority levels for LLM influence over a cognitive function."""
+    """Authority levels for the model influence over a cognitive function."""
 
     SCAFFOLD_ONLY = 0
     MODEL_ADVISES = 1
@@ -47,7 +47,7 @@ class AuthorityManager:
     """Manages per-subsystem authority levels.
 
     Authority is earned, not assumed. Each function starts at a conservative
-    level and can be promoted as the LLM demonstrates reliable behavior.
+    level and can be promoted as the entity demonstrates reliable behavior.
     All changes are logged for auditability.
     """
 
@@ -128,7 +128,7 @@ class AuthorityManager:
         return list(self._history)
 
     def model_has_authority(self, function: str, minimum: int = 1) -> bool:
-        """Check if the LLM has at least the given authority level."""
+        """Check if the entity has at least the given authority level."""
         return self.level(function) >= minimum
 
     def __repr__(self) -> str:

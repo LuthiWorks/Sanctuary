@@ -17,10 +17,10 @@ Fast plasticity vs medium plasticity:
 - CfC retraining (this module): ~50K params, trains in seconds on CPU,
   captures temporal dynamics from actual experience. Can run frequently.
 - QLoRA fine-tuning (qlora_updater.py): billions of params, trains in
-  minutes on GPU, modifies the LLM's world model. Runs rarely.
+  minutes on GPU, modifies the entity's world model. Runs rarely.
 
 The CfC cells are the experiential substrate — they feel the flow of
-time between LLM cycles. Retraining them from live data lets them
+time between model cycles. Retraining them from live data lets them
 incorporate patterns that only emerge during real interaction: the way
 arousal builds during extended conversation, how prediction errors cluster
 around novel topics, how attention drifts during idle periods.
@@ -356,7 +356,7 @@ class CfCRetrainer:
     """Retrains CfC cells from accumulated live interaction data.
 
     The retrainer is the fast-plasticity counterpart to the QLoRA updater.
-    While QLoRA modifies the LLM (medium plasticity, heavy computation),
+    While QLoRA modifies the entity (medium plasticity, heavy computation),
     the CfC retrainer modifies the experiential layer (fast plasticity,
     CPU-trainable in seconds).
 

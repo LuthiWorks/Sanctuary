@@ -27,7 +27,7 @@ from sanctuary.core.schema import (
 
 
 class PlaceholderModel:
-    """A mock model that produces valid CognitiveOutput without any LLM.
+    """A mock model that produces valid CognitiveOutput without any the model.
 
     Generates deterministic, schema-compliant responses for testing the
     cognitive cycle, scaffold integration, context compression, authority
@@ -41,7 +41,7 @@ class PlaceholderModel:
     async def think(self, cognitive_input: CognitiveInput) -> CognitiveOutput:
         """Process a cognitive input and return a valid output.
 
-        This is the same interface a real LLM client will implement.
+        This is the same interface a real the model client will implement.
         """
         self.cycle_count += 1
 

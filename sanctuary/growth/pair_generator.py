@@ -2,7 +2,7 @@
 
 This module bridges the gap between the entity's growth reflections (what it
 wants to learn) and the structured format required for QLoRA fine-tuning.
-The transformation is purely structural — no LLM generation happens here.
+The transformation is purely structural — no the model generation happens here.
 The entity has already expressed what it wants to learn; we simply format
 that expression into training-compatible pairs.
 

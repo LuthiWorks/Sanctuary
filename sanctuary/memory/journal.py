@@ -1,10 +1,10 @@
-"""Journal — the LLM's private, append-only journal.
+"""Journal — the entity's private, append-only journal.
 
-The journal stores the LLM's reflections, observations, and private thoughts.
+The journal stores the entity's reflections, observations, and private thoughts.
 Entries come from MemoryOp(type="journal") in CognitiveOutput. They are
 append-only (never modified or deleted) and persist as JSONL for crash safety.
 
-The journal is not chat logs — it is the LLM's own voice, written by its
+The journal is not chat logs — it is the entity's own voice, written by its
 own choice, about what it considers worth recording.
 """
 
@@ -76,7 +76,7 @@ class JournalConfig:
 
 
 class Journal:
-    """Append-only journal for the LLM's private reflections.
+    """Append-only journal for the entity's private reflections.
 
     Persists entries as JSONL (one JSON object per line) for crash safety.
     Each write is a single append — no rewriting the whole file.

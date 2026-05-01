@@ -12,7 +12,7 @@ to remember, the motor makes it persist. And in every case, the entity
 Design principles:
   - Every action produces a feedback percept (sensorimotor loop).
   - Speech output is handler-based — the motor emits, interfaces listen.
-  - The motor does not decide what to do. The LLM decides. The motor executes.
+  - The motor does not decide what to do. The entity decides. The motor executes.
   - Failure is also perceived — a failed action is still an experience.
 
 Aligned with PLAN.md Phase 3: Sensorium + Motor.

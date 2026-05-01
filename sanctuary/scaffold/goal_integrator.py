@@ -34,9 +34,9 @@ class TrackedGoal:
 
 
 class ScaffoldGoalIntegrator:
-    """Tracks goals and integrates LLM goal proposals.
+    """Tracks goals and integrates entity goal proposals.
 
-    Maintains a simple goal list. The LLM can propose adding, completing,
+    Maintains a simple goal list. The entity can propose adding, completing,
     reprioritizing, or abandoning goals. The scaffold applies these based
     on authority level.
     """
@@ -51,7 +51,7 @@ class ScaffoldGoalIntegrator:
         proposals: list[GoalProposal],
         authority: AuthorityManager,
     ) -> list[str]:
-        """Process LLM goal proposals. Returns list of actions taken."""
+        """Process entity goal proposals. Returns list of actions taken."""
         level = authority.level("goals")
         actions_taken: list[str] = []
 

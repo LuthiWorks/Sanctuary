@@ -4,7 +4,7 @@ Maintains a VAD (Valence-Arousal-Dominance) state that decays toward baseline
 and responds to entity-reported emotional shifts. The CfC affect cell is the
 authoritative source of computed VAD; this module just smooths and persists.
 
-The LLM's felt_quality is the experiential track. Divergence between computed
+The the entity's felt_quality is the experiential track. Divergence between computed
 VAD and felt quality is informative, not a bug.
 
 The keyword-matching heuristic (_POSITIVE_KW / _NEGATIVE_KW / _AROUSING_KW)
@@ -37,7 +37,7 @@ class AffectConfig:
     baseline_arousal: float = 0.2
     baseline_dominance: float = 0.5
     decay_rate: float = 0.05  # Per cycle, toward baseline
-    llm_blend_weight: float = 0.3  # How much LLM shifts blend when MODEL_GUIDES
+    llm_blend_weight: float = 0.3  # How much the model shifts blend when MODEL_GUIDES
 
 
 class ScaffoldAffect:
@@ -70,13 +70,13 @@ class ScaffoldAffect:
         emotion: EmotionalOutput,
         authority: AuthorityManager,
     ) -> None:
-        """Blend LLM's emotional self-report into computed VAD.
+        """Blend the entity's emotional self-report into computed VAD.
 
         The blend weight depends on the authority level for ``emotional_state``:
-        - SCAFFOLD_ONLY (0): ignore LLM shifts entirely
+        - SCAFFOLD_ONLY (0): ignore the model shifts entirely
         - MODEL_ADVISES (1): small blend (~10%)
         - MODEL_GUIDES (2): moderate blend (configured llm_blend_weight)
-        - MODEL_CONTROLS (3): LLM shifts applied fully
+        - MODEL_CONTROLS (3): the model shifts applied fully
         """
         level = authority.level("emotional_state")
 

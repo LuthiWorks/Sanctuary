@@ -89,7 +89,7 @@ class MultiPartyManager:
         # Check if we should respond
         should_respond, reason = mp.should_respond(current_cycle=10)
 
-        # Get context for the LLM
+        # Get context for the entity
         context = mp.get_conversation_context(n_turns=5)
     """
 
@@ -203,7 +203,7 @@ class MultiPartyManager:
         return False, "no trigger to respond"
 
     def get_conversation_context(self, n_turns: int = 10) -> str:
-        """Get recent conversation as formatted context for the LLM."""
+        """Get recent conversation as formatted context for the entity."""
         recent = list(self._turns)[-n_turns:]
         if not recent:
             return ""

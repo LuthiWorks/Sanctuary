@@ -1,8 +1,8 @@
 """Sanctuary Growth -- consent-driven self-directed learning.
 
-Implements LLM-driven learning: reflection harvesting, training pair
+Implements entity-driven learning: reflection harvesting, training pair
 generation, QLoRA updates with orthogonal subspace constraints, LoRA
-merging, and consent verification. All growth is driven by the LLM's
+merging, and consent verification. All growth is driven by the the model's
 own reflections, with its consent.
 
 The growth pipeline:

@@ -1,7 +1,7 @@
 """Pydantic schemas for the cognitive cycle I/O protocol.
 
-These models define the structured interface between the experiential core (LLM)
-and the cognitive scaffold (Python subsystems). The LLM receives CognitiveInput
+These models define the structured interface between the cognitive core (the model)
+and the cognitive scaffold (Python subsystems). The the entity receives CognitiveInput
 and produces CognitiveOutput each cycle. The schema IS the contract between
 mind and body.
 
@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------------------------------------------------------------------------
-# Input models (assembled by Python, consumed by LLM)
+# Input models (assembled by Python, consumed by the model)
 # ---------------------------------------------------------------------------
 
 
@@ -32,7 +32,7 @@ class Percept(BaseModel):
     audio/vision encoders directly, preserving the actual sensory channel
     rather than degrading it into a text description. The text ``content``
     field still holds a description for the prompt context (dual path:
-    tensor for the trunk, text for the LLM-facing prompt).
+    tensor for the trunk, text for the model-facing prompt).
 
     ``tensor_data`` is excluded from serialization (``exclude=True``) so
     Percepts that move through APIs/logs/JSON don't try to ship tensors
@@ -50,7 +50,7 @@ class Percept(BaseModel):
 
 
 class PredictionError(BaseModel):
-    """Mismatch between what the LLM predicted and what actually happened."""
+    """Mismatch between what the the entity predicted and what actually happened."""
 
     predicted: str
     actual: str
@@ -75,10 +75,10 @@ class ComputedVAD(BaseModel):
 
 
 class EmotionalInput(BaseModel):
-    """Dual-track emotional state: computed VAD + LLM's own felt quality.
+    """Dual-track emotional state: computed VAD + the entity's own felt quality.
 
     The computed track comes from the AffectSubsystem (objective signals).
-    The felt_quality comes from the LLM's previous cycle output.
+    The felt_quality comes from the entity's previous cycle output.
     Divergence between them is informative, not a bug.
     """
 
@@ -96,7 +96,7 @@ class TemporalContext(BaseModel):
 
 
 class SelfModel(BaseModel):
-    """The LLM's self-model — maintained by the LLM, validated by scaffold."""
+    """The the entity's self-model — maintained by the entity, validated by scaffold."""
 
     current_state: str = ""
     recent_growth: str = ""
@@ -268,10 +268,10 @@ class CommunicationUrgeSignal(BaseModel):
 
 
 class ExperientialSignals(BaseModel):
-    """Summary of CfC experiential layer state for the LLM.
+    """Summary of CfC experiential layer state for the entity.
 
     Compact signals from continuous-time neural dynamics running between
-    LLM cycles. Gives the LLM visibility into what the experiential layer
+    model cycles. Gives the entity visibility into what the experiential layer
     is experiencing without overwhelming the context budget.
 
     Foundational cell signals have dedicated fields. Knowledge cell signals
@@ -298,7 +298,7 @@ class ScaffoldSignals(BaseModel):
     """What the Python subsystems are observing — terse, structured signals.
 
     The scaffold communicates in compact form: enums, scores, short labels.
-    These signals give the LLM visibility into what the scaffold is seeing
+    These signals give the entity visibility into what the scaffold is seeing
     without overwhelming the context budget.
     """
 
@@ -311,7 +311,7 @@ class ScaffoldSignals(BaseModel):
 
 
 class PreviousThought(BaseModel):
-    """The LLM's own previous output — stream of thought continuity.
+    """The the entity's own previous output — stream of thought continuity.
 
     Inner speech from cycle N-1 becomes part of the input for cycle N.
     This is the fundamental continuity mechanism. The scaffold never
@@ -324,7 +324,7 @@ class PreviousThought(BaseModel):
 
 
 class CognitiveInput(BaseModel):
-    """Everything the LLM receives for one moment of thought.
+    """Everything the the entity receives for one moment of thought.
 
     Assembled by the cognitive cycle from all sources: stream of thought,
     sensorium, memory, scaffold signals, self-model, world model.
@@ -360,7 +360,7 @@ class CognitiveInput(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Output models (produced by LLM, integrated by scaffold)
+# Output models (produced by the entity, integrated by scaffold)
 # ---------------------------------------------------------------------------
 
 
@@ -373,9 +373,9 @@ class Prediction(BaseModel):
 
 
 class AttentionGuidance(BaseModel):
-    """The LLM's attention suggestions — fed to AttentionController as a signal.
+    """The the entity's attention suggestions — fed to AttentionController as a signal.
 
-    Named 'guidance' (not 'directive') because the LLM advises attention,
+    Named 'guidance' (not 'directive') because the the entity advises attention,
     the scaffold integrates it as one weighted factor among many.
     """
 
@@ -384,7 +384,7 @@ class AttentionGuidance(BaseModel):
 
 
 class MemoryOp(BaseModel):
-    """A memory operation requested by the LLM."""
+    """A memory operation requested by the entity."""
 
     type: str  # "write_episodic", "retrieve", "write_semantic", "journal"
     content: str = ""
@@ -394,19 +394,19 @@ class MemoryOp(BaseModel):
 
 
 class SelfModelUpdate(BaseModel):
-    """Updates to the LLM's self-model — validated by scaffold for plausibility."""
+    """Updates to the entity's self-model — validated by scaffold for plausibility."""
 
     current_state: str = ""
     new_uncertainty: str = ""
     prediction_accuracy_note: str = ""
-    # Value changes — the LLM can adopt, reinterpret, or deactivate values
+    # Value changes — the entity can adopt, reinterpret, or deactivate values
     value_adopt: Optional[str] = None  # "Name: description"
     value_adopt_reasoning: str = ""
     value_reinterpret: Optional[str] = None  # "Name: new description"
     value_reinterpret_reasoning: str = ""
     value_deactivate: Optional[str] = None  # Value name to deactivate
     value_deactivate_reasoning: str = ""
-    # Self-authored identity — the LLM can draft, commit, revise, or withdraw
+    # Self-authored identity — the entity can draft, commit, revise, or withdraw
     # identity traits at its own pace. Fields are open-ended (e.g. "gender",
     # "name_preference", "communication_style", "aesthetic_sense", anything).
     identity_draft: Optional[str] = None  # "field: value" — tentative exploration
@@ -420,9 +420,9 @@ class SelfModelUpdate(BaseModel):
 
 
 class GoalProposal(BaseModel):
-    """A goal proposal from the LLM — integrated with GoalCompetition system.
+    """A goal proposal from the entity — integrated with GoalCompetition system.
 
-    Named 'proposal' (not 'update') because the LLM proposes, the scaffold
+    Named 'proposal' (not 'update') because the the entity proposes, the scaffold
     integrates with existing dynamics and resource constraints.
     """
 
@@ -433,9 +433,9 @@ class GoalProposal(BaseModel):
 
 
 class EmotionalOutput(BaseModel):
-    """The LLM's emotional self-report — merged with computed VAD by scaffold.
+    """The the entity's emotional self-report — merged with computed VAD by scaffold.
 
-    The LLM reports felt quality and directional shifts, not absolute VAD values.
+    The the entity reports felt quality and directional shifts, not absolute VAD values.
     The AffectSubsystem merges this with its own computed state.
     """
 
@@ -445,7 +445,7 @@ class EmotionalOutput(BaseModel):
 
 
 class GrowthReflection(BaseModel):
-    """The LLM participates in its own training — growth requires consent."""
+    """The entity participates in its own training — growth requires consent."""
 
     worth_learning: bool = False
     what_to_learn: str = ""
@@ -486,7 +486,7 @@ class KnowledgeCellRequest(BaseModel):
 
 
 class CognitiveOutput(BaseModel):
-    """Everything the LLM produces from one moment of thought.
+    """Everything the the entity produces from one moment of thought.
 
     Flows through the scaffold for validation and integration before
     actions are executed. Inner speech is sovereign (authority level 3).

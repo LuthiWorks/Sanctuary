@@ -1,8 +1,8 @@
-"""Scaffold action validator — validates LLM-proposed actions based on authority.
+"""Scaffold action validator — validates entity-proposed actions based on authority.
 
 Checks memory operations, goal proposals, and other structured outputs for
 validity and applies authority-based filtering. Invalid operations are
-removed from the output; the LLM is notified via anomaly flags.
+removed from the output; the entity is notified via anomaly flags.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ _VALID_GOAL_ACTIONS = frozenset(["add", "complete", "reprioritize", "abandon"])
 
 
 class ScaffoldActionValidator:
-    """Validates and filters LLM output based on authority and basic rules."""
+    """Validates and filters entity output based on authority and basic rules."""
 
     def validate(
         self,

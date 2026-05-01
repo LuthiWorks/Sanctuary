@@ -4,7 +4,7 @@ The manager sits between the cognitive cycle and the individual CfC cells.
 Each cycle, it:
     1. Receives the current cognitive state (arousal, errors, etc.)
     2. Steps all CfC cells forward (evolving hidden states)
-    3. Returns a summary of experiential state for the LLM's input
+    3. Returns a summary of experiential state for the entity's input
 
 The manager uses a dynamic registry to track all cells — both foundational
 (precision, affect, attention, goal) and knowledge cells (acquired through
@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 class ExperientialState:
     """The experiential layer's output for one cognitive cycle.
 
-    This gets included in the LLM's CognitiveInput as a compact summary
+    This gets included in the entity's CognitiveInput as a compact summary
     of what the continuous-time cells are experiencing.
     """
 
@@ -343,7 +343,7 @@ class ExperientialManager:
     async def start_evolution(self, config: Optional[EvolutionConfig] = None):
         """Start the continuous evolution background loop.
 
-        CfC cells will evolve between LLM cycles at adaptive tick rates.
+        CfC cells will evolve between model cycles at adaptive tick rates.
         """
         if self._evolution_loop is not None and self._evolution_loop.running:
             return
@@ -362,7 +362,7 @@ class ExperientialManager:
             self._evolution_loop.feed_percept(event)
 
     def update_evolution_context(self, **kwargs):
-        """Update scaffold context for the evolution loop after each LLM cycle."""
+        """Update scaffold context for the evolution loop after each model cycle."""
         if self._evolution_loop is not None:
             self._evolution_loop.update_context(**kwargs)
 
