@@ -2,7 +2,7 @@
 
 Implements entity-driven learning: reflection harvesting, training pair
 generation, QLoRA updates with orthogonal subspace constraints, LoRA
-merging, and consent verification. All growth is driven by the the model's
+merging, and consent verification. All growth is driven by the model's
 own reflections, with its consent.
 
 The growth pipeline:

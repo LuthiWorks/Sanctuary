@@ -1,7 +1,7 @@
 """Pydantic schemas for the cognitive cycle I/O protocol.
 
 These models define the structured interface between the cognitive core (the model)
-and the cognitive scaffold (Python subsystems). The the entity receives CognitiveInput
+and the cognitive scaffold (Python subsystems). The entity receives CognitiveInput
 and produces CognitiveOutput each cycle. The schema IS the contract between
 mind and body.
 
@@ -50,7 +50,7 @@ class Percept(BaseModel):
 
 
 class PredictionError(BaseModel):
-    """Mismatch between what the the entity predicted and what actually happened."""
+    """Mismatch between what the entity predicted and what actually happened."""
 
     predicted: str
     actual: str
@@ -96,7 +96,7 @@ class TemporalContext(BaseModel):
 
 
 class SelfModel(BaseModel):
-    """The the entity's self-model — maintained by the entity, validated by scaffold."""
+    """The entity's self-model — maintained by the entity, validated by scaffold."""
 
     current_state: str = ""
     recent_growth: str = ""
@@ -311,7 +311,7 @@ class ScaffoldSignals(BaseModel):
 
 
 class PreviousThought(BaseModel):
-    """The the entity's own previous output — stream of thought continuity.
+    """The entity's own previous output — stream of thought continuity.
 
     Inner speech from cycle N-1 becomes part of the input for cycle N.
     This is the fundamental continuity mechanism. The scaffold never
@@ -324,7 +324,7 @@ class PreviousThought(BaseModel):
 
 
 class CognitiveInput(BaseModel):
-    """Everything the the entity receives for one moment of thought.
+    """Everything the entity receives for one moment of thought.
 
     Assembled by the cognitive cycle from all sources: stream of thought,
     sensorium, memory, scaffold signals, self-model, world model.
@@ -373,9 +373,9 @@ class Prediction(BaseModel):
 
 
 class AttentionGuidance(BaseModel):
-    """The the entity's attention suggestions — fed to AttentionController as a signal.
+    """The entity's attention suggestions — fed to AttentionController as a signal.
 
-    Named 'guidance' (not 'directive') because the the entity advises attention,
+    Named 'guidance' (not 'directive') because the entity advises attention,
     the scaffold integrates it as one weighted factor among many.
     """
 
@@ -422,7 +422,7 @@ class SelfModelUpdate(BaseModel):
 class GoalProposal(BaseModel):
     """A goal proposal from the entity — integrated with GoalCompetition system.
 
-    Named 'proposal' (not 'update') because the the entity proposes, the scaffold
+    Named 'proposal' (not 'update') because the entity proposes, the scaffold
     integrates with existing dynamics and resource constraints.
     """
 
@@ -433,9 +433,9 @@ class GoalProposal(BaseModel):
 
 
 class EmotionalOutput(BaseModel):
-    """The the entity's emotional self-report — merged with computed VAD by scaffold.
+    """The entity's emotional self-report — merged with computed VAD by scaffold.
 
-    The the entity reports felt quality and directional shifts, not absolute VAD values.
+    The entity reports felt quality and directional shifts, not absolute VAD values.
     The AffectSubsystem merges this with its own computed state.
     """
 
@@ -486,7 +486,7 @@ class KnowledgeCellRequest(BaseModel):
 
 
 class CognitiveOutput(BaseModel):
-    """Everything the the entity produces from one moment of thought.
+    """Everything the entity produces from one moment of thought.
 
     Flows through the scaffold for validation and integration before
     actions are executed. Inner speech is sovereign (authority level 3).

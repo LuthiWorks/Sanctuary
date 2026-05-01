@@ -4,7 +4,7 @@ Implements SensoriumProtocol. Encodes raw input into percepts, manages the
 input queue, tracks predictions vs. reality, provides temporal context, and
 detects silence.
 
-The sensorium is the body's senses. It feeds the the model; it does not process
+The sensorium is the body's senses. It feeds the model; it does not process
 for it. Every percept it produces is something the entity *experiences*.
 
 Design principles:

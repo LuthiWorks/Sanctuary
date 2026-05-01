@@ -4,7 +4,7 @@ Maintains a VAD (Valence-Arousal-Dominance) state that decays toward baseline
 and responds to entity-reported emotional shifts. The CfC affect cell is the
 authoritative source of computed VAD; this module just smooths and persists.
 
-The the entity's felt_quality is the experiential track. Divergence between computed
+The entity's felt_quality is the experiential track. Divergence between computed
 VAD and felt quality is informative, not a bug.
 
 The keyword-matching heuristic (_POSITIVE_KW / _NEGATIVE_KW / _AROUSING_KW)

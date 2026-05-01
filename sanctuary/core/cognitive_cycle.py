@@ -3,7 +3,7 @@
 Each cycle: assemble input -> the model processes -> scaffold integrates ->
 execute actions -> broadcast -> update predictions.
 
-The the entity's output from cycle N becomes part of its input for cycle N+1.
+The entity's output from cycle N becomes part of its input for cycle N+1.
 The scaffold provides defaults, validation, and anomaly detection.
 The authority manager governs how much weight the entity's signals carry
 versus the scaffold's defaults.
