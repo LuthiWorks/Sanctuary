@@ -1,6 +1,6 @@
 """Sanctuary Identity — Identity and values.
 
-Loads the charter and ethical values at boot. After boot, the LLM
+Loads the charter and ethical values at boot. After boot, the entity
 maintains its own identity — this module provides the initial seed
 and manages value evolution over the entity's lifetime.
 

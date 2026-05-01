@@ -168,7 +168,7 @@ class TestValueUpdates:
 
     @pytest.mark.asyncio
     async def test_value_adopt_via_output(self, runner_config):
-        """When the LLM outputs a value_adopt, it should reach the ValuesSystem."""
+        """When the entity outputs a value_adopt, it should reach the ValuesSystem."""
         runner = SanctuaryRunner(config=runner_config)
         await runner.boot()
 
@@ -193,7 +193,7 @@ class TestValueUpdates:
 
     @pytest.mark.asyncio
     async def test_value_reinterpret_via_output(self, runner_config):
-        """When the LLM reinterprets a value, ValuesSystem reflects the change."""
+        """When the entity reinterprets a value, ValuesSystem reflects the change."""
         runner = SanctuaryRunner(config=runner_config)
         await runner.boot()
 
@@ -217,7 +217,7 @@ class TestValueUpdates:
 
     @pytest.mark.asyncio
     async def test_value_deactivate_via_output(self, runner_config):
-        """When the LLM deactivates a value, it is marked inactive."""
+        """When the entity deactivates a value, it is marked inactive."""
         runner = SanctuaryRunner(config=runner_config)
         await runner.boot()
 

@@ -601,14 +601,14 @@ class TestMemorySubstratePartialFailure:
 
 
 # ============================================================
-# 5. Post-LLM interior crash paths in _cycle()
+# 5. Post-the model interior crash paths in _cycle()
 # ============================================================
 
 class TestCycleInteriorCrashPaths:
-    """Test that post-LLM operations don't kill the cycle.
+    """Test that post-the model operations don't kill the cycle.
 
     These tests mock _assemble_input to skip Pydantic construction,
-    focusing on the post-LLM error handling in _cycle().
+    focusing on the post-the model error handling in _cycle().
     """
 
     def _make_cycle(self):

@@ -132,7 +132,7 @@ class CounterfactualReasoner:
         confidence: float = 0.5,
         lesson: str = "",
     ) -> None:
-        """Record a generated counterfactual from the LLM's reflection."""
+        """Record a generated counterfactual from the entity's reflection."""
         cf = Counterfactual(
             decision_cycle=decision_cycle,
             alternative_action=alternative_action,

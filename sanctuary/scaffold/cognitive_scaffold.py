@@ -6,7 +6,7 @@ and broadcast cognitive output.
 The scaffold's job:
   1. Validate actions against authority levels
   2. Record entity-driven goal proposals
-  3. Track dual-track emotion (computed VAD + LLM-reported felt quality)
+  3. Track dual-track emotion (computed VAD + entity-reported felt quality)
   4. Report scaffold signals back to the entity next cycle
   5. Broadcast integrated output
 
@@ -102,7 +102,7 @@ class CognitiveScaffold:
     # -----------------------------------------------------------------
 
     def get_signals(self) -> ScaffoldSignals:
-        """Return scaffold observations for the LLM's next input.
+        """Return scaffold observations for the entity's next input.
 
         These are terse, structured signals — not prose.
         """

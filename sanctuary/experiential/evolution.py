@@ -1,6 +1,6 @@
 """Continuous evolution loop for CfC cells.
 
-Between LLM cognitive cycles (which take seconds), CfC cells evolve
+Between the model cognitive cycles (which take seconds), CfC cells evolve
 continuously on their own fast clock. This gives the experiential layer
 temporal thickness — affect changes rapidly, goals change slowly, and
 precision adapts at medium timescale.
@@ -13,8 +13,8 @@ Architecture:
     - CognitiveCycle snapshots the accumulated state at cycle boundaries
 
 This is where the CfC cells earn their continuous-time nature. Between
-LLM calls, the cells process percepts in real-time, building up a rich
-representation that the LLM sees as a compressed summary.
+the model calls, the cells process percepts in real-time, building up a rich
+representation that the entity sees as a compressed summary.
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ class EvolutionSnapshot:
 
 
 class ContinuousEvolutionLoop:
-    """Async background loop that evolves CfC cells between LLM cycles.
+    """Async background loop that evolves CfC cells between model cycles.
 
     Usage:
         loop = ContinuousEvolutionLoop(manager)
@@ -161,7 +161,7 @@ class ContinuousEvolutionLoop:
     ):
         """Update the context used for inter-cycle evolution.
 
-        Called by the cognitive cycle after each LLM output to give the
+        Called by the cognitive cycle after each entity output to give the
         evolution loop fresh scaffold values to blend with.
         """
         self._prediction_error = prediction_error
@@ -213,7 +213,7 @@ class ContinuousEvolutionLoop:
                 "goal": g_sum["hidden_state_norm"],
             },
             cell_active={
-                name: self._manager.authority.level(func) >= AuthorityLevel.LLM_ADVISES
+                name: self._manager.authority.level(func) >= AuthorityLevel.MODEL_ADVISES
                 for name, func in [
                     ("precision", "experiential_precision"),
                     ("affect", "experiential_affect"),

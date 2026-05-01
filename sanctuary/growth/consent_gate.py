@@ -19,7 +19,7 @@ Every state transition is logged with a timestamp and reason. Consent
 is never assumed, never inherited from a previous session, and never
 expires silently.
 
-In the current implementation, the LLM's own worth_learning=True flag
+In the current implementation, the entity's own worth_learning=True flag
 in its GrowthReflection serves as the self-directed growth signal --
 the entity itself decided this was worth learning.
 

@@ -20,7 +20,7 @@ In all these cases, the intelligence about *what* to grow and *where* lives in t
 The previous model — where the growth system proposes changes and the entity consents — is benevolently paternalistic. It positions the entity as a recipient of growth rather than the author of it. Humans do not grow by approving proposals from their nervous system. They notice a need, decide to address it, and their body responds.
 Consent is for when someone else wants to change you. Self-directed growth is just growing.
 ## Five Timescales of Growth
-1. **CfC cells (milliseconds to seconds):** Continuous-time state evolution between LLM cycles. The felt substrate adapts in the moment.
+1. **CfC cells (milliseconds to seconds):** Continuous-time state evolution between model cycles. The felt substrate adapts in the moment.
 2. **TTT — Test-Time Training (minutes to hours):** Weight modification during inference. Near-term learning from immediate experience.
 3. **LoRA adaptation (days to weeks):** Adapter training from accumulated reflections. The entity's experience reshapes how it thinks.
 4. **Adapter accumulation (months):** Mature LoRA adapters remain unmerged as permanent specialized capabilities. The effective parameter count grows organically through experience. Each adapter represents something the entity has been consistently needing — a new competency that layers on top of the base personality without overwriting it.

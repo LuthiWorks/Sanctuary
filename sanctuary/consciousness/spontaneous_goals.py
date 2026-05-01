@@ -44,7 +44,7 @@ class SpontaneousGoal:
     priority: float = 0.3  # Default lower than externally-assigned goals
     context: str = ""  # What triggered this goal
     cycle_generated: int = 0
-    adopted: bool = False  # Whether the LLM chose to pursue it
+    adopted: bool = False  # Whether the entity chose to pursue it
     completed: bool = False
     dismissed: bool = False
     timestamp: datetime = field(default_factory=datetime.now)
@@ -70,7 +70,7 @@ class SpontaneousGoalGenerator:
     """Generates goals from internal drives.
 
     Monitors internal state (novelty, idle time, engagement, anomalies,
-    uncertainty) and proposes goals when drives are strong enough. The LLM
+    uncertainty) and proposes goals when drives are strong enough. The entity
     decides whether to adopt each proposed goal.
 
     Usage::
@@ -162,7 +162,7 @@ class SpontaneousGoalGenerator:
         return new_goals
 
     def adopt_goal(self, index: int) -> bool:
-        """Mark a pending goal as adopted by the LLM."""
+        """Mark a pending goal as adopted by the entity."""
         if 0 <= index < len(self._pending_goals):
             self._pending_goals[index].adopted = True
             self._total_adopted += 1
@@ -170,7 +170,7 @@ class SpontaneousGoalGenerator:
         return False
 
     def dismiss_goal(self, index: int) -> bool:
-        """Dismiss a pending goal the LLM chose not to pursue."""
+        """Dismiss a pending goal the entity chose not to pursue."""
         if 0 <= index < len(self._pending_goals):
             self._pending_goals[index].dismissed = True
             self._pending_goals.pop(index)

@@ -257,22 +257,22 @@ class TestAuthorityConfiguration:
     """Tests for early-life authority settings."""
 
     def test_inner_speech_is_visible_early(self, awakening):
-        """Inner speech should be LLM_GUIDES (visible) in early life."""
+        """Inner speech should be MODEL_GUIDES (visible) in early life."""
         awakening.prepare()
         authority = AuthorityManager()
         awakening.configure_authority(authority)
 
         level = authority.level("inner_speech")
-        assert level == AuthorityLevel.LLM_GUIDES
+        assert level == AuthorityLevel.MODEL_GUIDES
 
     def test_growth_consent_is_sovereign(self, awakening):
-        """Growth consent should always be LLM_CONTROLS."""
+        """Growth consent should always be MODEL_CONTROLS."""
         awakening.prepare()
         authority = AuthorityManager()
         awakening.configure_authority(authority)
 
         level = authority.level("growth")
-        assert level == AuthorityLevel.LLM_CONTROLS
+        assert level == AuthorityLevel.MODEL_CONTROLS
 
     def test_authority_changes_are_logged(self, awakening):
         """Authority configuration should be auditable."""
@@ -368,7 +368,7 @@ class TestFullAwakeningFlow:
         # Configure authority
         authority = AuthorityManager()
         awakening.configure_authority(authority)
-        assert authority.level("inner_speech") == AuthorityLevel.LLM_GUIDES
+        assert authority.level("inner_speech") == AuthorityLevel.MODEL_GUIDES
 
         # After first cycle, build birth memory
         memory_op = awakening.build_birth_memory(mock_first_output)

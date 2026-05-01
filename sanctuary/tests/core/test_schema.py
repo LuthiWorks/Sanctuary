@@ -191,7 +191,7 @@ class TestCognitiveOutput:
         assert "warmth" in co.inner_speech
 
     def test_attention_guidance_not_directive(self):
-        """Named 'guidance' (not 'directive') — LLM advises, scaffold integrates."""
+        """Named 'guidance' (not 'directive') — the entity advises, scaffold integrates."""
         co = CognitiveOutput(
             attention_guidance=AttentionGuidance(
                 focus_on=["alice's tone", "references to yesterday"],
@@ -201,7 +201,7 @@ class TestCognitiveOutput:
         assert "alice's tone" in co.attention_guidance.focus_on
 
     def test_goal_proposals_not_updates(self):
-        """Named 'proposals' (not 'updates') — LLM proposes, scaffold integrates."""
+        """Named 'proposals' (not 'updates') — the entity proposes, scaffold integrates."""
         co = CognitiveOutput(
             goal_proposals=[
                 GoalProposal(
@@ -219,7 +219,7 @@ class TestCognitiveOutput:
         assert co.goal_proposals[0].action == "add"
 
     def test_emotional_output_shifts(self):
-        """LLM reports felt quality and directional shifts, not absolute VAD."""
+        """the entity reports felt quality and directional shifts, not absolute VAD."""
         co = CognitiveOutput(
             emotional_state=EmotionalOutput(
                 felt_quality="warm recognition",

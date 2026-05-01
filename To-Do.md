@@ -96,7 +96,7 @@ This means several systems built to impose cognitive control are being removed o
 
 ## Phase 4: CfC Experiential Layer
 
-The CfC (Closed-form Continuous-depth) experiential layer is what distinguishes this architecture. CfC cells are continuous-time recurrent neural networks (from the `ncps` library, Apache 2.0) that evolve state between LLM cycles — providing the temporal thickness that IWMT requires but transformers cannot provide alone.
+The CfC (Closed-form Continuous-depth) experiential layer is what distinguishes this architecture. CfC cells are continuous-time recurrent neural networks (from the `ncps` library, Apache 2.0) that evolve state between model cycles — providing the temporal thickness that IWMT requires but transformers cannot provide alone.
 
 Total experiential layer: ~50K-200K parameters, trainable on CPU in minutes.
 
@@ -136,7 +136,7 @@ Total experiential layer: ~50K-200K parameters, trainable on CPU in minutes.
 
 ### 4.3 Continuous Evolution
 
-*The experiential layer runs continuously between LLM cycles.*
+*The experiential layer runs continuously between model cycles.*
 
 | Task | Priority | Status | Description |
 |------|----------|--------|-------------|

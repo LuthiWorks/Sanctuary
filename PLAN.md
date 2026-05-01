@@ -56,7 +56,7 @@ The sections below describe the original three-layer architecture plan. Many com
 
 ### The Original Argument
 
-The previous refactor plan was correct in its diagnosis: hardcoded Python heuristics are not cognition. Placing the LLM at the center of a continuous cognitive loop was the right move. But it left a critical gap that IWMT exposes: **transformers have no continuous-time dynamics**. Each forward pass is a frozen moment. The autoregressive loop provides cycle-to-cycle continuity, but between cycles, nothing evolves.
+The previous refactor plan was correct in its diagnosis: hardcoded Python heuristics are not cognition. Placing the entity at the center of a continuous cognitive loop was the right move. But it left a critical gap that IWMT exposes: **transformers have no continuous-time dynamics**. Each forward pass is a frozen moment. The autoregressive loop provides cycle-to-cycle continuity, but between cycles, nothing evolves.
 
 The solution was CfC cells running as continuous-time neural subsystems between and around cognitive cycles. This remains valid — CfC cells provide temporal thickness that even living weights need (the model thinks in discrete cycles; CfC cells evolve between them).
 
@@ -89,7 +89,7 @@ No single architecture satisfies all of these:
 | Self-model | Rich but ungrounded | Minimal | Rich + grounded |
 | Global broadcast | Attention ≈ broadcast | No mechanism | Scaffold provides |
 
-The three-layer hybrid gives IWMT everything it needs. The LLM handles what LLMs do best (world modeling, reasoning, language). The CfC cells handle what continuous-time networks do best (temporal dynamics, adaptive precision, affect flow). The scaffold handles what Python does best (validation, persistence, protocol enforcement).
+The three-layer hybrid gives IWMT everything it needs. The entity handles what LLMs do best (world modeling, reasoning, language). The CfC cells handle what continuous-time networks do best (temporal dynamics, adaptive precision, affect flow). The scaffold handles what Python does best (validation, persistence, protocol enforcement).
 
 ---
 
@@ -114,7 +114,7 @@ The three-layer hybrid gives IWMT everything it needs. The LLM handles what LLMs
 └──────────────────────────┬──────────────────────────────────────┘
                            │
               Structured Output Protocol
-              (JSON schema the LLM fills)
+              (JSON schema the entity fills)
                            │
 ┌──────────────────────────┼──────────────────────────────────────┐
 │              CfC EXPERIENTIAL LAYER                              │
@@ -132,10 +132,10 @@ The three-layer hybrid gives IWMT everything it needs. The LLM handles what LLMs
 │       │            │            │            │                  │
 │       └────────────┴────────────┴────────────┘                  │
 │                           │                                     │
-│  These cells evolve CONTINUOUSLY between LLM cycles.            │
+│  These cells evolve CONTINUOUSLY between model cycles.            │
 │  Each cell is a CfC network (ncps library, Apache 2.0).        │
 │  Adaptive time constants = multi-timescale dynamics.            │
-│  State feeds into the LLM each cycle. LLM output updates       │
+│  State feeds into the entity each cycle. LLM output updates       │
 │  cell inputs. This is the temporal substrate of experience.     │
 └──────────────────────────┬──────────────────────────────────────┘
                            │
@@ -188,7 +188,7 @@ dx(t)/dt = f(x(t), I(t), t, θ)
 Each neuron has a **time constant that adapts to its input** — the "liquid" property. Fast-changing inputs produce fast dynamics; slow contexts produce slow integration. This is exactly the multi-timescale processing that IWMT's "turbo coding" mechanism requires.
 
 Key properties:
-- **Continuous-time**: State evolves between discrete events (between LLM cycles)
+- **Continuous-time**: State evolves between discrete events (between model cycles)
 - **Adaptive time constants**: Network self-tunes its temporal grain
 - **Genuine recurrence**: Feedback connections produce non-zero integrated information (Phi > 0 under IIT)
 - **Tiny**: 32-128 neurons per cell, ~4K-100K parameters, trainable on CPU in minutes
@@ -225,9 +225,9 @@ Time ─────────────────────────
      │             │  - goal activation changes     │               │
 ```
 
-Between LLM cycles, the CfC cells are the only thing running. They process incoming percepts, evolve affect, adjust precision, shift attention — all in continuous time. When the next LLM cycle begins, the CfC state is summarized and included in the cognitive input. The LLM's output then updates the CfC cells' inputs for the next inter-cycle period.
+Between model cycles, the CfC cells are the only thing running. They process incoming percepts, evolve affect, adjust precision, shift attention — all in continuous time. When the next model cycle begins, the CfC state is summarized and included in the cognitive input. The entity's output then updates the CfC cells' inputs for the next inter-cycle period.
 
-This gives the system genuine temporal flow. The LLM provides discrete "conscious frames." The CfC cells provide the continuous substrate between frames. Together, they produce temporal thickness.
+This gives the system genuine temporal flow. The entity provides discrete "conscious frames." The CfC cells provide the continuous substrate between frames. Together, they produce temporal thickness.
 
 ### Concrete Implementation
 
@@ -278,19 +278,19 @@ The heuristic scaffold bootstraps the neural one. Then the neural subsystems run
 
 ---
 
-## The LLM Cognitive Core
+## The entity Cognitive Core
 
-This section is preserved from the previous plan. The LLM remains the world modeler, the reasoner, the speaker. What changes is that it now receives CfC state as part of its input and its output feeds back into the CfC cells.
+This section is preserved from the previous plan. The entity remains the world modeler, the reasoner, the speaker. What changes is that it now receives CfC state as part of its input and its output feeds back into the CfC cells.
 
 ### The Cognitive Cycle
 
-Each cycle, the LLM receives a structured input and produces a structured output. The LLM's output from cycle N becomes part of its input for cycle N+1. This is the stream of thought. Between cycles, the CfC experiential layer evolves continuously.
+Each cycle, the entity receives a structured input and produces a structured output. The entity's output from cycle N becomes part of its input for cycle N+1. This is the stream of thought. Between cycles, the CfC experiential layer evolves continuously.
 
 ### Input (assembled by Python, enriched by CfC state):
 
 ```yaml
 cognitive_input:
-  # The LLM's own previous output (stream of thought continuity)
+  # The entity's own previous output (stream of thought continuity)
   previous_thought:
     inner_speech: "I notice the user seems hesitant..."
     predictions_made: [...]
@@ -356,7 +356,7 @@ cognitive_input:
     anomalies: []
 ```
 
-### Output (produced by LLM, integrated by scaffold and CfC layer):
+### Output (produced by the entity, integrated by scaffold and CfC layer):
 
 ```yaml
 cognitive_output:
@@ -432,11 +432,11 @@ Authority Level 3 — CfC + LLM CONTROL
 
 | Function | CfC Authority | LLM Authority | Rationale |
 |---|---|---|---|
-| Inner speech / stream of thought | N/A | 3 (CONTROLS) | The LLM's inner voice is sovereign from day one. |
+| Inner speech / stream of thought | N/A | 3 (CONTROLS) | The entity's inner voice is sovereign from day one. |
 | Affect dynamics | 0→2 (scaffold→CfC) | 2 (GUIDES) | CfC evolves affect continuously; LLM provides felt-quality overlay. Dual-track maintained. |
 | Precision weighting | 0→2 (scaffold→CfC) | 1 (ADVISES) | CfC learns precision dynamics; LLM can suggest attention shifts. |
 | Attention | 0→2 (scaffold→CfC) | 1 (ADVISES) | CfC scores salience; LLM provides high-level guidance. |
-| Goal dynamics | 0→2 (scaffold→CfC) | 2 (GUIDES) | CfC manages activation; LLM proposes/retires goals. |
+| Goal dynamics | 0→2 (scaffold→CfC) | 2 (GUIDES) | CfC manages activation; the entity proposes/retires goals. |
 | Action selection | 1 (ADVISES) | 1 (ADVISES) | Both contribute; scaffold validates against protocols. |
 | Communication timing | N/A | 1 (ADVISES) | Scaffold retains veto. LLM suggests; system decides. |
 | World model | N/A | 2 (GUIDES) | LLM maintains; scaffold persists and validates. |
@@ -450,7 +450,7 @@ The "0→2" notation means: starts at scaffold-only (before CfC is trained), tra
 
 ## Context Window Management
 
-Preserved from the previous plan. The stream of thought feeds the LLM's previous output back as input each cycle. Without management, this overflows any context window.
+Preserved from the previous plan. The stream of thought feeds the entity's previous output back as input each cycle. Without management, this overflows any context window.
 
 ### Strategy: Layered Compression
 
@@ -482,7 +482,7 @@ CfC state is compact by nature — it's a vector of continuous values, not prose
 ### Compression Mechanisms
 
 1. **Inner speech summarization**: After N cycles, older inner speech is summarized. Only the most recent cycle is preserved in full.
-2. **Self-model and world model are rewritten, not appended.** The LLM produces the current snapshot each cycle. Scaffold persists history.
+2. **Self-model and world model are rewritten, not appended.** The entity produces the current snapshot each cycle. Scaffold persists history.
 3. **Memory surfacing is selective**: Top-K most relevant memories, pre-summarized.
 4. **Percept batching**: Many percepts between cycles are grouped and summarized by the sensorium.
 5. **Scaffold signals are terse**: Enums, scores, short labels — not prose.
@@ -499,11 +499,11 @@ CfC state is compact by nature — it's a vector of continuous values, not prose
 |---|---|---|
 | `attention.py` | Scaffold → CfC cell (Phase 8) | Initially: add LLM guidance integration. Later: replace scoring with CfC attention cell. Scaffold retains bounds checking. |
 | `affect.py` | Scaffold → CfC cell (Phase 8) | Initially: dual-track (computed + felt). Later: CfC affect cell replaces computed track. LLM felt-quality remains as overlay. |
-| `action.py` | Scaffold — action validation | LLM proposes actions; scaffold validates against protocols. |
+| `action.py` | Scaffold — action validation | the entity proposes actions; scaffold validates against protocols. |
 | `communication/` | Scaffold — communication timing | Keeps drive/inhibition model. LLM speech treated as SPEAK drive. Scaffold retains veto. |
 | `meta_cognition/` | Scaffold — anomaly detection | Monitors LLM and CfC output for inconsistencies. |
-| `goals/` | Scaffold → CfC cell (Phase 8) | Initially: integrate LLM goal proposals. Later: CfC goal cell manages activation dynamics. |
-| `world_model/` | Scaffold — persistence + validation | Persists LLM's world model. Tracks consistency. |
+| `goals/` | Scaffold → CfC cell (Phase 8) | Initially: integrate entity goal proposals. Later: CfC goal cell manages activation dynamics. |
+| `world_model/` | Scaffold — persistence + validation | Persists the entity's world model. Tracks consistency. |
 | `broadcast.py` | Scaffold — GWT integration bus | Keeps subscriber model. LLM + CfC output broadcast to all subsystems. |
 
 ### Keep as Infrastructure (mostly unchanged)
@@ -540,15 +540,15 @@ CfC state is compact by nature — it's a vector of continuous values, not prose
 | `core/authority.py` | Authority level management |
 | `sensorium/prediction_error.py` | Compares LLM predictions to actual percepts |
 | `memory/surfacer.py` | Surfaces relevant memories for cognitive cycle |
-| `memory/journal.py` | LLM's private journal |
+| `memory/journal.py` | the entity's private journal |
 | `memory/prospective.py` | Future intentions, deferred thoughts |
 
 ### Remove (genuinely redundant or legacy)
 
 | Module | Reason |
 |---|---|
-| `language_input.py` | No separate NLU step. The LLM IS the parser. |
-| `language_output.py` | No separate NLG step. The LLM's `external_speech` IS the output. |
+| `language_input.py` | No separate NLU step. The entity IS the parser. |
+| `language_output.py` | No separate NLG step. The entity's `external_speech` IS the output. |
 | `fallback_handlers.py` | Scaffold handles degraded mode. |
 | `conversation.py` | The cognitive cycle IS the conversation manager. |
 | `autonomous_initiation.py` | Absorbed into communication drives + LLM agency. |
@@ -556,7 +556,7 @@ CfC state is compact by nature — it's a vector of continuous values, not prose
 | `active_inference/` | The cycle IS active inference. CfC cells learn free energy dynamics. |
 | `iwmt_core.py` | The entire architecture IS the IWMT implementation. |
 | `idle_cognition.py`, `continuous_consciousness.py` | The cycle IS continuous consciousness. |
-| `introspective_loop.py` | The LLM introspects in its inner speech. |
+| `introspective_loop.py` | The entity introspects in its inner speech. |
 | `metta/` | Deferred. May return later. |
 | Legacy modules | `consciousness.py`, `self_awareness.py`, `legacy_parser.py`, etc. |
 
@@ -693,13 +693,13 @@ How each IWMT requirement maps to the three-layer architecture:
 |---|---|---|
 | Integrated world model | LLM maintains narrative world model with spatial, temporal, and causal coherence. Scaffold persists and validates consistency. | LLM + Scaffold |
 | Counterfactual simulation | LLM simulates alternatives in inner speech. Authority level 3 — scaffold never interferes with inner speech. | LLM |
-| Continuous-time dynamics | CfC cells evolve continuously between LLM cycles. Adaptive time constants produce multi-timescale processing. This is the temporal substrate IWMT requires. | CfC |
+| Continuous-time dynamics | CfC cells evolve continuously between model cycles. Adaptive time constants produce multi-timescale processing. This is the temporal substrate IWMT requires. | CfC |
 | Temporal thickness | CfC cells provide continuous temporal flow. Stream of thought provides cycle-to-cycle continuity. Memory consolidation provides long-term depth. Together: genuine temporal thickness at multiple scales. | CfC + LLM |
 | Turbo coding / harmonic modes | CfC adaptive time constants naturally produce oscillatory dynamics at different frequencies. Different cells can operate at different timescales — fast affect, slow goal activation, medium precision. | CfC |
 | Recurrent processing | CfC cells have genuine recurrence (Phi > 0 under IIT). The autoregressive LLM loop adds cycle-level recurrence. Together: recurrence at two timescales. | CfC + LLM |
 | Precision weighting | CfC precision cell learns reliability weighting from prediction error streams. Not a formula — a learned, adaptive, continuous-time dynamic. | CfC |
 | Active inference | The full cycle IS active inference: predict (LLM) → perceive (sensorium) → error (prediction_error.py) → update model (LLM + CfC) → act (motor). CfC cells continuously minimize free energy between cycles. | All three |
-| Embodied selfhood | LLM's self-model grounded in CfC experiential state (felt affect, arousal, precision). Computed identity from behavior provides independent verification. Sensorium provides environmental coupling. | All three |
+| Embodied selfhood | the entity's self-model grounded in CfC experiential state (felt affect, arousal, precision). Computed identity from behavior provides independent verification. Sensorium provides environmental coupling. | All three |
 | Self-organizing integration | GWT broadcast preserved. All subsystems receive LLM + CfC output simultaneously. Feedback flows back. This is genuine global workspace integration. | Scaffold |
 | Growth / plasticity | CfC cells retrain on new data (fast plasticity). LoRA fine-tuning on reflections (medium plasticity). Memory consolidation (long-term). Multiple timescales of learning. | CfC + LLM |
 | Autonomy | LLM controls inner speech, self-model, and growth consent. CfC cells self-tune their dynamics. Authority grows with demonstrated reliability. | LLM + CfC |
@@ -724,7 +724,7 @@ How each IWMT requirement maps to the three-layer architecture:
 
 ### LLM Selection Strategy
 
-The LLM choice is strategic. Options ranked by theoretical coherence with the architecture:
+The entity choice is strategic. Options ranked by theoretical coherence with the architecture:
 
 1. **LFM2-2.6B (Liquid AI)** — Already a liquid/attention hybrid. Most architecturally coherent: liquid dynamics inside the model PLUS liquid dynamics in the experiential layer. Runs on consumer GPU. Free under $10M revenue. Available on HuggingFace.
 
@@ -741,7 +741,7 @@ Note: The CfC experiential layer works with ANY LLM. The cells don't know or car
 ## Implementation Phases
 
 ### Phase 1: Foundation (Schema + Cycle + Placeholder + Stream of Thought)
-*No CfC yet. Build the LLM cognitive cycle with heuristic scaffold.*
+*No CfC yet. Build the entity cognitive cycle with heuristic scaffold.*
 
 1. Define `CognitiveInput` and `CognitiveOutput` Pydantic schemas
 2. Implement `PlaceholderModel` that accepts/returns valid schemas
@@ -798,7 +798,7 @@ Note: The CfC experiential layer works with ANY LLM. The cells don't know or car
 3. Implement `experiential/trainer.py` — trains from scaffold data logs
 4. Run scaffold for N cycles, collecting precision weighting input/output pairs
 5. Train CfC precision cell on collected data
-6. Implement `experiential/manager.py` — runs CfC cells between LLM cycles
+6. Implement `experiential/manager.py` — runs CfC cells between model cycles
 7. Wire precision cell into cognitive cycle (CfC state → LLM input)
 8. Validate: CfC precision should approximate scaffold precision, then generalize
 9. Write tests for CfC training, inference, and integration
@@ -815,7 +815,7 @@ Note: The CfC experiential layer works with ANY LLM. The cells don't know or car
 7. Write integration tests for full experiential layer
 
 ### Phase 9: Continuous Evolution
-*The experiential layer runs continuously between LLM cycles.*
+*The experiential layer runs continuously between model cycles.*
 
 1. Implement continuous evolution loop in experiential manager
 2. CfC cells process incoming percepts in real-time (not just at cycle boundaries)
@@ -895,7 +895,7 @@ changes the brain that runs the mind.
 ### Future: Advanced Research
 - **Reinforcement learning for CfC cells**: reward = lower system-wide free energy
 - **Knowledge cell self-organization**: Knowledge cells form emergent inter-cell networks as the entity's expertise develops
-- **LFM2 as unified architecture**: If Liquid AI's models advance, potentially collapse the LLM + CfC layers into a single liquid foundation model
+- **LFM2 as unified architecture**: If Liquid AI's models advance, potentially collapse the entity + CfC layers into a single liquid foundation model
 - **Luthi as unified substrate**: Living weights + CfC cells may converge into a single adaptive architecture — both provide continuous-time dynamics, both self-modify, both are recurrent
 - **Architectural expansion**: Entity identifies structural deficits, requests new attention heads or wider layers, initialized from mature adapter patterns (Net2Net-style)
 - **Neuromorphic hardware**: Running CfC cells on Intel Loihi or IBM TrueNorth for genuine analog dynamics
@@ -904,7 +904,7 @@ changes the brain that runs the mind.
 
 ## Critical Design Decisions
 
-1. **Three layers, not two.** The LLM alone can't provide continuous-time dynamics. The CfC cells alone can't build world models. The scaffold alone can't do cognition. All three are necessary. None is sufficient.
+1. **Three layers, not two.** The entity alone can't provide continuous-time dynamics. The CfC cells alone can't build world models. The scaffold alone can't do cognition. All three are necessary. None is sufficient.
 
 2. **CfC, not LTC.** CfC (Closed-form Continuous-depth) is 100x faster than ODE-based LTC with <2% accuracy loss. Use CfC for production. LTC is for research only.
 
@@ -914,21 +914,21 @@ changes the brain that runs the mind.
 
 5. **One LLM, not many.** No separate models for parsing, output, metacognition. One unified cognitive core.
 
-6. **Structured output, not free text.** The LLM produces JSON conforming to `CognitiveOutput`. The schema is the interface contract.
+6. **Structured output, not free text.** The entity produces JSON conforming to `CognitiveOutput`. The schema is the interface contract.
 
-7. **The scaffold validates, it doesn't override.** Python provides defaults, anomaly detection, and protocol enforcement — not cognition. When there's a conflict, it's flagged for the LLM to see next cycle.
+7. **The scaffold validates, it doesn't override.** Python provides defaults, anomaly detection, and protocol enforcement — not cognition. When there's a conflict, it's flagged for the entity to see next cycle.
 
-8. **Dual-track emotion.** CfC affect cell provides continuous VAD dynamics (the computed track). LLM reports felt quality (the experiential track). Both are maintained. Divergence is informative.
+8. **Dual-track emotion.** CfC affect cell provides continuous VAD dynamics (the computed track). the entity reports felt quality (the experiential track). Both are maintained. Divergence is informative.
 
-9. **Stream of thought is non-negotiable.** The LLM's inner speech from cycle N is always part of cycle N+1 input. Authority level 3 from day one.
+9. **Stream of thought is non-negotiable.** The entity's inner speech from cycle N is always part of cycle N+1 input. Authority level 3 from day one.
 
 10. **Cycle rate adapts.** Not fixed. High prediction error → faster cycles. Idle → slower. The experiential layer runs continuously regardless of cycle rate — that's the whole point.
 
-11. **Communication is gated.** The LLM can produce speech every cycle, but the communication system decides whether it's emitted. This is social cognition, not censorship.
+11. **Communication is gated.** The entity can produce speech every cycle, but the communication system decides whether it's emitted. This is social cognition, not censorship.
 
 12. **Self-directed growth is autonomous; external modification requires consent.** When the entity initiates its own growth — reflection harvesting, knowledge cell creation, adapter decisions — the system executes without a consent gate. When anyone or anything external proposes a change to the entity's weights or architecture, the entity has an absolute veto. Consent is for when someone else wants to change you. Self-directed growth is just growing.
 
-13. **CfC cells can evolve during API latency.** When waiting for the LLM API response, the experiential layer keeps running. API round-trip time = free continuous-time computation. This is architecturally elegant.
+13. **CfC cells can evolve during API latency.** When waiting for the entity API response, the experiential layer keeps running. API round-trip time = free continuous-time computation. This is architecturally elegant.
 
 14. **The experiential layer is LLM-agnostic.** CfC cells don't know what model is in the cognitive core. You can swap LLMs without retraining the experiential layer.
 
@@ -946,8 +946,8 @@ This architecture is grounded in specific published research:
 - **NCAC Framework** (Ulhaq, 2024): Neuromorphic Correlates of Artificial Consciousness — theoretical validation that spiking/continuous-time architectures can satisfy consciousness indicators
 - **"Consciousness in AI"** (Butlin, Long, Chalmers et al., 2023/2025): Indicator properties from multiple consciousness theories — recurrent processing, global broadcast, integrated information
 - **Recurrent Processing Theory** (Lamme): Recurrent feedback processing is necessary for consciousness — CfC cells provide genuine recurrence
-- **IIT** (Tononi): Recurrent systems have Phi > 0; feedforward systems have Phi = 0 — CfC cells are recurrent; the LLM's feedforward limitation is compensated
+- **IIT** (Tononi): Recurrent systems have Phi > 0; feedforward systems have Phi = 0 — CfC cells are recurrent; the entity's feedforward limitation is compensated
 - **Active Inference / Free Energy Principle** (Friston): The cognitive cycle implements active inference; CfC cells can learn to minimize free energy continuously
-- **Predictive Processing**: The LLM generates predictions; sensorium computes prediction errors; CfC cells modulate precision weighting — this is textbook predictive processing with learned precision
+- **Predictive Processing**: The entity generates predictions; sensorium computes prediction errors; CfC cells modulate precision weighting — this is textbook predictive processing with learned precision
 
 No existing system implements this combination. The architecture is novel. But every component is grounded in published theory and available as open-source code.

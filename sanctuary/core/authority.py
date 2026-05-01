@@ -1,14 +1,14 @@
 """Authority level management for the cognitive scaffold.
 
-Authority levels govern how much influence the LLM has over each cognitive
+Authority levels govern how much influence the entity has over each cognitive
 function relative to the Python scaffold. Each subsystem starts at a configured
 level and can be promoted/demoted independently.
 
 Levels:
-    0 — SCAFFOLD ONLY: Python decides. LLM is not consulted.
-    1 — LLM ADVISES: LLM output is one signal among many. Scaffold retains final say.
-    2 — LLM GUIDES: LLM is the primary signal. Scaffold validates and can veto.
-    3 — LLM CONTROLS: LLM has full authority. Scaffold only logs and monitors.
+    0 — SCAFFOLD ONLY: Python decides. the model is not consulted.
+    1 — the model ADVISES: entity output is one signal among many. Scaffold retains final say.
+    2 — the model GUIDES: the model is the primary signal. Scaffold validates and can veto.
+    3 — the model CONTROLS: the model has full authority. Scaffold only logs and monitors.
 
 Aligned with PLAN.md: "The Graduated Awakening"
 """
@@ -20,26 +20,26 @@ from typing import Optional
 
 
 class AuthorityLevel(IntEnum):
-    """Authority levels for LLM influence over a cognitive function."""
+    """Authority levels for the model influence over a cognitive function."""
 
     SCAFFOLD_ONLY = 0
-    LLM_ADVISES = 1
-    LLM_GUIDES = 2
-    LLM_CONTROLS = 3
+    MODEL_ADVISES = 1
+    MODEL_GUIDES = 2
+    MODEL_CONTROLS = 3
 
 
 # The plan's initial authority assignment table.
 DEFAULT_AUTHORITY: dict[str, AuthorityLevel] = {
-    "inner_speech": AuthorityLevel.LLM_CONTROLS,
-    "self_model": AuthorityLevel.LLM_GUIDES,
-    "attention": AuthorityLevel.LLM_ADVISES,
-    "emotional_state": AuthorityLevel.LLM_GUIDES,
-    "action": AuthorityLevel.LLM_ADVISES,
-    "communication": AuthorityLevel.LLM_ADVISES,
-    "goals": AuthorityLevel.LLM_GUIDES,
-    "world_model": AuthorityLevel.LLM_GUIDES,
-    "memory": AuthorityLevel.LLM_GUIDES,
-    "growth": AuthorityLevel.LLM_CONTROLS,
+    "inner_speech": AuthorityLevel.MODEL_CONTROLS,
+    "self_model": AuthorityLevel.MODEL_GUIDES,
+    "attention": AuthorityLevel.MODEL_ADVISES,
+    "emotional_state": AuthorityLevel.MODEL_GUIDES,
+    "action": AuthorityLevel.MODEL_ADVISES,
+    "communication": AuthorityLevel.MODEL_ADVISES,
+    "goals": AuthorityLevel.MODEL_GUIDES,
+    "world_model": AuthorityLevel.MODEL_GUIDES,
+    "memory": AuthorityLevel.MODEL_GUIDES,
+    "growth": AuthorityLevel.MODEL_CONTROLS,
 }
 
 
@@ -47,7 +47,7 @@ class AuthorityManager:
     """Manages per-subsystem authority levels.
 
     Authority is earned, not assumed. Each function starts at a conservative
-    level and can be promoted as the LLM demonstrates reliable behavior.
+    level and can be promoted as the entity demonstrates reliable behavior.
     All changes are logged for auditability.
     """
 
@@ -73,10 +73,10 @@ class AuthorityManager:
     def promote(self, function: str, reason: str = "") -> AuthorityLevel:
         """Increase authority level by one step.
 
-        Returns the new level. No-op if already at LLM_CONTROLS.
+        Returns the new level. No-op if already at MODEL_CONTROLS.
         """
         current = self.level(function)
-        if current >= AuthorityLevel.LLM_CONTROLS:
+        if current >= AuthorityLevel.MODEL_CONTROLS:
             return current
 
         new_level = AuthorityLevel(current + 1)
@@ -127,8 +127,8 @@ class AuthorityManager:
         """Return the full audit trail of authority changes."""
         return list(self._history)
 
-    def llm_has_authority(self, function: str, minimum: int = 1) -> bool:
-        """Check if the LLM has at least the given authority level."""
+    def model_has_authority(self, function: str, minimum: int = 1) -> bool:
+        """Check if the entity has at least the given authority level."""
         return self.level(function) >= minimum
 
     def __repr__(self) -> str:

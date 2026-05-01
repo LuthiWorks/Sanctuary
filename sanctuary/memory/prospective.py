@@ -1,6 +1,6 @@
 """Prospective memory — future intentions and deferred thoughts.
 
-Prospective memory holds things the LLM wants to remember to do later:
+Prospective memory holds things the entity wants to remember to do later:
   - "Next time Alice mentions her project, ask how it's going"
   - "Reflect on today's conversation during idle time"
   - "After 10 more cycles, revisit the goal I abandoned"
@@ -11,7 +11,7 @@ Intentions can be triggered by:
   - Event (when a specific condition is met)
 
 Triggered intentions are surfaced as SurfacedMemory objects in the
-cognitive cycle input, so the LLM can act on them naturally.
+cognitive cycle input, so the entity can act on them naturally.
 """
 
 from __future__ import annotations
@@ -82,7 +82,7 @@ class ProspectiveConfig:
 
     max_intentions: int = 50
     max_age_cycles: int = 1000  # Expire intentions older than this
-    max_triggered_per_cycle: int = 3  # Don't overwhelm the LLM
+    max_triggered_per_cycle: int = 3  # Don't overwhelm the entity
 
 
 class ProspectiveMemory:

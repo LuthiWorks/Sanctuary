@@ -4,7 +4,7 @@ The manager sits between the cognitive cycle and the individual CfC cells.
 Each cycle, it:
     1. Receives the current cognitive state (arousal, errors, etc.)
     2. Steps all CfC cells forward (evolving hidden states)
-    3. Returns a summary of experiential state for the LLM's input
+    3. Returns a summary of experiential state for the entity's input
 
 The manager uses a dynamic registry to track all cells — both foundational
 (precision, affect, attention, goal) and knowledge cells (acquired through
@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 class ExperientialState:
     """The experiential layer's output for one cognitive cycle.
 
-    This gets included in the LLM's CognitiveInput as a compact summary
+    This gets included in the entity's CognitiveInput as a compact summary
     of what the continuous-time cells are experiencing.
     """
 
@@ -275,10 +275,10 @@ class ExperientialManager:
 
         # Build cell_active from all cells
         cell_active: dict[str, bool] = {
-            "precision": precision_level >= AuthorityLevel.LLM_ADVISES,
-            "affect": affect_level >= AuthorityLevel.LLM_ADVISES,
-            "attention": attention_level >= AuthorityLevel.LLM_ADVISES,
-            "goal": goal_level >= AuthorityLevel.LLM_ADVISES,
+            "precision": precision_level >= AuthorityLevel.MODEL_ADVISES,
+            "affect": affect_level >= AuthorityLevel.MODEL_ADVISES,
+            "attention": attention_level >= AuthorityLevel.MODEL_ADVISES,
+            "goal": goal_level >= AuthorityLevel.MODEL_ADVISES,
         }
         for name, _ in self._registry.knowledge_cells():
             cell_active[name] = True  # Knowledge cells are always active
@@ -302,15 +302,15 @@ class ExperientialManager:
         """Blend scaffold and CfC outputs based on authority level.
 
         SCAFFOLD_ONLY (0): 100% scaffold
-        LLM_ADVISES (1):   75% scaffold, 25% CfC
-        LLM_GUIDES (2):    25% scaffold, 75% CfC
-        LLM_CONTROLS (3):  100% CfC
+        MODEL_ADVISES (1):   75% scaffold, 25% CfC
+        MODEL_GUIDES (2):    25% scaffold, 75% CfC
+        MODEL_CONTROLS (3):  100% CfC
         """
         weights = {
             AuthorityLevel.SCAFFOLD_ONLY: (1.0, 0.0),
-            AuthorityLevel.LLM_ADVISES: (0.75, 0.25),
-            AuthorityLevel.LLM_GUIDES: (0.25, 0.75),
-            AuthorityLevel.LLM_CONTROLS: (0.0, 1.0),
+            AuthorityLevel.MODEL_ADVISES: (0.75, 0.25),
+            AuthorityLevel.MODEL_GUIDES: (0.25, 0.75),
+            AuthorityLevel.MODEL_CONTROLS: (0.0, 1.0),
         }
         scaffold_w, cfc_w = weights[level]
         return scaffold_value * scaffold_w + cfc_value * cfc_w
@@ -343,7 +343,7 @@ class ExperientialManager:
     async def start_evolution(self, config: Optional[EvolutionConfig] = None):
         """Start the continuous evolution background loop.
 
-        CfC cells will evolve between LLM cycles at adaptive tick rates.
+        CfC cells will evolve between model cycles at adaptive tick rates.
         """
         if self._evolution_loop is not None and self._evolution_loop.running:
             return
@@ -362,7 +362,7 @@ class ExperientialManager:
             self._evolution_loop.feed_percept(event)
 
     def update_evolution_context(self, **kwargs):
-        """Update scaffold context for the evolution loop after each LLM cycle."""
+        """Update scaffold context for the evolution loop after each model cycle."""
         if self._evolution_loop is not None:
             self._evolution_loop.update_context(**kwargs)
 

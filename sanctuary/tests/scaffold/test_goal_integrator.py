@@ -6,7 +6,7 @@ from sanctuary.scaffold.goal_integrator import ScaffoldGoalIntegrator
 
 
 class TestGoalIntegrator:
-    """Test goal tracking and LLM proposal integration."""
+    """Test goal tracking and the model proposal integration."""
 
     def test_initial_state_empty(self):
         gi = ScaffoldGoalIntegrator()
@@ -16,7 +16,7 @@ class TestGoalIntegrator:
 
     def test_add_goal(self):
         gi = ScaffoldGoalIntegrator()
-        authority = AuthorityManager()  # goals defaults to LLM_GUIDES
+        authority = AuthorityManager()  # goals defaults to MODEL_GUIDES
         proposals = [GoalProposal(action="add", goal="Learn Python", priority=0.7)]
         actions = gi.integrate_proposals(proposals, authority)
         assert any("added" in a for a in actions)
@@ -45,8 +45,8 @@ class TestGoalIntegrator:
 
     def test_abandon_needs_guides(self):
         gi = ScaffoldGoalIntegrator()
-        authority_advises = AuthorityManager({"goals": AuthorityLevel.LLM_ADVISES})
-        authority_guides = AuthorityManager({"goals": AuthorityLevel.LLM_GUIDES})
+        authority_advises = AuthorityManager({"goals": AuthorityLevel.MODEL_ADVISES})
+        authority_guides = AuthorityManager({"goals": AuthorityLevel.MODEL_GUIDES})
 
         # Add a goal at GUIDES level
         gi.integrate_proposals(
@@ -70,7 +70,7 @@ class TestGoalIntegrator:
 
     def test_reprioritize_advises_blends(self):
         gi = ScaffoldGoalIntegrator()
-        authority = AuthorityManager({"goals": AuthorityLevel.LLM_ADVISES})
+        authority = AuthorityManager({"goals": AuthorityLevel.MODEL_ADVISES})
         gi.integrate_proposals(
             [GoalProposal(action="add", goal="Task C", priority=0.5)],
             authority,
@@ -87,7 +87,7 @@ class TestGoalIntegrator:
 
     def test_reprioritize_guides_direct(self):
         gi = ScaffoldGoalIntegrator()
-        authority = AuthorityManager({"goals": AuthorityLevel.LLM_GUIDES})
+        authority = AuthorityManager({"goals": AuthorityLevel.MODEL_GUIDES})
         gi.integrate_proposals(
             [GoalProposal(action="add", goal="Task D", priority=0.5)],
             authority,

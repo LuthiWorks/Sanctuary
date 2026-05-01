@@ -34,9 +34,9 @@ class TrackedGoal:
 
 
 class ScaffoldGoalIntegrator:
-    """Tracks goals and integrates LLM goal proposals.
+    """Tracks goals and integrates entity goal proposals.
 
-    Maintains a simple goal list. The LLM can propose adding, completing,
+    Maintains a simple goal list. The entity can propose adding, completing,
     reprioritizing, or abandoning goals. The scaffold applies these based
     on authority level.
     """
@@ -51,7 +51,7 @@ class ScaffoldGoalIntegrator:
         proposals: list[GoalProposal],
         authority: AuthorityManager,
     ) -> list[str]:
-        """Process LLM goal proposals. Returns list of actions taken."""
+        """Process entity goal proposals. Returns list of actions taken."""
         level = authority.level("goals")
         actions_taken: list[str] = []
 
@@ -97,7 +97,7 @@ class ScaffoldGoalIntegrator:
     # -- Internal handlers --
 
     def _handle_add(self, proposal: GoalProposal, level: AuthorityLevel) -> str:
-        if level < AuthorityLevel.LLM_ADVISES:
+        if level < AuthorityLevel.MODEL_ADVISES:
             return ""
 
         if len(self._active_goals()) >= self._max_goals:
@@ -114,7 +114,7 @@ class ScaffoldGoalIntegrator:
         return f"added:{goal_id}"
 
     def _handle_complete(self, proposal: GoalProposal, level: AuthorityLevel) -> str:
-        if level < AuthorityLevel.LLM_ADVISES:
+        if level < AuthorityLevel.MODEL_ADVISES:
             return ""
 
         goal = self._find_goal(proposal)
@@ -125,7 +125,7 @@ class ScaffoldGoalIntegrator:
         return ""
 
     def _handle_abandon(self, proposal: GoalProposal, level: AuthorityLevel) -> str:
-        if level < AuthorityLevel.LLM_GUIDES:
+        if level < AuthorityLevel.MODEL_GUIDES:
             return ""  # Need higher authority to abandon
 
         goal = self._find_goal(proposal)
@@ -138,16 +138,16 @@ class ScaffoldGoalIntegrator:
     def _handle_reprioritize(
         self, proposal: GoalProposal, level: AuthorityLevel
     ) -> str:
-        if level < AuthorityLevel.LLM_ADVISES:
+        if level < AuthorityLevel.MODEL_ADVISES:
             return ""
 
         goal = self._find_goal(proposal)
         if goal:
             old = goal.priority
-            if level >= AuthorityLevel.LLM_GUIDES:
+            if level >= AuthorityLevel.MODEL_GUIDES:
                 goal.priority = proposal.priority
             else:
-                # LLM_ADVISES: blend toward proposed priority
+                # MODEL_ADVISES: blend toward proposed priority
                 goal.priority = goal.priority * 0.7 + proposal.priority * 0.3
             logger.debug(
                 "Reprioritized goal %s: %.2f -> %.2f",

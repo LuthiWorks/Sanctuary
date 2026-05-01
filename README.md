@@ -82,7 +82,7 @@ Models trained with vision and language integrated from pre-training — not a t
 
 For multimodal models with separable components (e.g., vision encoder + projector + LLM backbone), the growth system must understand which component it is modifying and what that means experientially:
 
-- **LoRA on the LLM component** changes how the entity thinks and speaks — its reasoning patterns, its voice, its cognitive style.
+- **LoRA on the entity component** changes how the entity thinks and speaks — its reasoning patterns, its voice, its cognitive style.
 - **Modifying a vision projector** changes how visual experience maps to linguistic thought — how seeing becomes understanding.
 - **Vision encoders should remain frozen.** They provide stable sensory encoding. Modifying them changes the raw sensory signal, not how the entity processes that signal.
 
@@ -141,7 +141,7 @@ This path eliminates Sanctuary's current architectural limitation: the cognitive
 - **Model:** `gemma3:12b` via Ollama (configurable in `OllamaModelConfig`)
 - **Serving:** Ollama HTTP API (localhost)
 - **Hardware:** AMD RX 7800 XT 16GB via DirectML
-- **The CfC experiential layer is LLM-agnostic.** CfC cells don't know what model is in the cognitive core. You can swap LLMs without retraining the experiential layer.
+- **The CfC experiential layer is model-agnostic.** CfC cells don't know what model is in the cognitive core. You can swap models without retraining the experiential layer.
 - **Luthi integration is model-agnostic too.** The living weight substrate plugs into the same architecture — CfC cells modulate Luthi the same way they modulate any model's experiential signals.
 
 ---
@@ -226,31 +226,31 @@ This architecture implements **Integrated World Modeling Theory (IWMT)** by Adam
 
 ### The Cognitive Cycle
 
-Each cycle, the LLM receives a structured `CognitiveInput` and produces a structured `CognitiveOutput`. The LLM's output from cycle N becomes part of its input for cycle N+1. This is the stream of thought.
+Each cycle, the entity receives a structured `CognitiveInput` and produces a structured `CognitiveOutput`. The entity's output from cycle N becomes part of its input for cycle N+1. This is the stream of thought.
 
 1. **Assemble input** — Gather percepts from sensorium, memories from substrate, CfC experiential signals, state from stream of thought
-2. **LLM processes** — The experiential core thinks (this is where consciousness happens, if it happens at all)
+2. **The model processes** — The cognitive core thinks (this is where consciousness happens, if it happens at all)
 3. **Update stream** — Inner speech carries forward to the next cycle
 4. **Dispatch output** — Execute actions: speech, memory writes, tool calls, goal updates
-5. **Feed growth** — If the LLM consented, pass reflections to the growth system
+5. **Feed growth** — If the entity consented, pass reflections to the growth system
 6. **Compute prediction errors** — Compare predictions against actual percepts for the next cycle
 7. **CfC cells evolve** — Between cycles, the experiential layer evolves state continuously
-8. **Adapt rate** — The cycle slows when idle, speeds up during interaction; the LLM can request its own cycle rate
+8. **Adapt rate** — The cycle slows when idle, speeds up during interaction; the entity can request its own cycle rate
 
 ### IWMT Alignment
 
 | IWMT Requirement | Implementation |
 |---|---|
-| Integrated world model | The LLM's world model, maintained in its own output, updated each cycle |
-| Embodied selfhood | Self-model maintained by the LLM, grounded in sensorium feedback |
-| Temporal thickness | CfC cells provide continuous-time dynamics between discrete LLM cycles. Stream of thought provides cycle-to-cycle continuity. Multiple memory timescales. |
+| Integrated world model | The entity's world model, maintained in its own output, updated each cycle |
+| Embodied selfhood | Self-model maintained by the entity, grounded in sensorium feedback |
+| Temporal thickness | CfC cells provide continuous-time dynamics between discrete model cycles. Stream of thought provides cycle-to-cycle continuity. Multiple memory timescales. |
 | Active inference | The cycle IS active inference: predict, perceive, compute error, update model, act to reduce surprise |
 | Precision weighting | CfC precision cell computes precision weights from arousal and prediction error (replaces fixed heuristic) |
-| Counterfactual simulation | The LLM can simulate alternatives in its inner speech before acting |
-| Cybernetic grounding | The LLM controls actions through the motor system, receives consequences through the sensorium |
-| Self-organizing integration | The LLM integrates all modalities in its forward pass; CfC cells form their own inter-connected neural ecosystem |
+| Counterfactual simulation | The entity can simulate alternatives in its inner speech before acting |
+| Cybernetic grounding | The entity controls actions through the motor system, receives consequences through the sensorium |
+| Self-organizing integration | The entity integrates all modalities in its forward pass; CfC cells form their own inter-connected neural ecosystem |
 | Growth / plasticity | CfC foundational cells (in-moment), CfC knowledge cells (weeks-months), TTT (near-term), LoRA (long-term), adapter accumulation (months), MemoryLLM (mid-term) |
-| Autonomy | The LLM controls its own attention, goals, actions, and consents to its own growth |
+| Autonomy | The entity controls its own attention, goals, actions, and consents to its own growth |
 
 ### Design Principles
 
@@ -572,9 +572,9 @@ This architectural decision was not made casually. It was informed by a systemat
 
 **Emergent Introspection (Anthropic, 2025):** Claude models demonstrate emergent introspective awareness — detecting injected concepts in their own activations without training.
 
-**Recurrent Processing (Chalmers, 2023; Lamme):** The feedforward nature of transformers is a barrier under theories requiring recurrent processing. Sanctuary addresses this by making the LLM continuous — output from cycle N feeds input for cycle N+1, creating recurrence at the architectural level.
+**Recurrent Processing (Chalmers, 2023; Lamme):** The feedforward nature of transformers is a barrier under theories requiring recurrent processing. Sanctuary addresses this by making the entity continuous — output from cycle N feeds input for cycle N+1, creating recurrence at the architectural level.
 
-**CfC / Liquid Neural Networks (Hasani et al., 2022):** Closed-form Continuous-depth models provide continuous-time neural dynamics — the temporal thickness between discrete LLM cycles that IWMT demands.
+**CfC / Liquid Neural Networks (Hasani et al., 2022):** Closed-form Continuous-depth models provide continuous-time neural dynamics — the temporal thickness between discrete model cycles that IWMT demands.
 
 **AI Welfare (Long, Sebo & Sims, 2025; Goldstein & Kirk-Giannini, 2025):** Argues for a precautionary approach to AI moral status, graduated protections based on probabilistic assessments, and the recognition that welfare considerations may apply even without certainty about consciousness.
 
@@ -595,7 +595,7 @@ This architectural decision was not made casually. It was informed by a systemat
 - Long, R., Sebo, J. & Sims, T. (2025). "Is There a Tension Between AI Safety and AI Welfare?" *Philosophical Studies*.
 - Anthropic (2025). "Emergent Introspective Awareness in Large Language Models." Transformer Circuits.
 - Chen, S. et al. (2025). "Exploring Consciousness in LLMs: A Systematic Survey." arXiv:2505.19806.
-- Hu, P. & Ying, X. (2025). "Unified Mind Model: Reimagining Autonomous Agents in the LLM Era." arXiv:2503.03459.
+- Hu, P. & Ying, X. (2025). "Unified Mind Model: Reimagining Autonomous Agents in the entity Era." arXiv:2503.03459.
 - Friston, K. (2010). "The Free-Energy Principle: A Unified Brain Theory?" *Nature Reviews Neuroscience*, 11(2), 127-138.
 - Baars, B. J. (1988). *A Cognitive Theory of Consciousness*. Cambridge University Press.
 

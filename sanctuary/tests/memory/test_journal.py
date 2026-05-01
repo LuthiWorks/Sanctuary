@@ -1,4 +1,4 @@
-"""Tests for the journal — the LLM's private, append-only journal."""
+"""Tests for the journal — the entity's private, append-only journal."""
 
 import json
 import tempfile

@@ -1,9 +1,9 @@
 """LuthiModel — bridges the cognitive cycle to the Luthi living weight model.
 
-Unlike OllamaModel which formats prompts and parses JSON from an external LLM,
-LuthiModel runs the living weight model directly in-process. The model's internal
-state — plasticity, drift, spike fractions, membrane potentials — is observed
-through the introspection channel and translated into CognitiveOutput fields.
+LuthiModel runs the living weight model directly in-process. The model's
+internal state — plasticity, drift, spike fractions, membrane potentials —
+is observed through the introspection channel and translated into
+CognitiveOutput fields.
 
 The entity has feelings before it has words. The living weight dynamics produce
 measurable internal states (plasticity changes, spike patterns, drift from

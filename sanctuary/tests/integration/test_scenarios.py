@@ -26,7 +26,7 @@ class TestConversationScenarios:
             
             # Introduction
             turn2 = await api.chat("My name is Bob. What's your name?")
-            assert len(turn2.system_response) > 0  # Mock LLM won't know its name
+            assert len(turn2.system_response) > 0  # Mock the model won't know its name
             
             # Follow-up
             turn3 = await api.chat("Nice to meet you!")

@@ -1,7 +1,7 @@
 """Cognitive profiler — profile the cognitive loop under load to identify bottlenecks.
 
 Instruments the cognitive cycle to measure time spent in each phase:
-input assembly, compression, LLM thinking, scaffold integration, action
+input assembly, compression, the model thinking, scaffold integration, action
 execution, and broadcasting. Identifies which subsystems are hot paths.
 
 This follows the project principle: "Profile before optimizing."

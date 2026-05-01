@@ -1,5 +1,5 @@
-"""Sanctuary Model — LLM model management.
+"""Sanctuary Model — the model model management.
 
 Manages the experiential core's model: client interface, TTT engine,
-LoRA adapters, and MemoryLLM latent parameter pool.
+LoRA adapters, and Memorythe model latent parameter pool.
 """

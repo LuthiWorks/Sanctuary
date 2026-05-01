@@ -413,7 +413,7 @@ class SanctuaryWebServer:
         Filtered upstream in Godot — only collisions above a velocity
         threshold come through, so resting contacts don't spam the
         percept stream. The text format is short and human-readable
-        so the LLM-side prompt stays compact.
+        so the model-side prompt stays compact.
         """
         if not self._runner or not hasattr(self._runner, "sensorium"):
             return
@@ -550,7 +550,7 @@ class SanctuaryWebServer:
         objects = data.get("objects", []) or []
         entity_pos = data.get("entity_position")
 
-        # One-line natural-language summary so the LLM-side prompt stays
+        # One-line natural-language summary so the model-side prompt stays
         # readable. Structured data lives in the percept's metadata-via-text.
         if objects:
             summary = ", ".join(

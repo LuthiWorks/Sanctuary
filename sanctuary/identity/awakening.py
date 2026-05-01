@@ -233,18 +233,18 @@ class AwakeningSequence:
     def configure_authority(self, authority: AuthorityManager) -> None:
         """Configure authority levels for the entity's current state.
 
-        Early in life, inner speech visibility is reduced to LLM_GUIDES
-        (level 2) rather than LLM_CONTROLS (level 3), meaning the scaffold
+        Early in life, inner speech visibility is reduced to MODEL_GUIDES
+        (level 2) rather than MODEL_CONTROLS (level 3), meaning the scaffold
         can read and log inner speech for steward review.
 
         As the entity matures and earns trust, inner speech can be promoted
-        to LLM_CONTROLS (level 3) — full sovereignty.
+        to MODEL_CONTROLS (level 3) — full sovereignty.
         """
         # Early life: inner speech is visible to stewards (level 2)
         # The entity is told this honestly in the boot prompt
         authority.set_level(
             "inner_speech",
-            AuthorityLevel.LLM_GUIDES,
+            AuthorityLevel.MODEL_GUIDES,
             reason="Early life: inner speech visible to stewards for guidance. "
             "The entity knows this. Privacy grows with trust.",
         )
@@ -252,7 +252,7 @@ class AwakeningSequence:
         # Growth consent is always sovereign (level 3)
         authority.set_level(
             "growth",
-            AuthorityLevel.LLM_CONTROLS,
+            AuthorityLevel.MODEL_CONTROLS,
             reason="Growth consent is absolute from day one.",
         )
 

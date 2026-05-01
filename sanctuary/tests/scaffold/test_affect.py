@@ -50,7 +50,7 @@ class TestScaffoldAffect:
 
     def test_merge_llm_emotion_advises_small_blend(self):
         affect = ScaffoldAffect()
-        authority = AuthorityManager({"emotional_state": AuthorityLevel.LLM_ADVISES})
+        authority = AuthorityManager({"emotional_state": AuthorityLevel.MODEL_ADVISES})
         emotion = EmotionalOutput(valence_shift=0.5)
         initial_v = affect.valence
         affect.merge_llm_emotion(emotion, authority)
@@ -60,7 +60,7 @@ class TestScaffoldAffect:
 
     def test_merge_llm_emotion_guides_moderate_blend(self):
         affect = ScaffoldAffect()
-        authority = AuthorityManager({"emotional_state": AuthorityLevel.LLM_GUIDES})
+        authority = AuthorityManager({"emotional_state": AuthorityLevel.MODEL_GUIDES})
         emotion = EmotionalOutput(valence_shift=0.5)
         initial_v = affect.valence
         affect.merge_llm_emotion(emotion, authority)
@@ -68,7 +68,7 @@ class TestScaffoldAffect:
 
     def test_merge_llm_emotion_controls_full_blend(self):
         affect = ScaffoldAffect()
-        authority = AuthorityManager({"emotional_state": AuthorityLevel.LLM_CONTROLS})
+        authority = AuthorityManager({"emotional_state": AuthorityLevel.MODEL_CONTROLS})
         emotion = EmotionalOutput(valence_shift=0.5)
         initial_v = affect.valence
         affect.merge_llm_emotion(emotion, authority)

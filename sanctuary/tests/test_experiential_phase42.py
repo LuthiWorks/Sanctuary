@@ -437,7 +437,7 @@ class TestExperientialManagerExpanded:
 
         # Promote affect
         mgr.promote("affect", "trained well")
-        assert mgr.authority.level("experiential_affect") == AuthorityLevel.LLM_ADVISES
+        assert mgr.authority.level("experiential_affect") == AuthorityLevel.MODEL_ADVISES
 
         # Demote it back
         mgr.demote("affect", "regression detected")
@@ -513,7 +513,7 @@ class TestExperientialManagerExpanded:
     def test_backward_compat_promote_precision(self):
         mgr = ExperientialManager()
         level = mgr.promote_precision("test")
-        assert level == AuthorityLevel.LLM_ADVISES
+        assert level == AuthorityLevel.MODEL_ADVISES
 
     def test_backward_compat_demote_precision(self):
         mgr = ExperientialManager()

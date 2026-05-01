@@ -701,11 +701,13 @@ class TestCLIArgParsing:
         args = parse_args(["--no-sleep"])
         assert args.no_sleep is True
 
-    def test_ollama_backend(self):
+    def test_ollama_backend_no_longer_accepted(self):
+        """Ollama was removed in the 2026-04-30 LLM-terminology cleanup —
+        it should now be rejected by argparse choices."""
         from sanctuary.api.cli import parse_args
 
-        args = parse_args(["--model-backend", "ollama"])
-        assert args.model_backend == "ollama"
+        with pytest.raises(SystemExit):
+            parse_args(["--model-backend", "ollama"])
 
     def test_invalid_backend_rejected(self):
         from sanctuary.api.cli import parse_args

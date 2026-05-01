@@ -5,7 +5,7 @@ the surfacer queries persistent storage and returns the top-K most relevant
 memories as SurfacedMemory objects for inclusion in CognitiveInput.
 
 The surfacer does not decide what matters — it retrieves what is semantically
-close to the current moment. The LLM decides what to attend to.
+close to the current moment. The entity decides what to attend to.
 """
 
 from __future__ import annotations
