@@ -42,7 +42,7 @@ class TestAuthorityManager:
         assert mgr.level("memory") == AuthorityLevel.SCAFFOLD_ONLY
 
     def test_unknown_function_returns_scaffold_only(self):
-        """Safe default: unknown functions get no LLM authority."""
+        """Safe default: unknown functions get no the model authority."""
         mgr = AuthorityManager()
         assert mgr.level("nonexistent") == AuthorityLevel.SCAFFOLD_ONLY
 

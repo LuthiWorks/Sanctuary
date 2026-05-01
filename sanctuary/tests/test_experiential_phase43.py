@@ -1,4 +1,4 @@
-"""Tests for Phase 4.3 — Continuous CfC evolution between LLM cycles.
+"""Tests for Phase 4.3 — Continuous CfC evolution between model cycles.
 
 Tests the evolution loop, adaptive timing, percept feeding, snapshot
 reads, and multi-timescale temporal dynamics.

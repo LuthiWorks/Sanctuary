@@ -82,7 +82,7 @@ class TestMemoryOpsInCycle:
 
     @pytest.mark.asyncio
     async def test_episodic_write_ops(self, memory):
-        """Episodic writes from LLM should be stored."""
+        """Episodic writes from the model should be stored."""
 
         class EpisodicModel:
             async def think(self, input):

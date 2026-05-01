@@ -6,7 +6,7 @@ from sanctuary.scaffold.goal_integrator import ScaffoldGoalIntegrator
 
 
 class TestGoalIntegrator:
-    """Test goal tracking and LLM proposal integration."""
+    """Test goal tracking and the model proposal integration."""
 
     def test_initial_state_empty(self):
         gi = ScaffoldGoalIntegrator()

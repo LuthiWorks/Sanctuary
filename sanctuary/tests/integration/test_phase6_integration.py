@@ -3,7 +3,7 @@
 Tests that the complete system (Runner + Cycle + Scaffold + Sensorium +
 Motor + Memory + Identity) works as a unified whole.
 
-These tests use the PlaceholderModel — no real LLM required.
+These tests use the PlaceholderModel — no real the model required.
 """
 
 from __future__ import annotations
