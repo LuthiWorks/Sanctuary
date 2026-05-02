@@ -670,7 +670,37 @@ class TestProxyHelpers:
 
 
 class TestSelfKnowledgeToolsWithoutMonitoring:
-    """Test self-knowledge tools when monitoring is not available."""
+    """Test self-knowledge tools when monitoring is not available.
+
+    The self-knowledge tools read module-level singleton refs in
+    ``sanctuary.tools.builtin`` that get populated by
+    ``register_self_knowledge_tools()`` whenever a SanctuaryRunner is
+    instantiated. Other test files (test_ws_server, test_health_server,
+    test_world) instantiate the runner and leave those globals populated,
+    so we explicitly clear them before each test in this class —
+    otherwise the "unavailable" path never executes.
+    """
+
+    @pytest.fixture(autouse=True)
+    def reset_module_refs(self):
+        import sanctuary.tools.builtin as mod
+        old = (
+            mod._dashboard_ref,
+            mod._consciousness_trace_ref,
+            mod._attention_tracker_ref,
+            mod._communication_log_ref,
+        )
+        mod._dashboard_ref = None
+        mod._consciousness_trace_ref = None
+        mod._attention_tracker_ref = None
+        mod._communication_log_ref = None
+        yield
+        (
+            mod._dashboard_ref,
+            mod._consciousness_trace_ref,
+            mod._attention_tracker_ref,
+            mod._communication_log_ref,
+        ) = old
 
     @pytest.mark.asyncio
     async def test_dashboard_unavailable(self):
@@ -799,10 +829,17 @@ class TestGitStatus:
 
     @pytest.mark.asyncio
     async def test_status_in_repo(self):
-        """Should work in Sanctuary's own repo."""
+        """Should work in Sanctuary's own repo.
+
+        Asserts the tool produces git's short-status header (a line
+        starting with ``##``) — not a specific branch name. Branch
+        names vary by environment: ``main`` on the canonical repo,
+        a feature branch during development, ``HEAD (no branch)`` on
+        GitHub Actions PR checkouts (detached HEAD).
+        """
         result = await _git_status({"repo": _SANCTUARY_REPO_ROOT})
         assert result.success
-        assert "main" in result.output or "master" in result.output
+        assert "##" in result.output
 
     @pytest.mark.asyncio
     async def test_status_not_a_repo(self, tmp_path):

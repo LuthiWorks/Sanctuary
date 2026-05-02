@@ -130,9 +130,20 @@ class TestRemoteMemoryStore:
 
     @pytest.mark.asyncio
     async def test_connect_failure_returns_false(self):
-        config = RemoteMemoryConfig(host="nonexistent-host", port=99999)
-        store = RemoteMemoryStore(config)
-        result = await store.connect()
+        """connect() should swallow transient remote errors and return False.
+
+        Mocks chromadb.HttpClient to raise so the test doesn't depend on
+        platform-specific networking behavior — chromadb.HttpClient raises
+        ValueError on Linux but ConnectionError on Windows when given an
+        unreachable host, and only the latter is in
+        _REMOTE_TRANSIENT_ERRORS.
+        """
+        store = RemoteMemoryStore(RemoteMemoryConfig(host="anywhere", port=8100))
+        with patch(
+            "chromadb.HttpClient",
+            side_effect=ConnectionError("simulated network failure"),
+        ):
+            result = await store.connect()
         assert result is False
         assert not store.connected
 
@@ -153,8 +164,12 @@ class TestRemoteMemoryStore:
     def test_store_marks_disconnected_after_max_retries(self):
         store = RemoteMemoryStore(RemoteMemoryConfig(max_retries=2))
         store._connected = True
-        # Mock _store_remote to raise, simulating network failure
-        with patch.object(store, "_store_remote", side_effect=Exception("network error")):
+        # Mock _store_remote to raise a transient remote error; the
+        # production code's narrow except clause only catches members
+        # of _REMOTE_TRANSIENT_ERRORS (ConnectionError, TimeoutError,
+        # OSError, chromadb.errors.ChromaError). A bare Exception
+        # would propagate and fail the test on every platform.
+        with patch.object(store, "_store_remote", side_effect=ConnectionError("network error")):
             store.store({"content": "test1", "significance": 5, "tags": []})
             store.store({"content": "test2", "significance": 5, "tags": []})
         assert not store.connected
