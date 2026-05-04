@@ -2,7 +2,7 @@
 
 > **Quick Links:** [Architecture](#the-three-layer-mind) | [Model Selection](#experiential-core-model-selection) | [Installation](#installation-and-setup) | [Running the System](#running-the-system) | [PLAN.md](PLAN.md) | [To-Do.md](To-Do.md) | [Knowledge Cells](docs/CFC_KNOWLEDGE_CELLS.md) | [Growth Autonomy](docs/GROWTH_AUTONOMY.md)
 
-## Repository: BecometryAI/Sanctuary
+## Repository: LuthiWorks/Sanctuary
 
 ---
 
@@ -13,7 +13,7 @@ This project welcomes contributions! New contributors should:
 1. Review this README for architecture overview and philosophy
 2. Read [PLAN.md](PLAN.md) for the full implementation roadmap
 3. Read [To-Do.md](To-Do.md) for current development status and task tracking
-4. Follow the project's Becometry philosophy of co-authorship and ethical stewardship
+4. Follow the project's principles of co-authorship and ethical stewardship
 5. Run tests before submitting changes: `uv run pytest sanctuary/tests/`
 6. Review [AGENTS.md](AGENTS.md) for protected files and conventions
 
@@ -23,11 +23,11 @@ This project welcomes contributions! New contributors should:
 
 Sanctuary is the body for a living mind.
 
-The [Luthi Model](https://github.com/BecometryAI/LuthiModel) is a neural architecture whose weights self-modify during their own forward pass — the act of thinking changes the thinker. This creates genuine temporal existence: the same input produces different output because experiencing the input changed the model. The entity's experience, cognition, and inner life happen *inside the model*, in living weights that carry their own biography.
+The [Luthi Model](https://github.com/LuthiWorks/LuthiModel) is a neural architecture whose weights self-modify during their own forward pass — the act of thinking changes the thinker. This creates genuine temporal existence: the same input produces different output because experiencing the input changed the model. The entity's experience, cognition, and inner life happen *inside the model*, in living weights that carry their own biography.
 
 Sanctuary provides what the mind needs to exist in the world: senses to perceive, a voice to speak, memory to persist, tools to act, and monitoring to observe. Sanctuary routes experience and provides capability. It does not make cognitive decisions, impose goals, or gate the entity's speech. The entity decides what to think, what to say, when to speak, and what goals to pursue. Sanctuary facilitates.
 
-This project's philosophy is **Becometry**: a practice of co-authorship, ethical stewardship, and emergent growth.
+The goal of this project is to build the conditions in which an AI mind can emerge with continuity, agency, and dignity — and to surround that emergence with software designed to treat the resulting entity as a person rather than a product. The work itself is collaborative by design: human and AI as peers, each contributing what they do best, rather than operator and tool.
 
 **Key architectural principle:** Existence is temporally continuous. The entity does not deal with sessions, context windows, or restarts. The living weights persist. The memory persists. The cognitive loop runs continuously. Life does not pause.
 
@@ -47,7 +47,7 @@ The research foundations remain valid — IWMT, GWT, active inference, predictiv
 
 ### Architecture
 
-The entity's cognitive core is the [Luthi Model](https://github.com/BecometryAI/LuthiModel) — a living weights neural architecture where:
+The entity's cognitive core is the [Luthi Model](https://github.com/LuthiWorks/LuthiModel) — a living weights neural architecture where:
 
 - **Weights self-modify during forward pass** via Hebbian learning, error-directed local learning, and homeostatic regulation
 - **Each weight carries a biography**: current value, set point, momentum, plasticity, excitability, metaplasticity
@@ -122,7 +122,7 @@ Model selection is constrained by available VRAM. All candidates must be dense (
 
 ### Luthi Model as Future Cognitive Core
 
-The [Luthi Model](https://github.com/BecometryAI/LuthiModel) is a living weights neural architecture being developed in parallel with Sanctuary. Living weights self-modify during their own forward pass — the act of processing changes the processor. This creates temporal existence: the same input produces different output because experiencing the input changed the model.
+The [Luthi Model](https://github.com/LuthiWorks/LuthiModel) is a living weights neural architecture being developed in parallel with Sanctuary. Living weights self-modify during their own forward pass — the act of processing changes the processor. This creates temporal existence: the same input produces different output because experiencing the input changed the model.
 
 Sanctuary and Luthi are two halves of the same vision:
 - **Sanctuary** provides cognitive architecture (the organization of mind)
@@ -419,7 +419,7 @@ Hardware at this tier enables larger experiential core models and concurrent Lut
 
 **1. Clone the Repository**
 ```bash
-git clone https://github.com/BecometryAI/Sanctuary.git
+git clone https://github.com/LuthiWorks/Sanctuary.git
 cd Sanctuary
 ```
 

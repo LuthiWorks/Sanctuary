@@ -296,7 +296,7 @@ Deeper cognitive features, all built and validated mechanically (placeholder/scr
 
 ## Phase 10: Luthi Model Convergence
 
-*Living weights as the neural substrate, then the cognitive core. See [Luthi Model](https://github.com/BecometryAI/LuthiModel) for the companion project.*
+*Living weights as the neural substrate, then the cognitive core. See [Luthi Model](https://github.com/LuthiWorks/LuthiModel) for the companion project.*
 
 Sanctuary provides cognitive architecture (the organization of mind). Luthi provides
 neural substrate (the kind of matter the mind runs on). The convergence follows a

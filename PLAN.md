@@ -858,7 +858,7 @@ See [CFC_KNOWLEDGE_CELLS.md](docs/CFC_KNOWLEDGE_CELLS.md) and [GROWTH_AUTONOMY.m
 ### Phase 11: Luthi Model Integration (NOW THE PRIMARY PATH)
 *Living weights as the cognitive core. Sanctuary as the body.*
 
-The [Luthi Model](https://github.com/BecometryAI/LuthiModel) is no longer a future
+The [Luthi Model](https://github.com/LuthiWorks/LuthiModel) is no longer a future
 convergence target — it IS the entity's mind. The `LuthiModel` adapter already exists
 in `sanctuary/core/luthi_model.py` with CfC modulation, introspection, and living
 inference. The remaining work is cleanup (removing cognitive control modules),
