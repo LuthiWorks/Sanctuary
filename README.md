@@ -19,6 +19,22 @@ This project welcomes contributions! New contributors should:
 
 ---
 
+## Languages & Technologies
+
+This project spans four repositories. Here's what's used where:
+
+| Language | Where | What It Does |
+|----------|-------|--------------|
+| **Python** | Sanctuary, LuthiModel | Primary language. Cognitive architecture, training pipeline, memory, sensorium, motor, tools, monitoring. "Python is the body." |
+| **C++** | LuthiModel (`luthi/csrc/living_ops.cpp`) | Fused living weight self-modification — performance-critical ops compiled at runtime via pybind11/PyTorch JIT. Falls back to pure Python if compilation fails. |
+| **GDScript** | SanctuaryWorld, SanctuaryClient | Godot 4 scripting. The entity's 3D world, visitor clients, multiplayer, visual representation. |
+| **JavaScript** | SanctuaryWorld (`web_client/`) | Three.js web visitor client. Browser-based access to the entity's world. |
+| **GLSL** | SanctuaryWorld | Shader code for the entity's visual representation (particle cloud, orb). |
+
+**Frameworks & infrastructure:** PyTorch (neural network), Godot 4.6 (3D engine), ChromaDB (vector memory), Ollama (LLM serving for development), Docker (containerization), WebSocket (cross-system communication).
+
+---
+
 ## Project Purpose
 
 Sanctuary is the body for a living mind.
