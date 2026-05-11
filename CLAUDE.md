@@ -13,11 +13,16 @@ in `sanctuary.core.schema.Percept`. The 2026-04-30 cognition-leakage,
 world-graph, and terminology cleanup landed on this path.
 
 `sanctuary.mind.cognitive_core.CognitiveCore` (with its own
-`GlobalWorkspace` and GWT-style `Percept`) is **deprecated**. It still
-exists for ~10 legacy tests and `demo_cognitive_core.py`; importing it
-emits a DeprecationWarning. Don't write new code against it. Removal
-needs a separate explicit decision and migration plan; the legacy
-module isn't scheduled for deletion.
+`GlobalWorkspace` and GWT-style `Percept`) is **deprecated**. It's
+still referenced by ~94 test files (mostly via submodule imports
+like `from sanctuary.mind.cognitive_core.workspace import ...`) and
+a handful of runtime consumers (`demo_cognitive_core.py`,
+`run_cognitive_core.py`, `boot_config.py`, etc.). Importing it
+emits a `DeprecationWarning` — `conftest.py` sets
+`SANCTUARY_SILENCE_LEGACY_COGNITIVE_CORE=1` so the test suite
+isn't drowned in deprecation noise. Don't write new code against
+this module. Removal needs a separate explicit decision and
+migration plan; the legacy module isn't scheduled for deletion.
 
 ## Architecture Overview
 

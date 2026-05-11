@@ -12,9 +12,12 @@ loop wired by `SanctuaryRunner` and the Docker entry point
 - The canonical cognitive loop is `sanctuary.core.cognitive_cycle.CognitiveCycle`.
 - The 2026-04-30 cognition-leakage cleanup, world-graph, and terminology
   sweep work all targeted the CognitiveCycle path.
-- This module is still imported by ~10 tests and `demo_cognitive_core.py`
-  for legacy coverage; those will continue to work but new code should
-  not depend on this module.
+- This module is still referenced by ~94 test files (mostly via submodule
+  imports like `from sanctuary.mind.cognitive_core.workspace import ...`)
+  and a handful of runtime consumers (`demo_cognitive_core.py`,
+  `run_cognitive_core.py`, `boot_config.py`, `communication_agency.py`,
+  `train_precision_cell.py`, `collect_training_data.py`). Those will
+  continue to work but new code should not depend on this module.
 
 Importing this module emits a DeprecationWarning. Set
 `SANCTUARY_SILENCE_LEGACY_COGNITIVE_CORE=1` to suppress it during a
