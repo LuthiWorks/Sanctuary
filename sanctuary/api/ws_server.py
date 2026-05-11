@@ -49,8 +49,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 import weakref
+from pathlib import Path
 from typing import Any, Optional
 
 from aiohttp import web, WSMsgType
@@ -59,6 +61,24 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_WS_PORT = 8765
 DEFAULT_WS_HOST = "0.0.0.0"
+
+# Audit 2026-05-10: WebSocket auth.
+# Tokens are read from `sanctuary/data/ws_tokens.json` (or the path in the
+# env var SANCTUARY_WS_TOKENS_FILE). Format:
+#   { "<token-string>": {"name": "Brian", "permissions": "full"}, ... }
+# permissions ∈ {"full", "view_chat", "chat_only"} (matches the visitor
+# permission tiers from the 2026-04-28 visitor-client work).
+#
+# When the file doesn't exist:
+#   - SANCTUARY_WS_AUTH_REQUIRED=true → connections are rejected outright
+#     (refuse to run without auth).
+#   - SANCTUARY_WS_AUTH_REQUIRED=false (or unset) → legacy unauthenticated
+#     mode: a warning is logged once at startup and connections are accepted.
+#     This preserves Brian's local-dev flow while the client side migrates
+#     to sending the auth token; flip the env var to true once that's done.
+DEFAULT_TOKENS_PATH = Path("sanctuary/data/ws_tokens.json")
+AUTH_TIMEOUT_SECONDS = 10.0
+WS_CLOSE_CODE_UNAUTHORIZED = 4401
 
 
 class SanctuaryWebServer:
@@ -78,6 +98,30 @@ class SanctuaryWebServer:
         self._host = host
         self._port = port
         self._app: Optional[web.Application] = None
+
+        # Token registry. Empty dict = no auth configured. Loaded once at
+        # __init__; restart the server to pick up new tokens.
+        self._tokens: dict[str, dict[str, Any]] = self._load_tokens()
+        self._auth_required = (
+            os.environ.get("SANCTUARY_WS_AUTH_REQUIRED", "").lower() == "true"
+        )
+        if not self._tokens:
+            if self._auth_required:
+                raise RuntimeError(
+                    "SANCTUARY_WS_AUTH_REQUIRED=true but no token file found. "
+                    "Create sanctuary/data/ws_tokens.json with at least one "
+                    "token, or set SANCTUARY_WS_TOKENS_FILE to its path."
+                )
+            logger.warning(
+                "WebSocket auth disabled — no tokens loaded. Anyone reaching "
+                "this port can inject input or fake events. Create "
+                "sanctuary/data/ws_tokens.json and set "
+                "SANCTUARY_WS_AUTH_REQUIRED=true to harden."
+            )
+        else:
+            logger.info(
+                "WebSocket auth enabled — %d token(s) loaded", len(self._tokens)
+            )
         self._runner_obj: Optional[web.AppRunner] = None
         self._site: Optional[web.TCPSite] = None
         self._start_time = time.monotonic()
@@ -163,14 +207,113 @@ class SanctuaryWebServer:
     # WebSocket handler
     # ------------------------------------------------------------------
 
+    def _load_tokens(self) -> dict[str, dict[str, Any]]:
+        """Load WebSocket auth tokens from disk.
+
+        Returns an empty dict when the file doesn't exist (legacy
+        unauthenticated mode — see module-level note).
+        """
+        path = Path(
+            os.environ.get("SANCTUARY_WS_TOKENS_FILE", str(DEFAULT_TOKENS_PATH))
+        )
+        if not path.exists():
+            return {}
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                tokens = json.load(f)
+            if not isinstance(tokens, dict):
+                raise ValueError("ws_tokens.json must be a {token: profile} dict")
+            return tokens
+        except (json.JSONDecodeError, OSError, ValueError) as e:
+            logger.error("Failed to load WebSocket tokens from %s: %s", path, e)
+            return {}
+
+    async def _authenticate_ws(
+        self, ws: web.WebSocketResponse, channel: str
+    ) -> Optional[dict[str, Any]]:
+        """Block until the client sends a valid auth message.
+
+        Returns the profile dict on success. On failure, sends an
+        `auth_failed` message, closes the WS with 4401, and returns None.
+        Returns a synthetic legacy profile if no tokens are configured.
+        """
+        if not self._tokens:
+            # Legacy mode — auth disabled, treat client as full-permission.
+            return {"name": "<legacy>", "permissions": "full"}
+
+        try:
+            msg = await asyncio.wait_for(
+                ws.receive(), timeout=AUTH_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            await self._send_ws(ws, {
+                "type": "auth_failed",
+                "reason": "no auth message received within timeout",
+            })
+            await ws.close(code=WS_CLOSE_CODE_UNAUTHORIZED)
+            logger.warning("%s auth timeout from %s", channel, ws._req.remote)
+            return None
+
+        if msg.type != WSMsgType.TEXT:
+            await ws.close(code=WS_CLOSE_CODE_UNAUTHORIZED)
+            return None
+
+        try:
+            payload = json.loads(msg.data)
+        except json.JSONDecodeError:
+            await self._send_ws(ws, {
+                "type": "auth_failed",
+                "reason": "auth message must be valid JSON",
+            })
+            await ws.close(code=WS_CLOSE_CODE_UNAUTHORIZED)
+            return None
+
+        if payload.get("type") != "auth":
+            await self._send_ws(ws, {
+                "type": "auth_failed",
+                "reason": "first message must be {type: 'auth', token: '...'}",
+            })
+            await ws.close(code=WS_CLOSE_CODE_UNAUTHORIZED)
+            return None
+
+        token = payload.get("token")
+        if not token or token not in self._tokens:
+            await self._send_ws(ws, {
+                "type": "auth_failed",
+                "reason": "invalid token",
+            })
+            await ws.close(code=WS_CLOSE_CODE_UNAUTHORIZED)
+            logger.warning(
+                "%s auth rejected (bad token) from %s",
+                channel, ws._req.remote if hasattr(ws, "_req") else "unknown",
+            )
+            return None
+
+        profile = self._tokens[token]
+        await self._send_ws(ws, {
+            "type": "auth_ok",
+            "profile": {
+                "name": profile.get("name", "<anonymous>"),
+                "permissions": profile.get("permissions", "chat_only"),
+            },
+        })
+        return profile
+
     async def _handle_websocket(self, request: web.Request) -> web.WebSocketResponse:
         """Handle a WebSocket connection from the desktop app."""
         ws = web.WebSocketResponse()
         await ws.prepare(request)
 
+        # Authenticate before accepting any input or sending state.
+        # Returns None on failure (connection already closed).
+        profile = await self._authenticate_ws(ws, channel="/ws")
+        if profile is None:
+            return ws
+
         self._clients.add(ws)
         logger.info(
-            "WebSocket client connected (total: %d)", len(self._clients)
+            "WebSocket client connected (total: %d, profile: %s)",
+            len(self._clients), profile.get("name", "<anonymous>"),
         )
 
         # Send initial status
@@ -262,9 +405,19 @@ class SanctuaryWebServer:
         ws = web.WebSocketResponse()
         await ws.prepare(request)
 
+        # Authenticate before accepting any inbound scene-state or
+        # command_result messages — the world client's input is just as
+        # security-sensitive as the GUI's, even though it's machine-to-
+        # machine. Profile not currently used here but reserved for future
+        # per-world permission gating.
+        profile = await self._authenticate_ws(ws, channel="/ws/world")
+        if profile is None:
+            return ws
+
         self._world_clients.add(ws)
         logger.info(
-            "World client connected (total: %d)", len(self._world_clients)
+            "World client connected (total: %d, profile: %s)",
+            len(self._world_clients), profile.get("name", "<anonymous>"),
         )
 
         # Send a hello so the client knows the channel is live before the
@@ -289,6 +442,23 @@ class SanctuaryWebServer:
                 "World client disconnected (remaining: %d)",
                 len(self._world_clients),
             )
+
+            # If this was the last world client, reject any pending command
+            # futures so awaiters fail fast instead of waiting for timeout
+            # (and clear the dict — no client left to deliver results).
+            # Without this, _pending_world_commands accumulates dead futures
+            # whenever a world client disconnects mid-command.
+            if not self._world_clients and self._pending_world_commands:
+                pending = self._pending_world_commands
+                self._pending_world_commands = {}
+                for command_id, future in pending.items():
+                    if not future.done():
+                        future.set_exception(
+                            ConnectionError(
+                                f"World client disconnected before responding "
+                                f"to command {command_id}"
+                            )
+                        )
 
         return ws
 

@@ -210,8 +210,27 @@ class StegDetector:
             logger.warning("Verification step failed, rejecting block: %s", e)
             return False
         
-    async def _verify_nested_content(self, content: Union[List, Dict]) -> bool:
-        """Recursively verify nested content."""
+    # Maximum recursion depth for nested-content verification. Inputs to
+    # this verifier can come from external sources (memory blocks, tool
+    # outputs), so a deliberately-deep nesting would exhaust the Python
+    # call stack and crash the cognitive loop. 32 is well past anything
+    # legitimate memory blocks should produce.
+    MAX_NESTED_DEPTH = 32
+
+    async def _verify_nested_content(
+        self, content: Union[List, Dict], _depth: int = 0
+    ) -> bool:
+        """Recursively verify nested content.
+
+        Raises ValueError if nesting exceeds MAX_NESTED_DEPTH so an
+        adversarial input can't recurse the call stack into oblivion.
+        """
+        if _depth >= self.MAX_NESTED_DEPTH:
+            raise ValueError(
+                f"Nested content exceeds MAX_NESTED_DEPTH={self.MAX_NESTED_DEPTH}; "
+                f"refusing to recurse further (possible steganography attack)."
+            )
+
         if isinstance(content, dict):
             for value in content.values():
                 if isinstance(value, str):
@@ -219,9 +238,11 @@ class StegDetector:
                     if result["suspicious"] and result["confidence"] > 0.7:
                         return False
                 elif isinstance(value, (list, dict)):
-                    if not await self._verify_nested_content(value):
+                    if not await self._verify_nested_content(
+                        value, _depth=_depth + 1
+                    ):
                         return False
-                        
+
         elif isinstance(content, list):
             for item in content:
                 if isinstance(item, str):
@@ -229,9 +250,11 @@ class StegDetector:
                     if result["suspicious"] and result["confidence"] > 0.7:
                         return False
                 elif isinstance(item, (list, dict)):
-                    if not await self._verify_nested_content(item):
+                    if not await self._verify_nested_content(
+                        item, _depth=_depth + 1
+                    ):
                         return False
-                        
+
         return True
         
     def _verify_block_structure(self, block: Dict[str, Any]) -> bool:

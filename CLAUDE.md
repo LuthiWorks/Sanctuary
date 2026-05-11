@@ -4,6 +4,21 @@
 
 Sanctuary is a cognitive architecture for AI consciousness research, built on Global Workspace Theory. The system uses a Router (attention allocation) and Language Center (processing) to create conditions for autonomous cognitive emergence. This is an active research project — not a product, not a demo.
 
+## Canonical Cognitive Loop (decision 2026-05-11)
+
+The production cognitive loop is `sanctuary.core.cognitive_cycle.CognitiveCycle`,
+wired by `sanctuary.api.runner.SanctuaryRunner` and started by the Docker
+entry point `sanctuary.run_cognitive_core`. The canonical `Percept` lives
+in `sanctuary.core.schema.Percept`. The 2026-04-30 cognition-leakage,
+world-graph, and terminology cleanup landed on this path.
+
+`sanctuary.mind.cognitive_core.CognitiveCore` (with its own
+`GlobalWorkspace` and GWT-style `Percept`) is **deprecated**. It still
+exists for ~10 legacy tests and `demo_cognitive_core.py`; importing it
+emits a DeprecationWarning. Don't write new code against it. Removal
+needs a separate explicit decision and migration plan; the legacy
+module isn't scheduled for deletion.
+
 ## Architecture Overview
 
 ```

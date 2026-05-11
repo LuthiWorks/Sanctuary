@@ -22,12 +22,17 @@ async def sandbox_python_execution(code: str, timeout: int = 30) -> str:
     client = docker.from_env()
     
     try:
-        # Create container with Python environment
+        # Create container with Python environment.
+        # python:3.12-slim — bumped from 3.9-slim (EOL October 2025) so the
+        # security sandbox runs on a maintained base. The interpreter is
+        # only used to exec untrusted code in a network-less, read-only,
+        # capability-dropped jail, so newer-language-features aren't the
+        # concern — patched runtime is.
         container = client.containers.run(
-            "python:3.9-slim",
+            "python:3.12-slim",
             [
-                "python", 
-                "-c", 
+                "python",
+                "-c",
                 code
             ],
             detach=True,
@@ -39,35 +44,39 @@ async def sandbox_python_execution(code: str, timeout: int = 30) -> str:
             security_opt=["no-new-privileges"],  # Prevent privilege escalation
             read_only=True,  # Make filesystem read-only
             tmpfs={"/tmp": "size=64m,exec,nodev,nosuid"},  # Temporary filesystem for /tmp
-            remove=True  # Auto-remove container after execution
+            # remove=False — we want to read logs() *after* wait() returns.
+            # With auto-remove the container would race-delete by the time
+            # we call logs(), intermittently raising docker.errors.NotFound.
+            # The explicit container.remove() in finally below handles cleanup.
+            remove=False,
         )
-        
+
         # Wait for container to finish with timeout
         try:
             output = await asyncio.wait_for(
                 asyncio.to_thread(container.wait),
                 timeout=timeout
             )
-            
-            # Get container logs
+
+            # Get container logs while it still exists (we own removal).
             logs = container.logs().decode('utf-8')
-            
+
             if output['StatusCode'] == 0:
                 return logs
             else:
                 return f"Error (exit code {output['StatusCode']}):\n{logs}"
-                
+
         except asyncio.TimeoutError:
             container.kill()
             return "Execution timed out"
-            
+
     except docker.errors.DockerException as e:
         logger.error(f"Sandbox execution error: {e}")
         return f"Error in sandbox execution: {str(e)}"
     finally:
         try:
             container.remove(force=True)
-        except docker.errors.APIError:
-            # Container may already be removed (auto-remove=True) or
-            # never created — both are fine in cleanup.
+        except (docker.errors.APIError, docker.errors.NotFound, NameError):
+            # Container may never have been created (NameError) or already
+            # be gone (NotFound) — both fine in cleanup.
             pass

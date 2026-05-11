@@ -14,6 +14,7 @@ The GlobalWorkspace serves as:
 
 from __future__ import annotations
 
+import copy
 import uuid
 import logging
 from datetime import datetime
@@ -258,15 +259,25 @@ class GlobalWorkspace:
             >>> snapshot = workspace.broadcast()
             >>> # snapshot.goals is immutable - cannot be modified
         """
+        # Deep-copy the nested containers so subsystems holding a snapshot
+        # can't reach in and mutate Goal.priority, Percept.metadata, etc.,
+        # and silently affect shared workspace state. The `frozen=True` on
+        # WorkspaceSnapshot itself only prevents reassigning fields on the
+        # snapshot — the list/dict contents still need explicit copying.
+        # Audit 2026-05-10 flagged "Snapshot immutability is a lie."
         return WorkspaceSnapshot(
-            goals=list(self.current_goals),
-            percepts=dict(self.active_percepts),
+            goals=copy.deepcopy(self.current_goals),
+            percepts=copy.deepcopy(self.active_percepts),
             emotions=self.emotional_state.copy(),
-            memories=list(self.attended_memories),
+            memories=copy.deepcopy(self.attended_memories),
             timestamp=self.timestamp,
             cycle_count=self.cycle_count,
-            metadata=dict(self.metadata),
-            temporal_context=dict(self.temporal_context) if self.temporal_context else None,
+            metadata=copy.deepcopy(self.metadata),
+            temporal_context=(
+                copy.deepcopy(self.temporal_context)
+                if self.temporal_context
+                else None
+            ),
         )
 
     def update(self, subsystem_outputs: List[Any]) -> None:
@@ -318,15 +329,30 @@ class GlobalWorkspace:
         Adds a new percept to active_percepts.
 
         This method adds a percept to the workspace, using its ID as key.
+        When at capacity, the oldest percept is evicted — GWT's limited-
+        capacity bottleneck is the entire theoretical point of the model.
 
         Args:
             percept: The Percept instance to add
-
-        Example:
-            >>> percept = Percept(modality="text", raw="Hello world")
-            >>> workspace.add_percept(percept)
         """
         self.active_percepts[percept.id] = percept
+
+        # Capacity enforcement (GWT bottleneck): evict oldest by timestamp
+        # when over the limit. Audit 2026-05-10 flagged that capacity was
+        # accepted but never enforced — making the workspace a dict instead
+        # of the limited-capacity broadcast theory calls for.
+        if len(self.active_percepts) > self.capacity:
+            oldest_id = min(
+                self.active_percepts,
+                key=lambda pid: self.active_percepts[pid].timestamp,
+            )
+            evicted = self.active_percepts.pop(oldest_id)
+            logger.debug(
+                "Evicted percept %s (modality=%s) — workspace at capacity",
+                evicted.id,
+                evicted.modality,
+            )
+
         logger.debug(f"Added percept: id={percept.id}, modality={percept.modality}")
 
     def add_goal(self, goal: Goal) -> None:
@@ -351,11 +377,24 @@ class GlobalWorkspace:
         if any(g.id == goal.id for g in self.current_goals):
             logger.warning(f"Goal {goal.id} already exists in workspace")
             return
-        
+
         self.current_goals.append(goal)
-        
+
         # Sort by priority (highest first)
         self.current_goals.sort(key=lambda g: g.priority, reverse=True)
+
+        # Capacity enforcement: drop the lowest-priority tail when above
+        # capacity. With the list already sorted high → low, this is the
+        # cheapest eviction policy that preserves the most-important goals.
+        if len(self.current_goals) > self.capacity:
+            dropped = self.current_goals[self.capacity:]
+            self.current_goals = self.current_goals[: self.capacity]
+            for g in dropped:
+                logger.debug(
+                    "Evicted goal %s (priority=%.2f) — workspace at capacity",
+                    g.id,
+                    g.priority,
+                )
         
         logger.info(f"Added goal: type={goal.type.value}, priority={goal.priority}")
 
@@ -378,6 +417,39 @@ class GlobalWorkspace:
                 self.current_goals.sort(key=lambda g: g.priority, reverse=True)
                 return True
         return False
+
+    def remove_completed_goals(
+        self, completion_threshold: float = 1.0
+    ) -> List[str]:
+        """Remove goals whose progress has reached the completion threshold.
+
+        Without this sweep, completed goals (especially RESPOND_TO_USER)
+        accumulate in current_goals and generate redundant downstream
+        actions — audit 2026-05-10 flagged this as a real cycle-level bug.
+        The cycle executor should call this after each cycle once it's
+        recorded progress on the active goals.
+
+        Args:
+            completion_threshold: Goals with `progress >= threshold` are
+                removed. Default 1.0 (only fully-completed goals removed).
+
+        Returns:
+            List of removed goal IDs (for logging / metrics).
+        """
+        completed = [
+            g for g in self.current_goals if g.progress >= completion_threshold
+        ]
+        if not completed:
+            return []
+        completed_ids = [g.id for g in completed]
+        self.current_goals = [
+            g for g in self.current_goals
+            if g.progress < completion_threshold
+        ]
+        logger.info(
+            "Removed %d completed goal(s): %s", len(completed_ids), completed_ids
+        )
+        return completed_ids
 
     def remove_goal(self, goal_id: str) -> None:
         """

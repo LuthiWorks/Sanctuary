@@ -37,11 +37,10 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 import chromadb
 from chromadb.config import Settings
 
-# Configure logging with appropriate gravity
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
-)
+# Module-level logger. Library code must NOT call logging.basicConfig —
+# doing so silently overrides whatever logging config the application
+# (or test runner) has set. The application's entry-point script is
+# responsible for configuring root logging; we only get our named logger.
 logger = logging.getLogger(__name__)
 
 # ============================================================================

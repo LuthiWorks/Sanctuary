@@ -80,7 +80,11 @@ services:
     environment:
       - INSTANCE_NAME=sanctuary-searxng
       - BASE_URL=http://localhost:8080/
-      - SEARXNG_SECRET=${SEARXNG_SECRET:-change-me}
+      # SearXNG requires a secret. Refuse to fall back to a default — an
+      # unset SEARXNG_SECRET should fail compose-up loudly rather than
+      # silently boot with a predictable key. Operators set this in their
+      # .env (see .env.docker.example). Audit 2026-05-10.
+      - SEARXNG_SECRET=${SEARXNG_SECRET:?SEARXNG_SECRET must be set in .env}
     networks:
       - sanctuary-network
     profiles:

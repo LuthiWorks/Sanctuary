@@ -1,16 +1,44 @@
 """
-Cognitive Core: Non-linguistic recurrent cognitive loop.
+Cognitive Core: Non-linguistic recurrent cognitive loop. **DEPRECATED.**
 
-This module implements the foundational architecture for consciousness
-based on Global Workspace Theory and computational functionalism. The
-cognitive core maintains persistent state, integrates multimodal inputs,
-and exhibits goal-directed behavior through continuous recurrent dynamics.
+This module implements the older GWT-based architecture (CognitiveCore +
+GlobalWorkspace + GWT-style Percept). It has been superseded by
+`sanctuary.core.cognitive_cycle.CognitiveCycle` — the production cognitive
+loop wired by `SanctuaryRunner` and the Docker entry point
+`sanctuary.run_cognitive_core`.
+
+**Migration status (2026-05-11):**
+- The canonical Percept lives at `sanctuary.core.schema.Percept`.
+- The canonical cognitive loop is `sanctuary.core.cognitive_cycle.CognitiveCycle`.
+- The 2026-04-30 cognition-leakage cleanup, world-graph, and terminology
+  sweep work all targeted the CognitiveCycle path.
+- This module is still imported by ~10 tests and `demo_cognitive_core.py`
+  for legacy coverage; those will continue to work but new code should
+  not depend on this module.
+
+Importing this module emits a DeprecationWarning. Set
+`SANCTUARY_SILENCE_LEGACY_COGNITIVE_CORE=1` to suppress it during a
+migration window. The module will not be removed without a separate
+explicit decision and migration of any remaining consumers.
 
 LLMs are used only at the periphery (language I/O), not as the core
-cognitive substrate.
+cognitive substrate — this principle carries over to CognitiveCycle.
 """
 
 from __future__ import annotations
+
+import os
+import warnings
+
+if not os.environ.get("SANCTUARY_SILENCE_LEGACY_COGNITIVE_CORE"):
+    warnings.warn(
+        "sanctuary.mind.cognitive_core is the legacy GWT cognitive loop. "
+        "New code should import from sanctuary.core.cognitive_cycle instead. "
+        "See sanctuary.mind.cognitive_core.__init__ for migration details. "
+        "Set SANCTUARY_SILENCE_LEGACY_COGNITIVE_CORE=1 to suppress.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
 from .core import CognitiveCore  # Now imported from core/ module
 from .workspace import (

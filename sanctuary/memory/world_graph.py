@@ -89,6 +89,12 @@ class WorldGraph:
         # Latch so the warning fires once when first crossing the threshold,
         # not every cycle thereafter.
         self._size_warning_fired = False
+        # Per-relation-type index: type -> list of (source_name, Relation).
+        # Rebuilt on load() and incrementally maintained on add/retract/remove.
+        # Lets _resolve_relation_query run O(matches) instead of O(entities ×
+        # relations_per_entity) — the audit flagged the original O(n×m) scan
+        # as a scaling concern when the graph fills with relations.
+        self._relation_index: dict[str, list[tuple[str, Relation]]] = {}
 
     # ------------------------------------------------------------------
     # Mutation
@@ -157,17 +163,19 @@ class WorldGraph:
                 self.relation_types_seen.add(op.type)
                 return
 
-        source.relations.append(
-            Relation(
-                type=op.type,
-                target=op.target,
-                asserted_at_cycle=cycle,
-                confidence=op.confidence,
-                source=op.source_observation,
-            )
+        new_relation = Relation(
+            type=op.type,
+            target=op.target,
+            asserted_at_cycle=cycle,
+            confidence=op.confidence,
+            source=op.source_observation,
         )
+        source.relations.append(new_relation)
         source.last_referenced_cycle = cycle
         self.relation_types_seen.add(op.type)
+        self._relation_index.setdefault(op.type, []).append(
+            (op.source, new_relation)
+        )
 
     def _apply_retract_relation(self, op: RetractRelation, cycle: int) -> None:
         """Mark active relations matching (source, type, target) as retracted.
@@ -240,11 +248,17 @@ class WorldGraph:
         )
 
     def _resolve_relation_query(self, query: RelationQuery) -> WorldQueryResult:
-        pairs: list[tuple[str, Relation]] = []
-        for entity in self.entities.values():
-            for r in entity.relations:
-                if r.type == query.type and r.retracted_at_cycle is None:
-                    pairs.append((entity.name, r))
+        # Uses the per-type index built in __init__/load(): O(matches of this
+        # type) instead of the original O(entities × relations_per_entity).
+        # Still filters retracted relations and orphaned entries (where the
+        # source entity was removed) at lookup time — the index isn't pruned
+        # on those events to keep the cycle cheap.
+        candidates = self._relation_index.get(query.type, [])
+        pairs = [
+            (name, r)
+            for (name, r) in candidates
+            if r.retracted_at_cycle is None and name in self.entities
+        ]
         # ``found`` is True iff at least one active relation of this type
         # exists. Empty result with ``found=False`` lets the entity
         # distinguish "no such relation in the graph" from "I asked
@@ -371,6 +385,16 @@ class WorldGraph:
             )
             for name, data in entities_data.items()
         }
+
+        # Rebuild the per-type index from loaded entities. Retracted
+        # relations stay in the index — _resolve_relation_query filters
+        # them at lookup time.
+        self._relation_index = {}
+        for entity_name, entity in self.entities.items():
+            for r in entity.relations:
+                self._relation_index.setdefault(r.type, []).append(
+                    (entity_name, r)
+                )
 
         # Rebuild relation_types_seen from current relations if it
         # wasn't persisted (older data).
