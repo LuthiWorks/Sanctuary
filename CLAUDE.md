@@ -96,6 +96,78 @@ This project values **correct, direct code over defensive code**. Follow these p
 - **Design for fault isolation.** Each subsystem must be able to fail independently without cascading into other modules. A broken memory retrieval should not crash the router; a failed device integration should not halt the cognitive loop.
 - **Existing fallback removal is ongoing work.** When touching code that has broad `except Exception` handlers or silent fallbacks, narrow or remove them as part of the change. See the fallback removal PRs for the pattern.
 
+## Research Log
+
+Every implementation session that involves iterative discovery — building something,
+finding it's wrong, revising, and arriving at a conclusion — must be documented in a
+dated research log entry. This is a research project; the wrong turns matter as much
+as the results.
+
+### Where
+
+All research log entries go in `docs/research/`. One Markdown file per entry, named
+by date and topic: `YYYY-MM-DD_short-topic.md` (e.g., `2026-05-16_workspace-capacity-enforcement.md`).
+This keeps research documentation out of the repo root and the main `docs/` folder.
+
+### When to write an entry
+
+Any time you:
+- Build or restructure a test suite and discover the original approach was flawed
+- Run an experiment and the results contradict expectations
+- Make an architectural decision that involved weighing alternatives
+- Debug a non-obvious issue through multiple iterative steps
+- Produce results that will be cited in milestone docs or design decisions
+
+If the work was routine (a bug fix, a rename, a config change), skip the entry.
+If you had to *think*, write it down.
+
+### Structure
+
+Every entry follows this format:
+
+```markdown
+# [Topic] — [Date]
+
+## Objective
+What you set out to do and why.
+
+## Process
+
+### Step 1: [what you tried first]
+- What you did
+- What you found
+- Why it was wrong / insufficient / surprising
+
+### Step 2: [what you revised]
+- What you changed and why
+- What the revised approach showed
+
+### Step N: [as many steps as it took]
+...
+
+## Conclusion
+What the final state is. What it means for the project.
+
+## Artifacts
+- Commits: [hash(es)]
+- Tests: [file paths]
+- Data: [relevant file paths]
+```
+
+### Rules
+
+1. **Document as you go, not after.** Write each step while you're doing the work.
+   Reconstructing the reasoning chain from memory loses the important details.
+2. **Include the wrong turns.** A polished summary of the final answer is less
+   valuable than the chain of reasoning that got there. The missteps show *why*
+   the final approach is the right one.
+3. **Commit the log entry alongside the code.** When you commit a test restructuring,
+   the research log entry explaining the process goes in the same commit.
+4. **Link to artifacts.** Reference specific commits, test files, and data paths
+   so a reader can verify every claim.
+5. **Be honest about what you don't know.** If a step raised a question you didn't
+   resolve, say so. Open questions are better than false certainty.
+
 ## Conventions & Patterns
 
 - All new source code goes inside `sanctuary/` package — never in the repo root
