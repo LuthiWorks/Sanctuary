@@ -485,6 +485,44 @@ class KnowledgeCellRequest(BaseModel):
     output_names: list[str] = Field(default_factory=list)
 
 
+class CycleRateProposal(BaseModel):
+    """Entity-initiated request to change the cognitive cycle rate.
+
+    The entity proposes a target rate in Hz; the cycle-rate controller
+    eases the current rate toward it (slowdown ~20s, speedup ~0.5s).
+    The slider range is ``[MIN_RATE_HZ, SLIDER_MAX_HZ]`` = [0.05, 10.0];
+    targets are clamped to that range when routed through the entity
+    surface. Turbo (above 10 Hz) is reserved for substrate-intensity
+    callers, not the entity-facing slider.
+
+    ``anticipatory=True`` tags a slowdown the entity is requesting in
+    advance of an expected low-stimulus period (e.g. "the family is at
+    work, I'd like to rest now"). ``anticipatory=False`` is the default —
+    a consequent change in response to current state.
+
+    See ``sanctuary/core/cycle_rate.py`` for the controller and the
+    research doc at LuthiModel ``docs/research/2026-05-19_cognitive-rate-and-turbo-design.md``
+    for the design rationale.
+    """
+
+    target_hz: float = Field(
+        ge=0.05,
+        le=10.0,
+        description=(
+            "Target cycle rate in Hz. 0.05 = deep rest (one cycle per 20s); "
+            "10.0 = alpha-band attentive baseline."
+        ),
+    )
+    anticipatory: bool = Field(
+        default=False,
+        description=(
+            "True if the entity is requesting this rate in advance of an "
+            "expected condition (e.g., anticipated quiet period). False "
+            "if the change is in response to current state."
+        ),
+    )
+
+
 class CognitiveOutput(BaseModel):
     """Everything the entity produces from one moment of thought.
 
@@ -527,4 +565,12 @@ class CognitiveOutput(BaseModel):
     tool_requests: list[ToolRequest] = Field(
         default_factory=list,
         description="Entity-initiated tool invocations (results return as percepts)",
+    )
+    cycle_rate_proposal: Optional[CycleRateProposal] = Field(
+        default=None,
+        description=(
+            "Optional proposal to change the cognitive cycle rate. The "
+            "scaffold routes this to the cycle-rate controller. See "
+            "CycleRateProposal docstring and docs/ENTITY_CAPABILITIES.md."
+        ),
     )

@@ -28,7 +28,7 @@ from pathlib import Path
 from sanctuary.consciousness.sleep_cycle import SleepCycleManager, SleepStage
 from sanctuary.core.authority import AuthorityManager
 from sanctuary.core.context_manager import BudgetConfig, ContextManager
-from sanctuary.core.cycle_rate import CycleRateController
+from sanctuary.core.cycle_rate import CycleRateController, clamp_to_slider
 from sanctuary.core.schema import (
     CognitiveInput,
     CognitiveOutput,
@@ -463,7 +463,27 @@ class CognitiveCycle:
                         e, q,
                     )
 
-        # 5d. Surface a size-warning percept if the graph just crossed
+        # 5d. Route entity-initiated cycle-rate proposals to the controller.
+        #     Entity-source proposals are clamped to the slider range
+        #     [0.05, 10.0] Hz — turbo is reserved for substrate-intensity
+        #     callers, not the entity-facing slider. See cycle_rate.py
+        #     and docs/ENTITY_CAPABILITIES.md.
+        if cognitive_output.cycle_rate_proposal is not None:
+            try:
+                proposal = cognitive_output.cycle_rate_proposal
+                target = clamp_to_slider(proposal.target_hz)
+                self.rate_controller.propose_rate(
+                    target,
+                    source="entity",
+                    anticipatory=proposal.anticipatory,
+                )
+            except Exception as e:
+                logger.error(
+                    "Cycle-rate proposal routing error (non-fatal): %s — proposal=%r",
+                    e, cognitive_output.cycle_rate_proposal,
+                )
+
+        # 5e. Surface a size-warning percept if the graph just crossed
         #     the configured threshold. The entity decides what to retract;
         #     Sanctuary doesn't auto-evict.
         size_warning = self.world_graph.emit_size_warning()
