@@ -270,3 +270,69 @@ class TestFullCycleIntegration:
         assert cycle.stream.cycle_count == 10
         assert model.cycle_count == 10
         assert cycle.last_output is not None
+
+
+class TestCycleRateControllerIntegration:
+    """Verify the cognitive cycle wires up the cycle-rate controller."""
+
+    def test_constructs_default_controller_from_cycle_delay(self):
+        from sanctuary.core.cycle_rate import CycleRateController
+
+        cycle = CognitiveCycle(model=PlaceholderModel(), cycle_delay=0.1)
+        assert isinstance(cycle.rate_controller, CycleRateController)
+        assert cycle.rate_controller.current_rate_hz == pytest.approx(10.0)
+
+    def test_uses_provided_controller(self):
+        from sanctuary.core.cycle_rate import CycleRateController
+
+        controller = CycleRateController(initial_hz=5.0)
+        cycle = CognitiveCycle(
+            model=PlaceholderModel(),
+            cycle_delay=0.1,
+            cycle_rate_controller=controller,
+        )
+        assert cycle.rate_controller is controller
+        assert cycle.rate_controller.current_rate_hz == 5.0
+
+    def test_cycle_delay_zero_yields_ten_hz_controller(self):
+        """cycle_delay=0 is the test convention for 'fast as possible'.
+
+        With the controller in place there's a floor at MAX_RATE_HZ
+        (10 Hz / 0.1s sleep). Tests that previously used cycle_delay=0
+        will sleep 0.1s per iteration — acceptable for unit tests but
+        worth knowing.
+        """
+        cycle = CognitiveCycle(model=PlaceholderModel(), cycle_delay=0.0)
+        assert cycle.rate_controller.current_rate_hz == 10.0
+
+    def test_cycle_delay_two_seconds_yields_half_hz_controller(self):
+        cycle = CognitiveCycle(model=PlaceholderModel(), cycle_delay=2.0)
+        assert cycle.rate_controller.current_rate_hz == pytest.approx(0.5)
+
+    @pytest.mark.asyncio
+    async def test_propose_rate_during_run_takes_effect_on_next_sleep(self):
+        """A rate change should be visible to the loop on its next read.
+
+        We propose a slower rate with zero smoothing, run a cycle, and
+        verify the controller's current_delay_seconds reflects the
+        new rate after the loop's tick advances.
+        """
+        from sanctuary.core.cycle_rate import CycleRateController
+
+        # Smoothing=0 so the change snaps on the next tick.
+        controller = CycleRateController(initial_hz=10.0, smoothing_seconds=0.0)
+        cycle = CognitiveCycle(
+            model=PlaceholderModel(),
+            cycle_delay=0.1,
+            cycle_rate_controller=controller,
+        )
+
+        # Propose the rate change before running.
+        controller.propose_rate(2.0)
+        assert controller.current_rate_hz == 10.0  # not yet ticked
+        assert cycle.rate_controller is controller
+
+        await cycle.run(max_cycles=2)
+        # After at least one inter-cycle tick, the controller has
+        # snapped to 2.0 Hz (smoothing=0 snaps on any tick).
+        assert controller.current_rate_hz == pytest.approx(2.0)

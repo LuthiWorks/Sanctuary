@@ -213,10 +213,11 @@ class TestCognitiveCycleGracefulDegradation:
         development must surface so they can be diagnosed.
         """
         from core.cognitive_cycle import CognitiveCycle
+        from core.cycle_rate import CycleRateController
 
         cycle = CognitiveCycle.__new__(CognitiveCycle)
         cycle.running = True
-        cycle._cycle_delay = 0.001
+        cycle.rate_controller = CycleRateController(initial_hz=10.0)
 
         call_count = 0
         async def cycle_side_effect():
@@ -239,10 +240,11 @@ class TestCognitiveCycleGracefulDegradation:
         crash boundary; before then, the loop must not swallow errors.
         """
         from core.cognitive_cycle import CognitiveCycle
+        from core.cycle_rate import CycleRateController
 
         cycle = CognitiveCycle.__new__(CognitiveCycle)
         cycle.running = True
-        cycle._cycle_delay = 0.001
+        cycle.rate_controller = CycleRateController(initial_hz=10.0)
 
         failure_count = 0
         async def always_fail():
@@ -467,10 +469,11 @@ class TestTransientFailureEdgeCases:
         propagates out of `run()` instead of being absorbed.
         """
         from core.cognitive_cycle import CognitiveCycle
+        from core.cycle_rate import CycleRateController
 
         cycle = CognitiveCycle.__new__(CognitiveCycle)
         cycle.running = True
-        cycle._cycle_delay = 0.001
+        cycle.rate_controller = CycleRateController(initial_hz=10.0)
 
         call_count = 0
         async def cycle_with_transient_failure():
@@ -614,10 +617,11 @@ class TestCycleInteriorCrashPaths:
     def _make_cycle(self):
         """Build a CognitiveCycle with _assemble_input mocked out."""
         from core.cognitive_cycle import CognitiveCycle
+        from core.cycle_rate import CycleRateController
 
         cycle = CognitiveCycle.__new__(CognitiveCycle)
         cycle.running = True
-        cycle._cycle_delay = 0.001
+        cycle.rate_controller = CycleRateController(initial_hz=10.0)
         cycle.cycle_count = 0
         cycle._last_output = None
         cycle._output_handlers = []

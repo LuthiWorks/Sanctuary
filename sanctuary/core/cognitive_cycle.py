@@ -28,6 +28,7 @@ from pathlib import Path
 from sanctuary.consciousness.sleep_cycle import SleepCycleManager, SleepStage
 from sanctuary.core.authority import AuthorityManager
 from sanctuary.core.context_manager import BudgetConfig, ContextManager
+from sanctuary.core.cycle_rate import CycleRateController
 from sanctuary.core.schema import (
     CognitiveInput,
     CognitiveOutput,
@@ -262,6 +263,7 @@ class CognitiveCycle:
         context_config: Optional[BudgetConfig] = None,
         stream_history: int = 10,
         cycle_delay: float = 0.1,
+        cycle_rate_controller: Optional[CycleRateController] = None,
         world_graph: Optional[WorldGraph] = None,
         world_graph_path: Optional[Path] = None,
     ):
@@ -291,7 +293,16 @@ class CognitiveCycle:
 
         self.running = False
         self.cycle_count = 0
-        self._cycle_delay = cycle_delay
+        # Cycle rate is owned by a controller so the slider, turbo, and
+        # heuristic stimulus-density paths can update it live. If no
+        # controller is provided, derive one from cycle_delay for
+        # back-compat. The loop reads current_delay_seconds each
+        # iteration, so changes take effect on the next sleep.
+        if cycle_rate_controller is not None:
+            self.rate_controller = cycle_rate_controller
+        else:
+            initial_hz = (1.0 / cycle_delay) if cycle_delay > 0 else 10.0
+            self.rate_controller = CycleRateController(initial_hz=initial_hz)
         self._output_handlers: list = []
         self._last_output: Optional[CognitiveOutput] = None
         # Stashed per-cycle for communication agency (needs them after think())
@@ -332,6 +343,7 @@ class CognitiveCycle:
         """
         self.running = True
         cycles = 0
+        last_tick = time.monotonic()
 
         while self.running:
             # Per AGENTS.md: no top-level crash boundary until Phase 9 (First
@@ -345,7 +357,14 @@ class CognitiveCycle:
                 self.running = False
                 break
 
-            await asyncio.sleep(self._cycle_delay)
+            # Advance the rate controller's smoothing by the wall-clock
+            # elapsed since the previous tick. Then sleep for the current
+            # delay — both reads happen here so a rate change made
+            # during _cycle() takes effect on this iteration's sleep.
+            now = time.monotonic()
+            self.rate_controller.tick(now - last_tick)
+            last_tick = now
+            await asyncio.sleep(self.rate_controller.current_delay_seconds)
 
     def stop(self):
         """Stop the cognitive cycle."""
