@@ -29,6 +29,7 @@ from sanctuary.consciousness.sleep_cycle import SleepCycleManager, SleepStage
 from sanctuary.core.authority import AuthorityManager
 from sanctuary.core.context_manager import BudgetConfig, ContextManager
 from sanctuary.core.cycle_rate import CycleRateController, clamp_to_slider
+from sanctuary.core.turbo import TurboManager
 from sanctuary.core.schema import (
     CognitiveInput,
     CognitiveOutput,
@@ -264,6 +265,7 @@ class CognitiveCycle:
         stream_history: int = 10,
         cycle_delay: float = 0.1,
         cycle_rate_controller: Optional[CycleRateController] = None,
+        turbo_manager: Optional[TurboManager] = None,
         world_graph: Optional[WorldGraph] = None,
         world_graph_path: Optional[Path] = None,
     ):
@@ -303,6 +305,9 @@ class CognitiveCycle:
         else:
             initial_hz = (1.0 / cycle_delay) if cycle_delay > 0 else 10.0
             self.rate_controller = CycleRateController(initial_hz=initial_hz)
+        # Turbo state machine. Optional — when not provided the cycle
+        # runs without substrate-intensity-driven rate elevation.
+        self.turbo = turbo_manager
         self._output_handlers: list = []
         self._last_output: Optional[CognitiveOutput] = None
         # Stashed per-cycle for communication agency (needs them after think())
@@ -620,6 +625,20 @@ class CognitiveCycle:
                     experiential_signals.knowledge_signals.update(luthi_signals)
             except Exception as e:
                 logger.error("Luthi introspection injection error (non-fatal): %s", e)
+
+        # Run the turbo state machine against the assembled signals.
+        # The manager reads substrate intensity (mechanical, plus future
+        # emotion-vector sources), runs its idle/armed/active/refractory
+        # state machine, drives engage_turbo / release_turbo on the rate
+        # controller, and auto-journals on exit. After observation it
+        # stamps turbo_active + turbo_duration_seconds onto the signals
+        # so the entity perceives their own elevated-processing periods.
+        if self.turbo is not None:
+            try:
+                self.turbo.observe(experiential_signals)
+                self.turbo.apply_to_signals(experiential_signals)
+            except Exception as e:
+                logger.error("Turbo manager observe error (non-fatal): %s", e)
 
         # Populate self-model with current values from identity system
         self_model = self.stream.get_self_model()

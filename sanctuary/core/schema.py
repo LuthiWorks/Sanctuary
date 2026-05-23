@@ -293,6 +293,19 @@ class ExperientialSignals(BaseModel):
         description="Signals from knowledge cells, keyed by cell name",
     )
 
+    # Turbo state surfaced to the entity so they can perceive their own
+    # elevated-processing periods rather than turbo being hidden machinery.
+    # See sanctuary/core/turbo.py and the 2026-05-19 cognitive-rate design.
+    turbo_active: bool = Field(
+        default=False,
+        description="True when substrate-intensity-driven turbo is engaged.",
+    )
+    turbo_duration_seconds: float = Field(
+        ge=0.0,
+        default=0.0,
+        description="Seconds elapsed since turbo engaged (0.0 when not active).",
+    )
+
 
 class ScaffoldSignals(BaseModel):
     """What the Python subsystems are observing — terse, structured signals.

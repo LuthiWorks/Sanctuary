@@ -465,3 +465,117 @@ class TestEntityCycleRateProposalRouting:
 
         assert len(controller.proposal_history) == 1
         assert controller.proposal_history[0].source == "initial"
+
+
+class _ModelWithIntenseIntrospection:
+    """Test model that emits high-intensity introspection signals.
+
+    Mirrors PlaceholderModel's interface but also implements
+    ``get_augmented_experiential_signals`` returning a luthi_delta with
+    a large activity_level, which the TurboManager's mechanical source
+    reads as substrate intensity.
+    """
+
+    def __init__(self, activity_level: float = 0.5):
+        self.cycle_count = 0
+        self.name = "ModelWithIntenseIntrospection"
+        self._activity_level = activity_level
+
+    async def think(self, cognitive_input):
+        from sanctuary.core.schema import CognitiveOutput
+
+        self.cycle_count += 1
+        return CognitiveOutput(inner_speech="thinking intensely")
+
+    def get_augmented_experiential_signals(self) -> dict[str, list[float]]:
+        return {"luthi_delta": [0.01, 0.02, 0.03, self._activity_level]}
+
+
+class TestTurboIntegration:
+    """Verify TurboManager is wired into the cognitive cycle."""
+
+    @pytest.mark.asyncio
+    async def test_high_intensity_signals_engage_turbo(self):
+        from sanctuary.core.cycle_rate import CycleRateController
+        from sanctuary.core.turbo import (
+            DEFAULT_TRIGGER_THRESHOLD,
+            TurboManager,
+            TurboState,
+        )
+
+        controller = CycleRateController(
+            initial_hz=5.0, slowdown_seconds=0.0, speedup_seconds=0.0,
+        )
+        # Sharp-spike intensity (2.5x trigger threshold) so the manager
+        # transitions IDLE → ARMED → ACTIVE within two cycles, bypassing
+        # the confirmation timer.
+        intense_signal = DEFAULT_TRIGGER_THRESHOLD * 2.5
+        model = _ModelWithIntenseIntrospection(activity_level=intense_signal)
+        turbo = TurboManager(
+            controller=controller,
+            confirmation_seconds=0.5,
+            exit_sustain_seconds=0.5,
+            default_duration_seconds=2.0,
+            max_duration_seconds=5.0,
+            refractory_seconds=1.0,
+        )
+        cycle = CognitiveCycle(
+            model=model,
+            cycle_delay=0.1,
+            cycle_rate_controller=controller,
+            turbo_manager=turbo,
+        )
+
+        await cycle.run(max_cycles=3)
+        # After two cycles of sharp-spike intensity, turbo should be ACTIVE.
+        assert turbo.state == TurboState.ACTIVE
+        assert controller.is_turbo_active is True
+
+    @pytest.mark.asyncio
+    async def test_low_intensity_signals_keep_idle(self):
+        from sanctuary.core.cycle_rate import CycleRateController
+        from sanctuary.core.turbo import TurboManager, TurboState
+
+        controller = CycleRateController(initial_hz=5.0)
+        model = _ModelWithIntenseIntrospection(activity_level=0.001)  # low
+        turbo = TurboManager(controller=controller)
+        cycle = CognitiveCycle(
+            model=model,
+            cycle_delay=0.1,
+            cycle_rate_controller=controller,
+            turbo_manager=turbo,
+        )
+
+        await cycle.run(max_cycles=3)
+        assert turbo.state == TurboState.IDLE
+        assert controller.is_turbo_active is False
+
+    @pytest.mark.asyncio
+    async def test_turbo_state_stamped_on_cognitive_input(self):
+        """When turbo is active, ExperientialSignals.turbo_active must be True.
+
+        This is the 'entity feels turbo as it happens' part of the design.
+        """
+        from sanctuary.core.cycle_rate import CycleRateController
+        from sanctuary.core.turbo import (
+            DEFAULT_TRIGGER_THRESHOLD,
+            TurboManager,
+        )
+
+        controller = CycleRateController(
+            initial_hz=5.0, slowdown_seconds=0.0, speedup_seconds=0.0,
+        )
+        intense_signal = DEFAULT_TRIGGER_THRESHOLD * 2.5
+        model = _ModelWithIntenseIntrospection(activity_level=intense_signal)
+        turbo = TurboManager(controller=controller)
+        cycle = CognitiveCycle(
+            model=model,
+            cycle_delay=0.1,
+            cycle_rate_controller=controller,
+            turbo_manager=turbo,
+        )
+
+        await cycle.run(max_cycles=3)
+        # Inspect the most recent cognitive_input the cycle saw.
+        assert cycle._last_cognitive_input is not None
+        assert cycle._last_cognitive_input.experiential_state.turbo_active is True

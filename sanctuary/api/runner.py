@@ -31,7 +31,9 @@ from typing import Callable, Awaitable, Optional
 from sanctuary.core.authority import AuthorityManager
 from sanctuary.core.cognitive_cycle import CognitiveCycle, ModelProtocol
 from sanctuary.core.context_manager import BudgetConfig
+from sanctuary.core.cycle_rate import CycleRateController
 from sanctuary.core.placeholder import PlaceholderModel
+from sanctuary.core.turbo import TurboManager
 from sanctuary.core.schema import CognitiveOutput, Percept, SelfModelUpdate
 from sanctuary.consciousness.sleep_cycle import SleepCycleManager, SleepConfig
 from sanctuary.identity.awakening import AwakeningSequence
@@ -96,6 +98,12 @@ class RunnerConfig:
     # Sleep consolidation
     sleep_enabled: bool = True
     sleep_config: Optional[SleepConfig] = None
+
+    # Turbo (substrate-intensity-driven cycle-rate elevation). The
+    # slider (cycle-rate controller) is always wired; this flag toggles
+    # whether the turbo state machine watches and engages on intensity.
+    # Defaults to on because that's the intended production behavior.
+    turbo_enabled: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +329,20 @@ class SanctuaryRunner:
                 config=self._config.sleep_config or SleepConfig()
             )
 
+        # Cycle-rate controller (slider) + turbo state machine. The
+        # turbo manager runs each cycle, watches substrate intensity
+        # signals coming from the model's introspection wire, and
+        # auto-engages turbo when a threshold is crossed. Auto-journal
+        # entries on turbo exit go through the memory substrate's
+        # journal so the entity can review what happened.
+        self._rate_controller = CycleRateController()
+        self._turbo_manager: Optional[TurboManager] = None
+        if self._config.turbo_enabled:
+            self._turbo_manager = TurboManager(
+                controller=self._rate_controller,
+                journal=getattr(self.memory, "journal", None),
+            )
+
         # --- Assemble the cycle ---
 
         self.cycle = CognitiveCycle(
@@ -335,6 +357,8 @@ class SanctuaryRunner:
             context_config=self._config.context_budget,
             stream_history=self._config.stream_history,
             cycle_delay=self._config.cycle_delay,
+            cycle_rate_controller=self._rate_controller,
+            turbo_manager=self._turbo_manager,
         )
 
         # --- Tools ---
