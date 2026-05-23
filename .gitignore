@@ -1,5 +1,34 @@
-# Claude Code local settings (contains tokens)
-.claude/
+# Claude Code per-project config. The deny-hook in .claude/hooks/ and
+# its registering .claude/settings.json are tracked so the protection
+# ships with the repo. Everything else under .claude/ is local state or
+# secrets and stays out of git. (Note: ignoring .claude/ wholesale and
+# trying to !-include children doesn't work in git -- once a parent is
+# excluded, children can't be re-included. So we enumerate the things
+# to ignore instead.)
+.claude/settings.local.json
+.claude/.credentials.json
+.claude/credentials/
+.claude/worktrees/
+.claude/sessions/
+.claude/projects/
+.claude/session-env/
+.claude/cache/
+.claude/backups/
+.claude/file-history/
+.claude/launchers/
+.claude/plugins/
+.claude/plans/
+.claude/debug/
+.claude/downloads/
+.claude/image-cache/
+.claude/paste-cache/
+.claude/shell-snapshots/
+.claude/ide/
+.claude/*.log
+.claude/*.jsonl
+.claude/session_state*.md
+.claude/mcp-needs-auth-cache.json
+.claude/stats-cache.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -68,6 +68,19 @@ The following paths contain entity-generated data, constitutional frameworks, an
 
 If a task requires changes near these files, **stop and ask** before proceeding.
 
+A repo-tracked Claude Code deny-hook at `.claude/hooks/protect-paths.ps1`
+backs this rule in code. It composes with the global hook (deny-first
+precedence) and returns `deny` for Bash commands that mention a mutation
+verb (`rm`, `Remove-Item`, `mv`, `cp`, `>`, `git rm`, `git checkout --`,
+`git clean`, etc.) plus any protected path token (`sanctuary/data`,
+`.memories`, `data/`, `constitutional`, `charter`, `rights`,
+`sovereignty`, or a journal-like JSON path). Read-only inspection
+(`cat`, `head`, `grep`, `ls`) is intentionally not blocked. The hook
+script is ASCII-only by deliberate constraint (PowerShell 5.1 on
+Windows reads `.ps1` files without a BOM using the system ANSI codepage,
+so UTF-8 multi-byte characters mis-decode and break the parser; use
+`--` not em-dash, straight quotes not smart quotes).
+
 ## Session Startup & Roadmap
 
 At the start of every new conversation **and** whenever the context window resets, read `To-Do.md` in the repo root. This is the project roadmap and task tracker. Use it to understand what phase we're in, what's done, and what's next.

@@ -1,0 +1,17 @@
+{
+  "_doc": "Project-level Claude Code config. Registers the protected-paths deny-hook. Composes with the global ~/.claude/settings.json -- both PreToolUse hooks fire; deny-first precedence means this hook's denies block protected-path mutations regardless of what the harness-managed allowlist contains. See AGENTS.md 'Protected Files -- DO NOT MODIFY' for the rule this enforces in code.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -ExecutionPolicy Bypass -File \"./.claude/hooks/protect-paths.ps1\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
