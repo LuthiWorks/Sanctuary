@@ -170,42 +170,25 @@ async def run(args: argparse.Namespace) -> int:
 
 
 async def _try_restore_checkpoint(checkpoint_dir: str) -> bool:
-    """Attempt to restore from the latest checkpoint.
+    """Stub for future checkpoint restore.
 
-    Returns True if restoration succeeded, False otherwise.
+    The legacy CognitiveCore checkpoint path was removed alongside the
+    rest of the legacy mind. SanctuaryRunner-side checkpoint/restore via
+    MemorySubstrate is a separate piece of work — see To-Do.md "Phase 9:
+    First Awakening" for the audit and integration steps. This function
+    always returns False until that lands.
     """
-    try:
-        from sanctuary.mind.cognitive_core.checkpoint import CheckpointManager
-
-        manager = CheckpointManager(checkpoint_dir=Path(checkpoint_dir))
-        latest = manager.get_latest_checkpoint()
-        if latest:
-            logger.info("Found checkpoint: %s", latest)
-            workspace = manager.load_checkpoint(latest)
-            logger.info("Restored from checkpoint successfully")
-            return True
-        else:
-            logger.info("No checkpoint found, starting fresh")
-            return False
-    except Exception as exc:
-        logger.warning("Checkpoint restoration failed: %s — starting fresh", exc)
-        return False
+    logger.info("Checkpoint restore not yet wired to SanctuaryRunner — starting fresh")
+    return False
 
 
 async def _save_exit_checkpoint(checkpoint_dir: str) -> None:
-    """Save a checkpoint on exit for crash recovery."""
-    try:
-        from sanctuary.mind.cognitive_core.checkpoint import CheckpointManager
-        from sanctuary.mind.cognitive_core.workspace import GlobalWorkspace
+    """Stub for future checkpoint save on exit.
 
-        manager = CheckpointManager(checkpoint_dir=Path(checkpoint_dir))
-        # Note: In the current architecture, the workspace is internal to
-        # CognitiveCore. For Phase 6 (SanctuaryRunner), checkpointing will
-        # need to be integrated with the new scaffold/memory systems.
-        # For now, we log the intent — full integration is tracked separately.
-        logger.info("Exit checkpoint saved to %s", checkpoint_dir)
-    except Exception as exc:
-        logger.warning("Could not save exit checkpoint: %s", exc)
+    See ``_try_restore_checkpoint`` — same status. This function is a
+    no-op until SanctuaryRunner-side checkpointing lands.
+    """
+    logger.info("Exit checkpoint not yet wired to SanctuaryRunner — skipping")
 
 
 def main(argv=None) -> int:

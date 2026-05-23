@@ -512,7 +512,7 @@ CfC state is compact by nature — it's a vector of continuous values, not prose
 |---|---|---|
 | `devices/` | Sensorium — device abstraction | None. |
 | `perception.py` | Sensorium — sensory encoding | Remove cognitive role. Just encode to embeddings. |
-| `memory_manager.py` | Memory system | Keep tri-store. Add LLM memory directive execution. |
+| ~~`memory_manager.py`~~ | ~~Memory system~~ | Retired 2026-05-22. Replaced by `sanctuary.memory.manager.MemorySubstrate`. |
 | `memory/` subpackage | Memory internals | Keep consolidation, retrieval, emotional weighting. Add surfacer, journal, prospective. |
 | `temporal/` | Sensorium — temporal perception | Feed temporal context to LLM and CfC cells. |
 | `workspace.py` | Shared data types | Keep. Workspace = integration point between LLM, CfC, and scaffold. |

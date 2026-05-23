@@ -296,14 +296,12 @@ class SanctuaryClient(discord.Client):
     def __init__(
         self,
         guild_id: int | None = None,
-        cognitive_core=None,
         max_queue_size: int = 200,
     ):
         """Initialise the Discord client.
 
         Args:
             guild_id: Optional guild ID for guild-scoped command sync.
-            cognitive_core: Optional CognitiveCore to route messages through.
             max_queue_size: Maximum outbound message queue depth.
         """
         intents = discord.Intents.all()
@@ -331,7 +329,6 @@ class SanctuaryClient(discord.Client):
         }
 
         # --- Hardening infrastructure ---
-        self._cognitive_core = cognitive_core
         self._reconnection = ReconnectionManager()
         self._rate_limiters: Dict[int, RateLimiter] = {}  # per-channel
         self._message_queue = MessageQueue(max_size=max_queue_size)
@@ -480,31 +477,11 @@ class SanctuaryClient(discord.Client):
         if message.author.bot:
             return
 
-        if self._cognitive_core is not None:
-            try:
-                await self._cognitive_core.process_language_input(
-                    message.content,
-                    context={
-                        "source": "discord",
-                        "channel_id": message.channel.id,
-                        "author": str(message.author),
-                        "guild_id": message.guild.id if message.guild else None,
-                    },
-                )
-
-                # Wait for cognitive response
-                response = await self._cognitive_core.get_response(timeout=10.0)
-                if response and response.get("type") == "SPEAK":
-                    await self.enqueue_message(
-                        channel_id=message.channel.id,
-                        content=response.get("text", "..."),
-                        priority=MessagePriority.RESPONSE,
-                    )
-            except Exception as exc:
-                logger.error(f"Error processing message through cognitive core: {exc}")
-        else:
-            # Fallback: echo-style stub when no cognitive core attached
-            logger.debug(f"No cognitive core — ignoring message from {message.author}")
+        # Discord inbound message routing is handled by the canonical
+        # cognitive cycle via the sensorium / tool layer, not here.
+        # When that wiring is in place, message events should be routed
+        # to ``SanctuaryRunner.inject_text``.
+        logger.debug(f"Discord message received from {message.author} (not yet routed)")
 
     # ---- Command tree setup ----
 

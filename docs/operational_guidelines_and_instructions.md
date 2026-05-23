@@ -1,5 +1,14 @@
 # Operational Guidelines and Instructions
 
+> **Status: partially stale (2026-05-22).** Sections referencing
+> `sanctuary.mind.cognitive_core` (CognitiveCore, GlobalWorkspace) or
+> `sanctuary.mind.memory_manager` (MemoryManager) describe the legacy
+> GWT cognitive loop that was retired on this date. Treat those
+> sections as historical reference, not current operational guidance.
+> Canonical loop: `sanctuary.core.cognitive_cycle.CognitiveCycle`,
+> wired by `sanctuary.api.runner.SanctuaryRunner`. Canonical memory:
+> `sanctuary.memory.manager.MemorySubstrate`.
+
 This document contains essential operational instructions and guidelines for running, testing, and configuring the Sanctuary system.
 
 ---

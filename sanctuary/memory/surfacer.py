@@ -22,8 +22,9 @@ logger = logging.getLogger(__name__)
 class MemoryStoreProtocol(Protocol):
     """Interface for any backend that can answer semantic queries.
 
-    The surfacer works with anything that implements this — the legacy
-    MemoryManager, a ChromaDB wrapper, or an in-memory test store.
+    The surfacer works with anything that implements this — a ChromaDB
+    wrapper, an in-memory test store, or any other backend that exposes
+    semantic recall, find_associated, and journal access.
     """
 
     async def recall(

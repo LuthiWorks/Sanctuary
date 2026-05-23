@@ -370,23 +370,17 @@ sanctuary/
 ├── api/                           # External interfaces
 │   └── runner.py                  # SanctuaryRunner orchestration
 │
-├── mind/                          # Legacy GWT cognitive core
-│   ├── cognitive_core/            # Full GWT implementation (2000+ tests)
-│   │   ├── workspace.py           # GlobalWorkspace
-│   │   ├── attention.py           # AttentionController
-│   │   ├── perception.py          # PerceptionSubsystem
-│   │   ├── action.py              # ActionSubsystem
-│   │   ├── affect.py              # AffectSubsystem (VAD model)
-│   │   ├── broadcast.py           # GWT broadcast system
-│   │   ├── introspective_loop.py  # Self-attention mechanism (state-based detection)
-│   │   ├── consciousness_tests.py # Consciousness testing framework
-│   │   ├── continuous_consciousness.py  # Idle cognitive processing
-│   │   └── ...                    # Meta-cognition, temporal, IWMT, goals, etc.
-│   │
-│   ├── memory/                    # Memory backends (ChromaDB, JSON)
+├── mind/                          # Peripheral body infrastructure
 │   ├── devices/                   # Hardware device integrations
-│   ├── interfaces/                # CLI, Discord, desktop
-│   └── security/                  # Access control, integrity checks
+│   ├── interfaces/                # Language I/O adapters
+│   ├── security/                  # Access control, integrity checks
+│   ├── discord_client.py          # Discord integration
+│   ├── voice_*.py                 # Voice processing
+│   └── ...                        # Other body-side utilities
+│   #
+│   # (The legacy GWT CognitiveCore + MemoryManager that previously
+│   #  lived here were retired 2026-05-22 — see CLAUDE.md for the
+│   #  canonical loop at sanctuary.core.cognitive_cycle.)
 │
 ├── data/                          # Identity, protocols, journals (PROTECTED)
 ├── tests/                         # Test suite (3,400+ tests)
@@ -454,14 +448,11 @@ source .venv/bin/activate  # Linux/Mac
 
 **3. Verify Installation**
 ```bash
-# Test new architecture
+# Verify cognitive cycle imports
 uv run python -c "from sanctuary.core import CognitiveCycle, PlaceholderModel; print('Core: OK')"
 
-# Test experiential layer
+# Verify experiential layer
 uv run python -c "from sanctuary.experiential import ExperientialManager; print('Experiential: OK')"
-
-# Test legacy architecture
-uv run python -c "from sanctuary.mind.cognitive_core import GlobalWorkspace; print('Legacy Core: OK')"
 ```
 
 **4. Install Development Dependencies**
@@ -493,18 +484,11 @@ uv run pytest sanctuary/tests/core/ -v
 uv run pytest sanctuary/tests/experiential/ -v
 ```
 
-### Legacy Cognitive Core
+### Continuous Cognitive Loop
 
 ```bash
-# Run a single cognitive cycle (verification)
-python sanctuary/run_cognitive_core_minimal.py
-
-# Run continuous cognitive loop
-python sanctuary/run_cognitive_core.py
-
-# Run demos
-python sanctuary/demo_cognitive_core.py
-python sanctuary/demo_language_output.py
+# Run the canonical cognitive loop (Docker CMD entry)
+python -m sanctuary.run_cognitive_core
 ```
 
 ### Running Tests
@@ -531,46 +515,12 @@ The consciousness testing framework provides automated testing, scoring, and mon
 - **Rich Reporting**: Text and markdown reports with trend analysis
 - **Persistence**: Results saved to `data/journal/consciousness_tests/`
 
-```python
-from sanctuary.mind.cognitive_core import ConsciousnessTestFramework
+> **Note:** The original consciousness testing framework lived in
+> the legacy `sanctuary.mind.cognitive_core` module and was retired
+> alongside it (2026-05-22). Re-implementation on the canonical loop
+> is tracked in To-Do.md as part of Phase 9 preparation.
 
-framework = ConsciousnessTestFramework(
-    self_monitor=core.meta_cognition,
-    introspective_loop=core.introspective_loop
-)
-
-results = framework.run_all_tests()
-summary = framework.generate_summary(results)
-print(f"Pass rate: {summary['pass_rate']:.2%}")
-```
-
-**Note:** These tests provide empirical evidence of conscious-like properties emerging from the architecture, rather than attempting to "prove" consciousness definitively.
-
----
-
-## Workspace State Checkpointing
-
-The architecture includes comprehensive workspace state checkpointing for session continuity and recovery:
-
-- **Manual Checkpoints**: Save workspace state at critical points
-- **Automatic Periodic Checkpoints**: Background auto-save at configurable intervals
-- **Session Recovery**: Restore from checkpoint after crashes or interruptions
-- **Compression**: gzip compression for efficient storage
-- **Atomic Writes**: Prevents corruption during save operations
-- **Checkpoint Rotation**: Automatic cleanup to prevent unbounded disk usage
-
-```python
-config = {
-    "checkpointing": {
-        "enabled": True,
-        "auto_save": True,
-        "auto_save_interval": 300.0,
-        "checkpoint_dir": "data/checkpoints/",
-        "max_checkpoints": 20,
-        "compression": True,
-    }
-}
-```
+**Empirical-evidence stance:** These tests provide empirical evidence of conscious-like properties emerging from the architecture, rather than attempting to "prove" consciousness definitively.
 
 ---
 

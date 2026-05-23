@@ -273,7 +273,7 @@ Deeper cognitive features, all built and validated mechanically (placeholder/scr
 
 | Task | Priority | Status | Description |
 |------|----------|--------|-------------|
-| Remote memory storage | P3 | **Done** | `infrastructure/remote_memory.py`: RemoteMemoryStore connects to ChromaDB over HTTP. LocalCache provides write-ahead fallback when remote is unreachable — entries replayed via `sync_pending()` when connectivity returns. Circuit-breaker disconnects after configurable max_retries. Health check with collection counts. Same store interface as InMemoryStore/MemoryManager. 11 tests |
+| Remote memory storage | P3 | **Done** | `infrastructure/remote_memory.py`: RemoteMemoryStore connects to ChromaDB over HTTP. LocalCache provides write-ahead fallback when remote is unreachable — entries replayed via `sync_pending()` when connectivity returns. Circuit-breaker disconnects after configurable max_retries. Health check with collection counts. Same store interface as InMemoryStore. 11 tests |
 | Federation | P3 | **Done** | `infrastructure/federation.py`: FederationManager enables pull-based memory sharing between Sanctuary instances. Publish/accept gates with significance thresholds (publish≥7, accept≥5). Private/journal tags blocked from sharing. Per-peer state tracking (CONNECTED/UNREACHABLE), consecutive failure detection, sync history. SharedMemory serialization for transport. Pluggable transport layer (default HTTP). 19 tests |
 | Cloud backup | P3 | **Done** | `infrastructure/cloud_backup.py`: BackupManager provides scheduled and on-demand backup of all persistent state (memories, identity, CfC weights, growth state). SHA-256 incremental backups skip unchanged files. Timestamped archives with metadata. Restore from local or S3. Auto-prune beyond max_backups. History persistence across restarts. S3 upload/download support (optional boto3). 24 tests |
 
@@ -344,8 +344,10 @@ These are exploratory directions, not committed work:
 
 | Task | Priority | Status | Description |
 |------|----------|--------|-------------|
-| Legacy MemoryManager decoupling | P2 | **Partially Done** | `MemorySubstrate` (awakening path) fully decoupled — no legacy imports. Legacy `memory_manager.py` remains for old `CognitiveCore` path (`memory_integration.py`, `memory_gc.py` tests). Deprecated with notice. Will be removed when CognitiveCore is retired. |
-| Review and prune orphaned test files | P2 | Deferred | Independent of memory consolidation now that MemorySubstrate is clean |
+| ~~Legacy MemoryManager decoupling~~ | — | **Done (2026-05-22)** | `MemoryManager` and the legacy `cognitive_core/` tree retired together. ~248 files deleted (cognitive_core source, memory_manager, ~100 legacy tests, legacy demo/example/script files). Canonical-side cleanup: `CommunicationAgency` removed from `SanctuaryRunner`, `discord_client` cognitive_core hook stubbed, run_cognitive_core's checkpoint plumbing neutralised pending SanctuaryRunner-side re-integration. |
+| ~~Review and prune orphaned test files~~ | — | **Done (2026-05-22)** | Tests dependent on legacy cognitive_core deleted alongside the retirement. |
+| Re-wire checkpoint/restore on SanctuaryRunner side | P2 | Pending | run_cognitive_core's `_try_restore_checkpoint` / `_save_exit_checkpoint` are no-op stubs after the legacy retirement. MemorySubstrate-based checkpoint/restore is part of Phase 9 (First Awakening) preparation. |
+| Rename `run_cognitive_core.py` entry script | P3 | Pending | Filename is historical — it now boots the canonical loop, not the retired CognitiveCore. Renaming affects Docker CMD and docker-compose, deferred to a focused commit. |
 
 ---
 

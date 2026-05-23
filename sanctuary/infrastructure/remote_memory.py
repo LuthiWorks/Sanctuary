@@ -1,7 +1,7 @@
 """Remote memory storage — ChromaDB on a separate server.
 
-Implements the same store interface as InMemoryStore and legacy MemoryManager,
-but connects to a remote ChromaDB instance over HTTP. Falls back to a local
+Implements the same store interface as InMemoryStore but connects to a
+remote ChromaDB instance over HTTP. Falls back to a local
 cache when the remote server is unreachable, ensuring the cognitive cycle
 never stalls on a network failure.
 

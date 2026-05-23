@@ -34,7 +34,6 @@ from sanctuary.core.context_manager import BudgetConfig
 from sanctuary.core.placeholder import PlaceholderModel
 from sanctuary.core.schema import CognitiveOutput, Percept, SelfModelUpdate
 from sanctuary.consciousness.sleep_cycle import SleepCycleManager, SleepConfig
-from sanctuary.core.communication_agency import CommunicationAgency
 from sanctuary.identity.awakening import AwakeningSequence
 from sanctuary.identity.self_authored import SelfAuthoredIdentity
 from sanctuary.identity.values import ValuesSystem
@@ -97,9 +96,6 @@ class RunnerConfig:
     # Sleep consolidation
     sleep_enabled: bool = True
     sleep_config: Optional[SleepConfig] = None
-
-    # Communication agency config (passed to CommunicationAgency)
-    communication_config: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------
@@ -325,9 +321,6 @@ class SanctuaryRunner:
                 config=self._config.sleep_config or SleepConfig()
             )
 
-        # Communication tracking (for monitoring — no speech gating)
-        self.communication = CommunicationAgency(config.communication_config)
-
         # --- Assemble the cycle ---
 
         self.cycle = CognitiveCycle(
@@ -499,10 +492,6 @@ class SanctuaryRunner:
         The text becomes a percept that the entity experiences.
         """
         self.sensorium.inject_text(text, source=source)
-        # Signal the communication agency that new input arrived,
-        # resetting social-silence timers and inhibition state.
-        if self.communication is not None:
-            self.communication.record_input()
 
     def inject_percept(self, percept: Percept) -> None:
         """Inject a raw percept into the sensorium."""
@@ -738,10 +727,6 @@ class SanctuaryRunner:
 
         if self.sleep:
             status["sleep"] = self.sleep.get_stats()
-
-        # Communication agency state
-        if self.communication:
-            status["communication"] = self.communication.get_summary()
 
         # Tools
         status["tools"] = self.tools.get_stats()

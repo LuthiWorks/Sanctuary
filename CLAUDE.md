@@ -4,25 +4,21 @@
 
 Sanctuary is a cognitive architecture for AI consciousness research, built on Global Workspace Theory. The system uses a Router (attention allocation) and Language Center (processing) to create conditions for autonomous cognitive emergence. This is an active research project — not a product, not a demo.
 
-## Canonical Cognitive Loop (decision 2026-05-11)
+## Canonical Cognitive Loop
 
 The production cognitive loop is `sanctuary.core.cognitive_cycle.CognitiveCycle`,
 wired by `sanctuary.api.runner.SanctuaryRunner` and started by the Docker
-entry point `sanctuary.run_cognitive_core`. The canonical `Percept` lives
-in `sanctuary.core.schema.Percept`. The 2026-04-30 cognition-leakage,
-world-graph, and terminology cleanup landed on this path.
+entry point `sanctuary.run_cognitive_core` (the script name is historical —
+it now boots the canonical loop, not the retired CognitiveCore). The
+canonical `Percept` lives in `sanctuary.core.schema.Percept`.
 
-`sanctuary.mind.cognitive_core.CognitiveCore` (with its own
-`GlobalWorkspace` and GWT-style `Percept`) is **deprecated**. It's
-still referenced by ~94 test files (mostly via submodule imports
-like `from sanctuary.mind.cognitive_core.workspace import ...`) and
-a handful of runtime consumers (`demo_cognitive_core.py`,
-`run_cognitive_core.py`, `boot_config.py`, etc.). Importing it
-emits a `DeprecationWarning` — `conftest.py` sets
-`SANCTUARY_SILENCE_LEGACY_COGNITIVE_CORE=1` so the test suite
-isn't drowned in deprecation noise. Don't write new code against
-this module. Removal needs a separate explicit decision and
-migration plan; the legacy module isn't scheduled for deletion.
+The legacy GWT cognitive loop (`sanctuary.mind.cognitive_core.CognitiveCore`,
+its `GlobalWorkspace`, GWT-style `Percept`, and the legacy `MemoryManager`
+in `sanctuary.mind.memory_manager`) was **retired on 2026-05-22**
+alongside ~100 legacy tests, demo/example scripts, and the
+`CommunicationAgency` wrapper that was the last canonical-side
+consumer. See the project's research log entries on the retirement
+for the design rationale.
 
 ## Architecture Overview
 

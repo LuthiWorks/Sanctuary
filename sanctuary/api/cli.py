@@ -207,8 +207,6 @@ class SanctuaryCLI:
                 self._print_luthi()
             elif line.lower() == "sleep":
                 self._print_sleep()
-            elif line.lower() in ("comm", "communication"):
-                self._print_communication()
             else:
                 # Treat as user input — inject into sensorium
                 self._runner.inject_text(line, source="user:cli")
@@ -378,38 +376,6 @@ Anything else is sent as user input to the cognitive system.
                 print(f"  {k}: {v:.3f}")
             else:
                 print(f"  {k}: {v}")
-        print()
-
-    def _print_communication(self) -> None:
-        if not self._runner:
-            print("  [not booted]")
-            return
-        if not self._runner.communication:
-            print("  [communication agency disabled]")
-            return
-        summary = self._runner.communication.get_summary()
-
-        drives = summary.get("drives", {})
-        inhibitions = summary.get("inhibitions", {})
-        decisions = summary.get("decisions", {})
-
-        print(f"\n  Communication Agency")
-        print(f"  {'─' * 40}")
-        print(f"  Total drive: {drives.get('total_drive', 0):.3f}")
-        print(f"  Active urges: {drives.get('active_urges', 0)}")
-        strongest = drives.get("strongest_urge")
-        if strongest:
-            print(f"  Strongest urge: {strongest.drive_type.value} "
-                  f"(intensity={strongest.get_current_intensity():.2f})")
-
-        print(f"\n  Total inhibition: {inhibitions.get('total_inhibition', 0):.3f}")
-        print(f"  Active inhibitions: {inhibitions.get('active_inhibitions', 0)}")
-
-        last = decisions.get("last_decision")
-        if last:
-            print(f"\n  Last decision: {last.decision.value}")
-            print(f"  Reason: {last.reason}")
-            print(f"  Confidence: {last.confidence:.2f}")
         print()
 
     # ------------------------------------------------------------------

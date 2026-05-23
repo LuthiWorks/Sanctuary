@@ -74,13 +74,6 @@ def runner_config(tmp_data_dir: Path) -> RunnerConfig:
         use_in_memory_store=True,
         silence_threshold=999.0,  # Don't generate silence percepts in tests
         stream_history=5,
-        communication_config={
-            "inhibitions": {
-                "min_output_spacing_seconds": 0.01,  # Near-zero for fast test cycles
-                "low_value_threshold": 0.0,  # Don't inhibit short placeholder responses
-                "uncertainty_threshold": 0.0,  # Don't inhibit on low confidence
-            },
-        },
     )
 
 
