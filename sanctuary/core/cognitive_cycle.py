@@ -29,6 +29,7 @@ from sanctuary.consciousness.sleep_cycle import SleepCycleManager, SleepStage
 from sanctuary.core.authority import AuthorityManager
 from sanctuary.core.context_manager import BudgetConfig, ContextManager
 from sanctuary.core.cycle_rate import CycleRateController, clamp_to_slider
+from sanctuary.core.stimulus_density import StimulusDensityHeuristic
 from sanctuary.core.turbo import TurboManager
 from sanctuary.core.schema import (
     CognitiveInput,
@@ -266,6 +267,7 @@ class CognitiveCycle:
         cycle_delay: float = 0.1,
         cycle_rate_controller: Optional[CycleRateController] = None,
         turbo_manager: Optional[TurboManager] = None,
+        stimulus_density_heuristic: Optional[StimulusDensityHeuristic] = None,
         world_graph: Optional[WorldGraph] = None,
         world_graph_path: Optional[Path] = None,
     ):
@@ -308,6 +310,10 @@ class CognitiveCycle:
         # Turbo state machine. Optional — when not provided the cycle
         # runs without substrate-intensity-driven rate elevation.
         self.turbo = turbo_manager
+        # Stimulus-density heuristic. Optional — when not provided the
+        # cycle runs without autonomic rate adjustment; the entity is
+        # the only driver of slider changes.
+        self.density_heuristic = stimulus_density_heuristic
         self._output_handlers: list = []
         self._last_output: Optional[CognitiveOutput] = None
         # Stashed per-cycle for communication agency (needs them after think())
@@ -639,6 +645,19 @@ class CognitiveCycle:
                 self.turbo.apply_to_signals(experiential_signals)
             except Exception as e:
                 logger.error("Turbo manager observe error (non-fatal): %s", e)
+
+        # Stimulus-density heuristic. Reads time-since-last-input from
+        # the sensorium and proposes slowdown (low density) or speedup
+        # (fresh input) through the rate controller. The heuristic
+        # respects the entity's authority — it stays silent within the
+        # entity's quiet window after an entity-source proposal.
+        if self.density_heuristic is not None:
+            try:
+                self.density_heuristic.observe()
+            except Exception as e:
+                logger.error(
+                    "Stimulus-density heuristic observe error (non-fatal): %s", e
+                )
 
         # Populate self-model with current values from identity system
         self_model = self.stream.get_self_model()

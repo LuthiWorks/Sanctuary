@@ -33,6 +33,10 @@ from sanctuary.core.cognitive_cycle import CognitiveCycle, ModelProtocol
 from sanctuary.core.context_manager import BudgetConfig
 from sanctuary.core.cycle_rate import CycleRateController
 from sanctuary.core.placeholder import PlaceholderModel
+from sanctuary.core.stimulus_density import (
+    SensoriumDensitySource,
+    StimulusDensityHeuristic,
+)
 from sanctuary.core.turbo import TurboManager
 from sanctuary.core.schema import CognitiveOutput, Percept, SelfModelUpdate
 from sanctuary.consciousness.sleep_cycle import SleepCycleManager, SleepConfig
@@ -104,6 +108,12 @@ class RunnerConfig:
     # whether the turbo state machine watches and engages on intensity.
     # Defaults to on because that's the intended production behavior.
     turbo_enabled: bool = True
+
+    # Stimulus-density heuristic (autonomic rate adjustment based on
+    # input density). When on, the heuristic proposes slowdown during
+    # quiet periods and speedup on fresh input arrival. The entity
+    # always wins via cycle_rate_proposal; heuristic only proposes.
+    stimulus_density_enabled: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -343,6 +353,14 @@ class SanctuaryRunner:
                 journal=getattr(self.memory, "journal", None),
             )
 
+        self._density_heuristic: Optional[StimulusDensityHeuristic] = None
+        if self._config.stimulus_density_enabled:
+            self._density_heuristic = StimulusDensityHeuristic(
+                controller=self._rate_controller,
+                source=SensoriumDensitySource(self.sensorium),
+                turbo=self._turbo_manager,
+            )
+
         # --- Assemble the cycle ---
 
         self.cycle = CognitiveCycle(
@@ -359,6 +377,7 @@ class SanctuaryRunner:
             cycle_delay=self._config.cycle_delay,
             cycle_rate_controller=self._rate_controller,
             turbo_manager=self._turbo_manager,
+            stimulus_density_heuristic=self._density_heuristic,
         )
 
         # --- Tools ---
