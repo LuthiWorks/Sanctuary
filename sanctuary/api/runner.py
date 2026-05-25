@@ -110,6 +110,13 @@ class RunnerConfig:
     # Defaults to on because that's the intended production behavior.
     turbo_enabled: bool = True
 
+    # Turbo trace logging. When set, each turbo.observe() call appends
+    # a JSONL line capturing per-source intensity, aggregate intensity,
+    # dominant source, state-before / state-after, and current rate.
+    # Used for empirical threshold tuning — see the threshold-tuning
+    # research log entry. None disables trace logging.
+    turbo_trace_path: Optional[str] = None
+
     # Stimulus-density heuristic (autonomic rate adjustment based on
     # input density). When on, the heuristic proposes slowdown during
     # quiet periods and speedup on fresh input arrival. The entity
@@ -375,6 +382,11 @@ class SanctuaryRunner:
             self._turbo_manager = TurboManager(
                 controller=self._rate_controller,
                 journal=getattr(self.memory, "journal", None),
+                trace_path=(
+                    Path(self._config.turbo_trace_path)
+                    if self._config.turbo_trace_path is not None
+                    else None
+                ),
             )
 
         self._density_heuristic: Optional[StimulusDensityHeuristic] = None

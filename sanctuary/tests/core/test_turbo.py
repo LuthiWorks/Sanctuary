@@ -346,6 +346,81 @@ class TestMultipleSources:
         assert manager.state == TurboState.IDLE
 
 
+class TestTraceLogging:
+    """Trace logging writes one JSONL line per observe() call."""
+
+    def test_trace_path_writes_jsonl(self, controller, signals, tmp_path):
+        import json
+
+        trace_path = tmp_path / "turbo_trace.jsonl"
+        source = _FakeSource(value=0.0)
+        manager = TurboManager(
+            controller=controller,
+            sources=[source],
+            trace_path=trace_path,
+            confirmation_seconds=0.5,
+            exit_sustain_seconds=0.5,
+            default_duration_seconds=2.0,
+            max_duration_seconds=5.0,
+            refractory_seconds=1.0,
+        )
+
+        # Drive through a state transition: low → arming spike → active.
+        source.set(0.001)
+        manager.observe(signals, now=10.0)
+        source.set(DEFAULT_TRIGGER_THRESHOLD * 2.5)
+        manager.observe(signals, now=10.5)
+        manager.observe(signals, now=10.6)
+
+        lines = trace_path.read_text(encoding="utf-8").strip().split("\n")
+        assert len(lines) == 3
+
+        # Each line is parseable JSON with the expected schema.
+        records = [json.loads(line) for line in lines]
+        for r in records:
+            assert "t" in r
+            assert "per_source" in r
+            assert "fake" in r["per_source"]
+            assert "intensity" in r
+            assert "dominant_source" in r
+            assert "state_before" in r
+            assert "state_after" in r
+            assert "current_rate_hz" in r
+            assert "is_turbo_active" in r
+
+        # First observe: state stays IDLE (intensity below arm threshold).
+        assert records[0]["state_before"] == "idle"
+        assert records[0]["state_after"] == "idle"
+        # Second observe: intensity above trigger, IDLE → ARMED.
+        assert records[1]["state_before"] == "idle"
+        assert records[1]["state_after"] == "armed"
+        # Third observe: sharp spike persists; ARMED → ACTIVE.
+        assert records[2]["state_after"] == "active"
+        assert records[2]["is_turbo_active"] is True
+
+    def test_no_trace_path_means_no_file(self, controller, signals, tmp_path):
+        source = _FakeSource(value=DEFAULT_TRIGGER_THRESHOLD * 2.5)
+        manager = TurboManager(
+            controller=controller,
+            sources=[source],
+            trace_path=None,
+        )
+        manager.observe(signals, now=10.0)
+        # No files created in tmp_path.
+        assert list(tmp_path.iterdir()) == []
+
+    def test_trace_creates_parent_directories(self, controller, signals, tmp_path):
+        nested_path = tmp_path / "deep" / "nested" / "trace.jsonl"
+        source = _FakeSource(value=0.001)
+        manager = TurboManager(
+            controller=controller,
+            sources=[source],
+            trace_path=nested_path,
+        )
+        manager.observe(signals, now=10.0)
+        assert nested_path.exists()
+
+
 class TestEventHistory:
     def test_event_recorded_on_exit(self, controller, signals):
         source = _FakeSource(value=0.0)

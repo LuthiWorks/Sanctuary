@@ -23,10 +23,12 @@ in LuthiModel `docs/research/2026-05-19_cognitive-rate-and-turbo-design.md`.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Optional, Protocol
 
 from sanctuary.core.cycle_rate import (
@@ -182,6 +184,7 @@ class TurboManager:
         max_duration_seconds: float = DEFAULT_MAX_TURBO_DURATION_SECONDS,
         refractory_seconds: float = DEFAULT_REFRACTORY_SECONDS,
         turbo_target_hz: float = TURBO_DEFAULT_HZ,
+        trace_path: Optional[Path] = None,
     ):
         self._controller = controller
         self._journal = journal
@@ -203,6 +206,17 @@ class TurboManager:
         self._active_below_exit_at: Optional[float] = None
         self._current_event: Optional[TurboEvent] = None
         self._event_history: list[TurboEvent] = []
+
+        # Trace logging — when ``trace_path`` is provided, every observe()
+        # call appends a JSONL line capturing per-source intensity, state,
+        # controller rate, and (if applicable) current event metadata.
+        # Used to collect empirical activity_level distributions for
+        # threshold tuning. See docs/research/ for analysis.
+        self._trace_path: Optional[Path] = (
+            Path(trace_path) if trace_path is not None else None
+        )
+        if self._trace_path is not None:
+            self._trace_path.parent.mkdir(parents=True, exist_ok=True)
 
     # ----- Read-only state -----------------------------------------
 
@@ -244,7 +258,10 @@ class TurboManager:
 
         t = time.monotonic() if now is None else now
 
-        intensity, dominant_source = self._aggregate_intensity(signals)
+        per_source_intensity = self._per_source_intensity(signals)
+        intensity, dominant_source = self._aggregate_intensity_from(
+            per_source_intensity
+        )
 
         # Always update peak intensity if we're in an active event
         if self._current_event is not None:
@@ -255,6 +272,8 @@ class TurboManager:
             if current_rate > self._current_event.peak_rate_hz:
                 self._current_event.peak_rate_hz = current_rate
 
+        state_before = self._state
+
         if self._state == TurboState.IDLE:
             self._tick_idle(intensity, dominant_source, t)
         elif self._state == TurboState.ARMED:
@@ -263,6 +282,16 @@ class TurboManager:
             self._tick_active(intensity, t)
         elif self._state == TurboState.REFRACTORY:
             self._tick_refractory(intensity, t)
+
+        if self._trace_path is not None:
+            self._emit_trace_line(
+                t=t,
+                per_source=per_source_intensity,
+                aggregate=intensity,
+                dominant=dominant_source,
+                state_before=state_before,
+                state_after=self._state,
+            )
 
     def apply_to_signals(self, signals: ExperientialSignals) -> ExperientialSignals:
         """Stamp turbo state onto an ExperientialSignals instance.
@@ -416,25 +445,70 @@ class TurboManager:
 
     # ----- Helpers --------------------------------------------------
 
-    def _aggregate_intensity(
+    def _per_source_intensity(
         self, signals: ExperientialSignals
-    ) -> tuple[float, str]:
-        """Read all sources and return (max_intensity, source_name)."""
-        max_intensity = 0.0
-        dominant = ""
+    ) -> dict[str, float]:
+        """Read each source independently. Exceptions become 0.0."""
+        out: dict[str, float] = {}
         for src in self._sources:
             try:
-                v = src.intensity(signals)
+                out[src.name] = float(src.intensity(signals))
             except Exception as e:
                 logger.error(
                     "Turbo intensity source %r raised %s (treating as 0)",
                     src.name, e,
                 )
-                v = 0.0
+                out[src.name] = 0.0
+        return out
+
+    def _aggregate_intensity_from(
+        self, per_source: dict[str, float]
+    ) -> tuple[float, str]:
+        """Return (max_intensity, dominant_source_name)."""
+        max_intensity = 0.0
+        dominant = ""
+        for name, v in per_source.items():
             if v > max_intensity:
                 max_intensity = v
-                dominant = src.name
+                dominant = name
         return max_intensity, dominant
+
+    def _aggregate_intensity(
+        self, signals: ExperientialSignals
+    ) -> tuple[float, str]:
+        """Convenience wrapper for callers outside observe()."""
+        return self._aggregate_intensity_from(
+            self._per_source_intensity(signals)
+        )
+
+    def _emit_trace_line(
+        self,
+        *,
+        t: float,
+        per_source: dict[str, float],
+        aggregate: float,
+        dominant: str,
+        state_before: TurboState,
+        state_after: TurboState,
+    ) -> None:
+        """Append one JSON line to the trace file. Best-effort — IO errors
+        log and continue rather than disrupting the cognitive cycle."""
+        record = {
+            "t": t,
+            "per_source": per_source,
+            "intensity": aggregate,
+            "dominant_source": dominant,
+            "state_before": state_before.value,
+            "state_after": state_after.value,
+            "current_rate_hz": self._controller.current_rate_hz,
+            "is_turbo_active": self.is_turbo_active,
+        }
+        try:
+            with open(self._trace_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record))
+                f.write("\n")
+        except Exception as e:
+            logger.error("Turbo trace write failed (non-fatal): %s", e)
 
     def _write_journal_entry(self, event: TurboEvent) -> None:
         if self._journal is None:
