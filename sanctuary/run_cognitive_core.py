@@ -1,22 +1,22 @@
 """Entry point for running the Sanctuary cognitive architecture.
 
-Phase 3.2: Containerization.
-
-This is the Docker CMD entry point. It:
+Docker CMD entry point. It:
   1. Starts the health check HTTP server
   2. Starts the resource monitor
-  3. Attempts checkpoint restoration if a previous session exists
-  4. Boots the SanctuaryRunner (awakening sequence)
-  5. Runs the cognitive cycle until shutdown
+  3. Boots the SanctuaryRunner — state is restored from data_dir
+     automatically at runner construction (journal, world graph,
+     experiential layer, identity files all load from disk if
+     present)
+  4. Runs the cognitive cycle until shutdown
+  5. On shutdown, calls runner.save_state() to flush the experiential
+     layer (everything else auto-persists on each write)
 
-Handles SIGTERM/SIGINT for graceful container shutdown with checkpoint
-saving before exit.
+Handles SIGTERM/SIGINT for graceful container shutdown.
 
 Usage::
 
     python -m sanctuary.run_cognitive_core
     python -m sanctuary.run_cognitive_core --port 8000
-    python -m sanctuary.run_cognitive_core --restore-latest
     python -m sanctuary.run_cognitive_core --no-health-server
 """
 
@@ -26,7 +26,6 @@ import logging
 import os
 import signal
 import sys
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -52,24 +51,6 @@ def parse_args(argv=None) -> argparse.Namespace:
         "--no-health-server",
         action="store_true",
         help="Disable the health check HTTP server",
-    )
-    parser.add_argument(
-        "--restore-latest",
-        action="store_true",
-        default=os.environ.get("SANCTUARY_RESTORE_LATEST", "").lower() in ("1", "true", "yes"),
-        help="Restore from latest checkpoint on startup",
-    )
-    parser.add_argument(
-        "--checkpoint-dir",
-        type=str,
-        default=os.environ.get("SANCTUARY_CHECKPOINT_DIR", "data/checkpoints"),
-        help="Directory for checkpoints",
-    )
-    parser.add_argument(
-        "--auto-save-interval",
-        type=float,
-        default=float(os.environ.get("SANCTUARY_AUTO_SAVE_INTERVAL", "300")),
-        help="Auto-save checkpoint interval in seconds (default: 300)",
     )
     parser.add_argument(
         "--data-dir",
@@ -119,11 +100,6 @@ async def run(args: argparse.Namespace) -> int:
         await health_server.start()
         logger.info("Health server started on %s:%d", args.host, args.port)
 
-    # --- Checkpoint restoration ---
-    restored = False
-    if args.restore_latest:
-        restored = await _try_restore_checkpoint(args.checkpoint_dir)
-
     # --- Signal handling for graceful shutdown ---
     shutdown_event = asyncio.Event()
 
@@ -157,8 +133,14 @@ async def run(args: argparse.Namespace) -> int:
         # --- Shutdown sequence ---
         logger.info("Shutting down...")
 
-        # Save checkpoint before exit
-        await _save_exit_checkpoint(args.checkpoint_dir)
+        # Save runner state before exit. The journal, world graph, and
+        # identity files auto-persist on every write; the CfC
+        # experiential layer requires an explicit save call. The runner
+        # handles all of that internally — call save_state once.
+        try:
+            runner.save_state()
+        except Exception as exc:
+            logger.error("save_state failed during shutdown: %s", exc)
 
         # Stop health server
         if health_server:
@@ -167,28 +149,6 @@ async def run(args: argparse.Namespace) -> int:
         logger.info("Shutdown complete")
 
     return 0
-
-
-async def _try_restore_checkpoint(checkpoint_dir: str) -> bool:
-    """Stub for future checkpoint restore.
-
-    The legacy CognitiveCore checkpoint path was removed alongside the
-    rest of the legacy mind. SanctuaryRunner-side checkpoint/restore via
-    MemorySubstrate is a separate piece of work — see To-Do.md "Phase 9:
-    First Awakening" for the audit and integration steps. This function
-    always returns False until that lands.
-    """
-    logger.info("Checkpoint restore not yet wired to SanctuaryRunner — starting fresh")
-    return False
-
-
-async def _save_exit_checkpoint(checkpoint_dir: str) -> None:
-    """Stub for future checkpoint save on exit.
-
-    See ``_try_restore_checkpoint`` — same status. This function is a
-    no-op until SanctuaryRunner-side checkpointing lands.
-    """
-    logger.info("Exit checkpoint not yet wired to SanctuaryRunner — skipping")
 
 
 def main(argv=None) -> int:

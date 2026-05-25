@@ -43,6 +43,7 @@ from sanctuary.consciousness.sleep_cycle import SleepCycleManager, SleepConfig
 from sanctuary.identity.awakening import AwakeningSequence
 from sanctuary.identity.self_authored import SelfAuthoredIdentity
 from sanctuary.identity.values import ValuesSystem
+from sanctuary.memory.journal import JournalConfig
 from sanctuary.memory.manager import MemorySubstrate, MemorySubstrateConfig
 from sanctuary.monitoring import (
     AttentionHeatmapTracker,
@@ -114,6 +115,21 @@ class RunnerConfig:
     # quiet periods and speedup on fresh input arrival. The entity
     # always wins via cycle_rate_proposal; heuristic only proposes.
     stimulus_density_enabled: bool = True
+
+    # Persistence. When True, the journal, world graph, and CfC
+    # experiential layer persist state to disk under data_dir, and
+    # restore on next boot. Identity files always persist (separate
+    # mechanism). Disable for unit tests that want a clean in-memory
+    # runner with no disk side effects.
+    persist_state: bool = True
+
+    # CfC experiential layer (precision, affect, attention, goal cells +
+    # continuous evolution). When True, the runner constructs an
+    # ExperientialManager and wires it into the cognitive cycle, so
+    # each cycle steps the cells forward and surfaces their state in
+    # the entity's ExperientialSignals. Defaults to on per PLAN.md's
+    # body description.
+    experiential_enabled: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -301,10 +317,18 @@ class SanctuaryRunner:
             max_percept_queue=self._config.max_percept_queue,
         )
 
-        # Memory
+        # Memory. When persist_state is on, the journal writes append-only
+        # JSONL to data_dir/journal.jsonl so entries survive restarts. When
+        # off, the journal is in-memory only (testing path).
+        data_dir_path = Path(self._config.data_dir)
+        journal_file_path: Optional[str] = None
+        if self._config.persist_state:
+            data_dir_path.mkdir(parents=True, exist_ok=True)
+            journal_file_path = str(data_dir_path / "journal.jsonl")
         self.memory = MemorySubstrate(
             config=MemorySubstrateConfig(
                 use_in_memory_store=self._config.use_in_memory_store,
+                journal=JournalConfig(file_path=journal_file_path),
             ),
         )
 
@@ -361,6 +385,39 @@ class SanctuaryRunner:
                 turbo=self._turbo_manager,
             )
 
+        # Experiential layer (CfC cells). When enabled, instantiate the
+        # manager, attempt to restore cell states from
+        # data_dir/experiential/ if present, and wire into the cycle.
+        # On shutdown (save_state), cell states are written back out so
+        # the next boot resumes the continuous-time dynamics where they
+        # left off rather than starting from initialization noise.
+        self._experiential = None
+        if self._config.experiential_enabled:
+            try:
+                from sanctuary.experiential.manager import ExperientialManager
+                self._experiential = ExperientialManager(authority=self.authority)
+                if self._config.persist_state:
+                    exp_dir = data_dir_path / "experiential"
+                    if exp_dir.exists():
+                        try:
+                            self._experiential.load(exp_dir)
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to restore experiential layer from %s: %s",
+                                exp_dir, e,
+                            )
+            except ImportError as e:
+                logger.warning(
+                    "ExperientialManager unavailable (missing dependency?): %s — "
+                    "running without CfC experiential layer", e,
+                )
+
+        # World-graph persistence. When persist_state is on, the cycle
+        # auto-saves on every mutation and loads at construction.
+        world_graph_path: Optional[Path] = None
+        if self._config.persist_state:
+            world_graph_path = data_dir_path / "world_graph.json"
+
         # --- Assemble the cycle ---
 
         self.cycle = CognitiveCycle(
@@ -372,12 +429,14 @@ class SanctuaryRunner:
             authority=self.authority,
             identity=self._identity_bridge,
             sleep_manager=self.sleep,
+            experiential=self._experiential,
             context_config=self._config.context_budget,
             stream_history=self._config.stream_history,
             cycle_delay=self._config.cycle_delay,
             cycle_rate_controller=self._rate_controller,
             turbo_manager=self._turbo_manager,
             stimulus_density_heuristic=self._density_heuristic,
+            world_graph_path=world_graph_path,
         )
 
         # --- Tools ---
@@ -513,6 +572,36 @@ class SanctuaryRunner:
     def stop(self) -> None:
         """Stop the cognitive cycle."""
         self.cycle.stop()
+
+    def save_state(self) -> None:
+        """Persist runtime state to data_dir.
+
+        Most subsystems auto-persist on write — journal append-only
+        JSONL, world graph atomic JSON after each mutation in the
+        cognitive cycle, identity files. This method covers the rest:
+
+          - The CfC experiential layer (in-memory tensors, no auto-save).
+          - The world graph as a backstop, in case mutations happened
+            outside the cycle's apply-and-save path.
+
+        Call from the shutdown sequence. Idempotent.
+        """
+        if not self._config.persist_state:
+            return
+
+        data_dir = Path(self._config.data_dir)
+
+        if self._experiential is not None:
+            try:
+                self._experiential.save(data_dir / "experiential")
+            except Exception as e:
+                logger.error("Failed to save experiential layer: %s", e)
+
+        if self.cycle.world_graph_path is not None:
+            try:
+                self.cycle.world_graph.save(self.cycle.world_graph_path)
+            except Exception as e:
+                logger.error("Failed to save world graph: %s", e)
 
     @property
     def running(self) -> bool:
