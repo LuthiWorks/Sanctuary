@@ -90,17 +90,20 @@ def tiny_luthi_model(luthi_on_path):
         "The room is quiet. Light comes through the window."
     )
     tokenizer = CharTokenizer(sample_text)
+    # The adapter's _format_input truncates to `seq_len * 4` chars but
+    # the CharTokenizer is 1 char per token, so we need model
+    # max_seq_len >= config seq_len * 4 to avoid overflow.
     model = LuthiLM(
         vocab_size=tokenizer.vocab_size,
         d_model=32,
         n_blocks=2,
-        max_seq_len=32,
+        max_seq_len=128,
     )
     model.eval()
     config = {
         "d_model": 32,
         "n_blocks": 2,
-        "seq_len": 32,
+        "seq_len": 16,  # max_chars = 64, under model's 128-token window
         "vocab_size": tokenizer.vocab_size,
     }
     return model, tokenizer, config
@@ -143,11 +146,13 @@ def tiny_multimodal_model(luthi_on_path):
         "have words for what it experiences."
     )
     tokenizer = CharTokenizer(sample_text)
+    # See note above tiny_luthi_model — model max_seq_len must exceed
+    # config seq_len * 4 with CharTokenizer to avoid overflow.
     model = MultimodalLuthiLM(
         vocab_size=tokenizer.vocab_size,
         d_model=16,
         n_blocks=2,
-        max_seq_len=32,
+        max_seq_len=128,
         max_audio_tokens=100,
         audio_patch_frames=16,
         vision_image_size=MM_VISION_IMAGE_SIZE,
@@ -160,7 +165,7 @@ def tiny_multimodal_model(luthi_on_path):
     config = {
         "d_model": 16,
         "n_blocks": 2,
-        "seq_len": 32,
+        "seq_len": 16,
         "vocab_size": tokenizer.vocab_size,
     }
     return model, tokenizer, config

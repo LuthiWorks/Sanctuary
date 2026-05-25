@@ -223,15 +223,14 @@ class TestIntrospectionShapeV2:
             "v2 has set_point + weight — set_point_drift should compute"
         )
 
-    def test_v2_specific_signals_NOT_currently_exposed(self, tiny_v2_model):
-        """error_acc, pred_frob, and precision are v2-native signals
-        that the current get_introspection does NOT read. This test
-        documents the gap.
+    def test_v2_exposes_error_acc_pred_frob_precision(self, tiny_v2_model):
+        """v2-native signals now flow through ``get_introspection``.
 
-        When this test starts FAILING (because get_introspection has
-        been extended to read v2 fields), update it to assert the new
-        v2-aware behavior. Until then, this is the load-bearing finding
-        for the threshold-tuning research log.
+        Closed the gap on 2026-05-25 in the LuthiModel side commit
+        (luthi/generate.py extended with hasattr-gated reads of
+        ``error_acc``, ``prediction``, ``precision``). This test was
+        previously asserting the gap (test_v2_specific_signals_NOT_currently_exposed);
+        now asserts the closed state.
         """
         from luthi.sanctuary_interface import get_introspection
         model, _, _ = tiny_v2_model
@@ -239,11 +238,46 @@ class TestIntrospectionShapeV2:
         state = get_introspection(model)
         block = state["blocks"][0]
 
-        # These are the v2 signals turbo would most want to read.
-        # Confirm they're NOT in the introspection output as of now.
-        assert "error_acc_mean" not in block
-        assert "pred_frob" not in block
-        assert "precision_mean" not in block
+        assert "error_acc_mean" in block
+        assert "error_acc_max" in block
+        assert "pred_frob" in block
+        assert "precision_mean" in block
+
+    def test_v2_adapter_surfaces_pc_signals_as_knowledge_signals(
+        self, tiny_v2_model
+    ):
+        """The Sanctuary-side LuthiModel adapter packages v2 introspection
+        as knowledge_signals['luthi_error_acc'] etc., parallel to how
+        v1 signals get packaged as luthi_plasticity / luthi_drift.
+        """
+        import asyncio
+        model, tokenizer, config = tiny_v2_model
+        bridge = _bridge(model, tokenizer, config)
+
+        from sanctuary.core.schema import (
+            CognitiveInput, EmotionalInput, ComputedVAD, ExperientialSignals,
+        )
+        ci = CognitiveInput(
+            previous_thought=None, new_percepts=[], surfaced_memories=[],
+            prediction_errors=[],
+            emotional_state=EmotionalInput(computed_vad=ComputedVAD()),
+            experiential_state=ExperientialSignals(),
+        )
+        asyncio.run(bridge.think(ci))
+
+        signals = bridge.get_augmented_experiential_signals()
+        # v2 fingerprints
+        assert "luthi_error_acc" in signals
+        assert "luthi_pred_frob" in signals
+        assert "luthi_precision" in signals
+        # One entry per block.
+        assert len(signals["luthi_error_acc"]) == 2
+        # Mechanical channel still populates plasticity/drift on v2.
+        assert "luthi_plasticity" in signals
+        assert "luthi_drift" in signals
+        # v1-only signals are absent on v2.
+        assert "luthi_spike_fraction" not in signals
+        assert "luthi_membrane" not in signals
 
 
 class TestTracePipelineEndToEnd:

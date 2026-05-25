@@ -98,6 +98,12 @@ class MechanicalIntensitySource:
     of how much the substrate changed this cycle. This source uses
     that fourth element as the intensity scalar.
 
+    On v1 (Hebbian/spiking) substrates, ``activity_level`` covers all
+    three components. On v2 (predictive coding) substrates,
+    membrane_change is always zero (no spiking dynamics), so the
+    activity_level signal is correspondingly weaker. Prefer
+    ``PCIntensitySource`` on v2.
+
     Source-pluggable so an emotion-vector source can later read from a
     different signal key without modifying this class.
     """
@@ -119,6 +125,55 @@ class MechanicalIntensitySource:
         if len(values) <= self._activity_index:
             return 0.0
         return abs(float(values[self._activity_index]))
+
+
+class PCIntensitySource:
+    """Reads prediction-error magnitude from v2's per-block error_acc.
+
+    The ``luthi_error_acc`` knowledge signal is one float per
+    PredictiveCodingLayer block — each is the layer's running per-output
+    prediction-error EMA (``error_acc.mean().item()``). High values
+    mean the substrate is currently surprised; that's the direct signal
+    the 2026-05-19 cognitive-rate-and-turbo design named as the primary
+    trigger ("intense prediction error").
+
+    Returns the max across blocks (worst-surprised layer drives turbo)
+    rather than mean, on the principle that one wildly surprised layer
+    is more turbo-worthy than evenly distributed mild surprise. This
+    can be changed via the ``aggregator`` parameter without altering
+    the TurboManager contract.
+
+    Returns 0.0 when the signal is absent — happens on v1 substrates
+    or when the introspection hasn't run yet. The manager treats 0.0 as
+    "no opinion," so this source can coexist with
+    ``MechanicalIntensitySource`` and the turbo aggregation will pick
+    whichever source has a real reading.
+    """
+
+    def __init__(
+        self,
+        signal_key: str = "luthi_error_acc",
+        aggregator: str = "max",
+    ):
+        if aggregator not in ("max", "mean"):
+            raise ValueError(
+                f"aggregator must be 'max' or 'mean', got {aggregator!r}"
+            )
+        self._signal_key = signal_key
+        self._aggregator = aggregator
+
+    @property
+    def name(self) -> str:
+        return "pc"
+
+    def intensity(self, signals: ExperientialSignals) -> float:
+        values = signals.knowledge_signals.get(self._signal_key, [])
+        if not values:
+            return 0.0
+        if self._aggregator == "max":
+            return max(abs(float(v)) for v in values)
+        # mean
+        return sum(abs(float(v)) for v in values) / len(values)
 
 
 @dataclass

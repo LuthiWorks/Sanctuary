@@ -16,6 +16,7 @@ from sanctuary.core.turbo import (
     DEFAULT_TRIGGER_THRESHOLD,
     IntensitySource,
     MechanicalIntensitySource,
+    PCIntensitySource,
     TurboManager,
     TurboState,
 )
@@ -316,6 +317,100 @@ class TestMechanicalIntensitySource:
             knowledge_signals={"custom": [0.1, 0.7, 0.3]}
         )
         assert source.intensity(signals) == pytest.approx(0.7)
+
+
+class TestPCIntensitySource:
+    """v2-native intensity source — reads error_acc from per-block
+    introspection. The design's natural turbo trigger."""
+
+    def test_reads_max_error_acc_by_default(self):
+        source = PCIntensitySource()
+        signals = ExperientialSignals(
+            knowledge_signals={"luthi_error_acc": [0.02, 0.15, 0.08]}
+        )
+        # Default aggregator is max — worst-surprised block drives turbo.
+        assert source.intensity(signals) == pytest.approx(0.15)
+
+    def test_mean_aggregator(self):
+        source = PCIntensitySource(aggregator="mean")
+        signals = ExperientialSignals(
+            knowledge_signals={"luthi_error_acc": [0.02, 0.04, 0.06]}
+        )
+        assert source.intensity(signals) == pytest.approx(0.04)
+
+    def test_negative_values_are_abs(self):
+        source = PCIntensitySource()
+        signals = ExperientialSignals(
+            knowledge_signals={"luthi_error_acc": [-0.3, 0.1]}
+        )
+        # Max of absolute values.
+        assert source.intensity(signals) == pytest.approx(0.3)
+
+    def test_missing_key_returns_zero(self):
+        source = PCIntensitySource()
+        signals = ExperientialSignals()
+        assert source.intensity(signals) == 0.0
+
+    def test_empty_list_returns_zero(self):
+        source = PCIntensitySource()
+        signals = ExperientialSignals(
+            knowledge_signals={"luthi_error_acc": []}
+        )
+        assert source.intensity(signals) == 0.0
+
+    def test_invalid_aggregator_raises(self):
+        with pytest.raises(ValueError, match="must be 'max' or 'mean'"):
+            PCIntensitySource(aggregator="median")
+
+    def test_configurable_signal_key(self):
+        source = PCIntensitySource(signal_key="custom_signal")
+        signals = ExperientialSignals(
+            knowledge_signals={"custom_signal": [0.5, 0.1]}
+        )
+        assert source.intensity(signals) == pytest.approx(0.5)
+
+    def test_name_is_pc(self):
+        source = PCIntensitySource()
+        assert source.name == "pc"
+
+
+class TestMixedV1V2Sources:
+    """A TurboManager with both Mechanical (v1) and PC (v2) sources
+    should aggregate max, so on either substrate the source that has
+    real data drives the decision. The other source returns 0.0 (no
+    opinion) and is silently dominated."""
+
+    def test_v1_substrate_mechanical_dominates(self, controller, signals):
+        # Only luthi_delta populated (v1-shape). PC source returns 0.
+        v1_signals = ExperientialSignals(
+            knowledge_signals={
+                "luthi_delta": [0.01, 0.02, 0.03, 0.12],
+            }
+        )
+        manager = TurboManager(
+            controller=controller,
+            sources=[MechanicalIntensitySource(), PCIntensitySource()],
+        )
+        manager.observe(v1_signals, now=10.0)
+        # Mechanical source reads 0.12 from luthi_delta[3]; PC reads 0.
+        # 0.12 > arm threshold (0.05), so ARMED.
+        assert manager.state == TurboState.ARMED
+
+    def test_v2_substrate_pc_dominates(self, controller, signals):
+        # Only luthi_error_acc populated (v2-shape). Mechanical returns 0.
+        v2_signals = ExperientialSignals(
+            knowledge_signals={
+                "luthi_error_acc": [0.08, 0.20, 0.05],
+            }
+        )
+        manager = TurboManager(
+            controller=controller,
+            sources=[MechanicalIntensitySource(), PCIntensitySource()],
+        )
+        manager.observe(v2_signals, now=10.0)
+        # PC reads max(0.08, 0.20, 0.05) = 0.20. Above trigger (0.15).
+        # Mechanical reads 0 from absent luthi_delta.
+        assert manager.state == TurboState.ARMED
 
 
 class TestMultipleSources:

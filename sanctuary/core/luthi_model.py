@@ -743,12 +743,20 @@ class LuthiModel:
         signals: dict[str, list[float]] = {}
         blocks = self._post_state.get("blocks", [])
 
-        # Per-block signals
-        plasticities = []
-        drifts = []
-        spike_fracs = []
-        membranes = []
-        excitabilities = []
+        # Per-block signals. Each accumulator is keyed by a v1 or v2
+        # introspection field; the substrate populates whichever apply.
+        # Empty lists are skipped at publish time so v1-only and v2-only
+        # signals never collide on the entity's knowledge_signals dict.
+        plasticities: list[float] = []
+        drifts: list[float] = []
+        # v1-only (spiking variants):
+        spike_fracs: list[float] = []
+        membranes: list[float] = []
+        excitabilities: list[float] = []
+        # v2-only (predictive coding):
+        error_accs: list[float] = []
+        pred_frobs: list[float] = []
+        precisions: list[float] = []
 
         for block in blocks:
             if "plasticity_mean" in block:
@@ -761,6 +769,12 @@ class LuthiModel:
                 membranes.append(block["membrane_mean"])
             if "excitability_mean" in block:
                 excitabilities.append(block["excitability_mean"])
+            if "error_acc_mean" in block:
+                error_accs.append(block["error_acc_mean"])
+            if "pred_frob" in block:
+                pred_frobs.append(block["pred_frob"])
+            if "precision_mean" in block:
+                precisions.append(block["precision_mean"])
 
         if plasticities:
             signals["luthi_plasticity"] = plasticities
@@ -772,6 +786,12 @@ class LuthiModel:
             signals["luthi_membrane"] = membranes
         if excitabilities:
             signals["luthi_excitability"] = excitabilities
+        if error_accs:
+            signals["luthi_error_acc"] = error_accs
+        if pred_frobs:
+            signals["luthi_pred_frob"] = pred_frobs
+        if precisions:
+            signals["luthi_precision"] = precisions
 
         # Aggregate delta signals
         delta = self._introspection_delta

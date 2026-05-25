@@ -37,7 +37,11 @@ from sanctuary.core.stimulus_density import (
     SensoriumDensitySource,
     StimulusDensityHeuristic,
 )
-from sanctuary.core.turbo import TurboManager
+from sanctuary.core.turbo import (
+    MechanicalIntensitySource,
+    PCIntensitySource,
+    TurboManager,
+)
 from sanctuary.core.schema import CognitiveOutput, Percept, SelfModelUpdate
 from sanctuary.consciousness.sleep_cycle import SleepCycleManager, SleepConfig
 from sanctuary.identity.awakening import AwakeningSequence
@@ -379,9 +383,19 @@ class SanctuaryRunner:
         self._rate_controller = CycleRateController()
         self._turbo_manager: Optional[TurboManager] = None
         if self._config.turbo_enabled:
+            # Wire both substrate sources. Each returns 0 when its
+            # signal is absent, so on a v1 substrate only Mechanical
+            # contributes; on v2 only PC contributes; on a mixed (or
+            # future hybrid) substrate the max-of-sources aggregator
+            # picks whichever is louder. The Protocol surface accepts
+            # additional sources too (emotion-vector when that lands).
             self._turbo_manager = TurboManager(
                 controller=self._rate_controller,
                 journal=getattr(self.memory, "journal", None),
+                sources=[
+                    MechanicalIntensitySource(),
+                    PCIntensitySource(),
+                ],
                 trace_path=(
                     Path(self._config.turbo_trace_path)
                     if self._config.turbo_trace_path is not None
