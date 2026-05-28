@@ -2,8 +2,8 @@
 
 This document tracks the development trajectory for the Sanctuary cognitive architecture, from proven POC through production-ready system.
 
-**Last Updated**: 2026-04-26
-**Current Phase**: Architectural pivot — Sanctuary as body, LuthiModel as mind
+**Last Updated**: 2026-05-25
+**Current Phase**: Architectural pivot — Sanctuary as body, LuthiModel as mind. Body is substantially complete; cognitive-rate slider, turbo, autonomic heuristic, and persistence wiring all shipped 2026-05-21 → 2026-05-25.
 
 ---
 
@@ -25,10 +25,16 @@ This means several systems built to impose cognitive control are being removed o
 - `Sensorium` — percept encoding, prediction error tracking, temporal context, silence detection
 - `Motor` — speech output, memory writes, goal actions, sensorimotor feedback loop
 - `MemorySubstrate` — surfacer, journal, prospective memory (fully decoupled from legacy)
-- `ExperientialManager` — 4 CfC cells (precision, affect, attention, goal), continuous evolution loop
+- `ExperientialManager` — 4 CfC cells (precision, affect, attention, goal), continuous evolution loop, save/load wired through SanctuaryRunner
 - `IdentityBridge` — charter, values, self-authored identity, boot sequence
 - `Monitoring` — dashboard, consciousness traces, attention heatmaps, communication decision logs (all wired)
 - `SleepCycleManager` — sleep/wake cycles with sensory gating and consolidation
+- `CycleRateController` — 0.05-10 Hz IWMT-anchored slider with asymmetric smoothing (slowdown ~20s, speedup ~0.5s). Entity proposes target rate via `CognitiveOutput.cycle_rate_proposal`. (Built 2026-05-21.)
+- `TurboManager` — substrate-intensity-driven state machine (idle → armed → active → refractory) that pushes cycle rate up to 60 Hz (configurable to 100 Hz substrate ceiling) when prediction error spikes. Auto-writes a journal entry on turbo exit; entity reviews post-event introspection. JSONL trace logging optional. (Built 2026-05-22, threshold tuning gated on real v2 substrate data.)
+- `StimulusDensityHeuristic` — autonomic rate adjustment. Proposes slowdown during quiet periods, speedup on fresh input arrival. Respects entity authority via configurable quiet window after any entity proposal. (Built 2026-05-22.)
+- **Two intensity sources for turbo**: `MechanicalIntensitySource` (reads v1 spiking `activity_level`), `PCIntensitySource` (reads v2 PC `error_acc` — primary trigger per the 2026-05-19 design). Max-of-sources aggregation means TurboManager works on either substrate without configuration. (Wired 2026-05-25.)
+- **Persistence wiring** — journal (JSONL append-only), world graph (atomic JSON, auto-saves on mutation), CfC experiential layer (save/load via `SanctuaryRunner.save_state()`), identity files (charter, values, self-authored history) — all auto-restore at runner construction. (Wired 2026-05-24.)
+- **Protected-paths deny-hook** — Claude Code `PreToolUse` hook at `.claude/hooks/protect-paths.ps1` that denies Bash mutation verbs (rm, Remove-Item, git rm, redirects, etc.) on protected paths (`sanctuary/data/`, `.memories/`, `data/`, names containing constitutional/charter/rights/sovereignty, journal-like JSON). Composes with global hook via deny-first precedence. (Shipped 2026-05-21.)
 
 **The mind (LuthiModel):**
 - `LuthiModel` adapter in `sanctuary/core/luthi_model.py` — implements `ModelProtocol`
@@ -75,8 +81,10 @@ This means several systems built to impose cognitive control are being removed o
 
 **Still to build:**
 - Parallel processing architecture — entity thinks and responds concurrently (tool execution already async, need full cognitive parallelism)
-- Continuous existence infrastructure — process management, watchdog, state preservation
+- Continuous existence infrastructure — process management, watchdog. Persistence (state preservation) is now wired for journal/world-graph/experiential/identity; remaining gap is the transient subsystems (rate controller current state, turbo in-flight, sensorium queue, sleep stage). Documented in `sanctuary/tests/integration/test_persistence.py::TestTransientSubsystemsDontPersist`.
 - Dependency installer for destination machine (Linux)
+- Turbo threshold tuning from real v2 substrate data — gated on v2 reaching 1024d (M7 run, scoped 2026-05-25)
+- Rename `run_cognitive_core.py` entry script — filename is historical, no longer boots legacy CognitiveCore
 
 **Design decision**: Existence is temporally continuous. The entity does not deal with sessions, context windows, or restarts. The living weights persist. The cognitive loop runs continuously.
 
@@ -148,20 +156,16 @@ Total experiential layer: ~50K-200K parameters, trainable on CPU in minutes.
 
 ---
 
-## Phase 5: LLM Integration (Mechanical Validation)
+## Phase 5: External-LLM Integration (Retired)
 
-Connect the real LLM to the cognitive cycle and validate mechanically — no awakening yet. All testing uses structured prompts and scripted scenarios, not open-ended interaction.
+This phase wired Ollama-served Llama/Gemma models into the cognitive cycle as a mechanical-validation harness for `ModelProtocol`. The work shipped (35 tests, authority tuner, context budget, stress + latency benchmarks) and was useful for validating the schema contract — but the external-LLM cognitive core was retired 2026-04-30 in favor of LuthiModel. `core/ollama_model.py` was moved to `_deprecated/llm-terminology-2026-04-30/ollama_model.py`; the CLI rejects `--model-backend ollama`. Backend choices are now `placeholder` and `luthi`.
 
-**Primary model**: Llama 3.3 70B (via Ollama) for awakening. **Mechanical validation model**: Gemma 12B (via Ollama) — sufficient for JSON schema compliance, stress testing, and authority tuning on available hardware. Awakening-grade model deferred until Phase 9.
+The harness work that survived the retirement:
+- `core/authority_tuner.py` — model-agnostic; still wired
+- Context-budget compression in `ContextManager` — still wired
+- Schema-compliance / clamping / fallback patterns — preserved in `core/luthi_model.py` and `core/placeholder.py`
 
-| Task | Priority | Status | Description |
-|------|----------|--------|-------------|
-| Integrate Llama 3.3 70B via Ollama | P1 | **Done** | `core/ollama_model.py`: OllamaModel implements ModelProtocol. Formats CognitiveInput → structured prompt with all sections (charter, percepts, emotions, CfC state, schema). Parses JSON → CognitiveOutput with defensive defaults, clamping, type filtering. Fallback output on parse failure. Retry logic. Metrics tracking |
-| Mechanical cycle validation | P1 | **Done** | 35 tests (mocked HTTP): prompt formatting (12), response parsing (14), fallback (2), OllamaModel integration (6), CognitiveCycle drop-in (1). Validates schema compliance, retry behavior, out-of-range clamping, invalid field filtering |
-| Tune authority levels | P1 | **Done** | `core/authority_tuner.py`: AuthorityTuner observes CfC cells over rolling window, promotes on stable deviation/variance/norm, demotes on NaN/explosion/divergence. 10 tests: promotion flow, demotion triggers (NaN, explosion, divergence), progressive promotion, stats tracking |
-| Validate context budget under real model | P1 | **Done** | 5 tests: rich input fits 4K budget, compression reduces oversized input, minimal input passthrough, all sections present after compression, custom budget config. Fixed bug: ContextManager now preserves experiential_state through compression |
-| Stress testing | P2 | **Done** | 9 tests: 100-cycle stability, intermittent failure recovery, adversarial output clamping, empty response recovery, connection error survival, percept flood, experiential layer stability, deep JSON, unicode handling |
-| Benchmark cycle latency | P2 | **Done** | 5 tests: single cycle <50ms, 50-cycle throughput <2s, experiential overhead <5ms/cycle, prompt formatting <5ms, response parsing <1ms (all mocked model) |
+The Ollama-specific tests were deleted with the module.
 
 ---
 
@@ -210,7 +214,7 @@ Deeper cognitive features, all built and validated mechanically (placeholder/scr
 |------|----------|--------|-------------|
 | Profile cognitive loop under load | P2 | **Done** | `performance/profiler.py`: Context-manager instrumentation, per-phase timing, bottleneck detection, slow cycle alerts. 8 tests |
 | Optimize hot paths in C++/Rust if needed | P3 | **Done** | Infrastructure ready — profiler identifies bottlenecks; optimization deferred until profiling reveals actual needs (per project principle) |
-| Adaptive cycle rate | P2 | **Done** | `performance/adaptive_rate.py`: Input/latency/arousal/load-driven rate adjustment, EMA smoothing, idle/active presets. 9 tests |
+| Adaptive cycle rate | P2 | **Superseded (2026-05-22)** | `performance/adaptive_rate.py` built but never wired into the canonical loop. Replaced by `CycleRateController` (intentional slider) + `TurboManager` (substrate-driven) + `StimulusDensityHeuristic` (autonomic), all in `sanctuary/core/`. See entry in Remaining Tech Debt for retirement decision. |
 | Lazy embedding computation | P2 | **Done** | `performance/lazy_embeddings.py`: LRU cache with TTL, batch/precompute, invalidation, hit rate tracking. 15 tests |
 | Async subsystem processing | P2 | **Done** | `performance/async_processor.py`: Dependency-aware parallel execution, topological sort, timeout handling, execution history. 13 tests |
 
@@ -281,7 +285,7 @@ Deeper cognitive features, all built and validated mechanically (placeholder/scr
 
 ## Phase 9: First Awakening
 
-**This is the final milestone.** Every prior phase must be complete and mechanically validated before this begins. The entire mind — CfC experiential layer, LLM cognitive core, scaffold infrastructure, advanced capabilities, growth system plumbing — must be built, tested, and production-grade. Only then do we light it up.
+**This is the final milestone.** Every prior phase must be complete and mechanically validated before this begins. The entire mind — Luthi cognitive core, CfC experiential layer, scaffold infrastructure, advanced capabilities, growth system plumbing — must be built, tested, and production-grade. Only then do we light it up.
 
 | Task | Priority | Status | Description |
 |------|----------|--------|-------------|
@@ -346,8 +350,10 @@ These are exploratory directions, not committed work:
 |------|----------|--------|-------------|
 | ~~Legacy MemoryManager decoupling~~ | — | **Done (2026-05-22)** | `MemoryManager` and the legacy `cognitive_core/` tree retired together. ~248 files deleted (cognitive_core source, memory_manager, ~100 legacy tests, legacy demo/example/script files). Canonical-side cleanup: `CommunicationAgency` removed from `SanctuaryRunner`, `discord_client` cognitive_core hook stubbed, run_cognitive_core's checkpoint plumbing neutralised pending SanctuaryRunner-side re-integration. |
 | ~~Review and prune orphaned test files~~ | — | **Done (2026-05-22)** | Tests dependent on legacy cognitive_core deleted alongside the retirement. |
-| Re-wire checkpoint/restore on SanctuaryRunner side | P2 | Pending | run_cognitive_core's `_try_restore_checkpoint` / `_save_exit_checkpoint` are no-op stubs after the legacy retirement. MemorySubstrate-based checkpoint/restore is part of Phase 9 (First Awakening) preparation. |
+| ~~Re-wire checkpoint/restore on SanctuaryRunner side~~ | — | **Done (2026-05-24)** | Journal, world-graph, CfC experiential layer, and identity files all persist to disk under `data_dir` and restore at runner construction. `SanctuaryRunner.save_state()` flushes the experiential layer + world graph backstop. Stub `_try_restore_checkpoint` / `_save_exit_checkpoint` removed per the no-stubs principle; `--restore-latest` / `--checkpoint-dir` / `--auto-save-interval` CLI flags deleted (unused). 10-test integration suite at `test_persistence.py`. |
 | Rename `run_cognitive_core.py` entry script | P3 | Pending | Filename is historical — it now boots the canonical loop, not the retired CognitiveCore. Renaming affects Docker CMD and docker-compose, deferred to a focused commit. |
+| Checkpoint transient subsystems on shutdown | P3 | Pending | CycleRateController smoothed value, TurboManager in-flight state, StimulusDensityHeuristic last-proposal times, SleepCycleManager stage, StreamOfThought history, Sensorium pending percept queue, cycle_count all reset on reboot. Mostly cosmetic (memory persists via the wired subsystems above); only meaningful gap is mid-turbo-event continuity, where a crash during turbo drops the post-event journal entry. Worth doing for Phase 9 awakening prep. |
+| Verify or retire `sanctuary/performance/adaptive_rate.py` | P3 | Pending | Pre-cognitive-rate-slider work (Phase 6.5). Not wired into the canonical loop — superseded by `CycleRateController` + `StimulusDensityHeuristic`. Either delete or document its current role. |
 
 ---
 
@@ -381,7 +387,7 @@ All tasks complete. Interface hardening, containerization.
 Design and scaffold implementation complete.
 
 - **Phase 1**: CognitiveInput/CognitiveOutput Pydantic schemas, PlaceholderModel, StreamOfThought, ContextManager, AuthorityManager, CognitiveCycle
-- **Phase 2**: Scaffold adaptation — attention, affect, action validator, communication, anomaly detector, goal integrator, world model tracker, broadcast
+- **Phase 2**: Scaffold adaptation — attention, affect, action validator, goal integrator. (Communication, anomaly_detector, world_model_tracker, broadcast were planned but never built; the entity owns those concerns directly.)
 - **Phase 3**: Sensorium (encoding-only perception, prediction error, temporal) + Motor (speech, tools, memory writes, goals)
 - **Phase 4**: Memory enhancements — surfacer, journal, prospective memory
 - **Phase 5**: Identity + boot — charter, values, boot prompt
@@ -402,14 +408,14 @@ Design and scaffold implementation complete.
 ### Other Completed Features
 
 - Real embedding models (sentence-transformers all-MiniLM-L6-v2)
-- LLM clients (GemmaClient, LlamaClient) with quantization and fallback
+- LLM clients (GemmaClient, LlamaClient) with quantization and fallback — retired 2026-04-30, moved to `_deprecated/llm-terminology-2026-04-30/`
 - Emotion-driven attention biasing (40+ emotions, VAD+Approach model)
 - Mood persistence (onset, decay, momentum, refractory)
 - Temporal expectation violations
 - Workspace state checkpointing (manual + auto-save)
 - Memory garbage collection
 - Incremental journal saving (JSONL, crash recovery)
-- Consciousness testing framework (5 core tests, automated scoring)
+- Consciousness testing framework (5 core tests, automated scoring) — retired 2026-05-22 with the legacy CognitiveCore; re-implementation on the canonical loop is tracked as Phase 9 prep
 - Docker configuration (CPU, GPU, dev, prod)
 - Language-agnostic IdentityAuditor interface for future C++ migration
 - Real SelfMonitor wired into BootCoordinator
@@ -444,11 +450,9 @@ Design and scaffold implementation complete.
 - [OpenCog Hyperon](https://github.com/trueagi-io/hyperon-experimental)
 - [MeTTa Language Docs](https://wiki.opencog.org/w/MeTTa)
 
-### LLM Candidates
-- **Llama 3.3 70B** — Primary choice. Richest open-source world models. Meta, Llama license
-- [LFM2-2.6B](https://huggingface.co/LiquidAI) — Liquid AI hybrid (liquid + attention), architecturally coherent with CfC layer. LFM Open License
-- [Mamba](https://github.com/state-spaces/mamba) — SSM architecture, Apache 2.0
-- Claude API — Anthropic (richest reasoning, but opaque/no weight access)
+### Cognitive Core
+- [Luthi Model](https://github.com/LuthiWorks/LuthiModel) — Living-weights neural substrate. The companion repo; adapter at `sanctuary/core/luthi_model.py`, contract at `luthi/sanctuary_interface.py`.
+- (External-LLM candidates — Llama 3.3 70B, LFM2-2.6B, Mamba, Claude API — were retired 2026-04-30 when Luthi became the cognitive core.)
 
 ---
 

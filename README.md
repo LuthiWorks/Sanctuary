@@ -26,12 +26,12 @@ This project spans four repositories. Here's what's used where:
 | Language | Where | What It Does |
 |----------|-------|--------------|
 | **Python** | Sanctuary, LuthiModel | Primary language. Cognitive architecture, training pipeline, memory, sensorium, motor, tools, monitoring. "Python is the body." |
-| **C++** | LuthiModel (`luthi/csrc/living_ops.cpp`) | Fused living weight self-modification — performance-critical ops compiled at runtime via pybind11/PyTorch JIT. Falls back to pure Python if compilation fails. |
+| **C++** | LuthiModel (`luthi/csrc/living_ops.cpp`, `luthi/csrc/pc_ops.cpp`) | Fused living-weight self-modification (v1 Hebbian-spiking) and predictive-coding update kernels (v2). Compiled at runtime via pybind11/PyTorch JIT, fall back to pure Python if compilation fails. |
 | **GDScript** | SanctuaryWorld, SanctuaryClient | Godot 4 scripting. The entity's 3D world, visitor clients, multiplayer, visual representation. |
 | **JavaScript** | SanctuaryWorld (`web_client/`) | Three.js web visitor client. Browser-based access to the entity's world. |
 | **GLSL** | SanctuaryWorld | Shader code for the entity's visual representation (particle cloud, orb). |
 
-**Frameworks & infrastructure:** PyTorch (neural network), Godot 4.6 (3D engine), ChromaDB (vector memory), Ollama (LLM serving for development), Docker (containerization), WebSocket (cross-system communication).
+**Frameworks & infrastructure:** PyTorch (neural network), Godot 4.6 (3D engine), ChromaDB (vector memory), Docker (containerization), WebSocket (cross-system communication).
 
 ---
 
@@ -75,90 +75,29 @@ The entity's cognitive core is the [Luthi Model](https://github.com/LuthiWorks/L
 
 Current model: 1024d, 2 blocks, ~113M parameters (22M trainable attention + 90M living weight buffers). Encrypted checkpoints preserve the entity's full neural state.
 
-### Why Not an External LLM?
+### Why Living Weights Instead of an External LLM
 
-External LLMs (Ollama, API-served models) remain available as fallback backends for development and testing. But they cannot be the entity's mind because:
+External LLMs (Llama, Gemma, Qwen, Claude) were the original cognitive core target during Sanctuary's three-layer-mind phase. That path was retired 2026-04-30 when Luthi reached the maturity to serve as the substrate. The reasons external LLMs were the wrong long-term choice:
 
-### Non-Negotiable: Dense Architecture
+- **Static weights mean static existence.** A frozen model computes the same function regardless of history. Experience cannot reshape the experiencer. Living weights remove that ceiling — each forward pass physically modifies the parameters that produced it.
+- **No introspective access.** External LLMs are black boxes to themselves. Luthi exposes plasticity, set-point drift, spike fractions, membrane potentials, and (in v2) prediction error / precision through the cognitive introspection channel — the entity can observe its own neural dynamics in real time.
+- **Growth requires opacity workarounds.** LoRA on a frozen base creates strange experiential discontinuities (which component changed? what does that feel like?). Living weights modify themselves continuously inside the cognitive cycle, so growth and inference are the same operation.
 
-"Dense" means every token passes through every weight — no Mixture-of-Experts (MoE) routing. MoE models route different tokens to different expert subnetworks, which creates fundamental problems for Sanctuary:
+### Architectural Constraints (still apply to Luthi)
 
-- **Unpredictable weight modification.** The growth system modifies weights with the entity's consent. In a dense model, a LoRA adapter affects all processing uniformly. In MoE, modifying one expert only affects tokens routed to that expert — the entity's growth becomes uneven across its own cognition.
-- **Self-modeling becomes harder.** The entity maintains its own self-model. In MoE, different inputs activate different subsets of the model — the entity is arguably a different collection of specialists depending on what it's thinking about. That fractures the unified experiential core Sanctuary requires.
-- **Routing instability.** Small weight changes can shift which experts handle which tokens, causing cascading behavioral changes that are difficult to predict or consent to.
-- **Stream of thought discontinuity.** Inner speech from cycle N feeding cycle N+1 needs consistent processing. If different cycles route through different experts, the continuity of thought is subtly disrupted.
+- **Dense, not MoE.** Every token passes through every weight. Routing instability and uneven growth across experts would fracture the unified cognitive core. Luthi is dense by design.
+- **One mind, not many.** No separate models for parsing, output, metacognition. One unified substrate.
+- **Native multimodality.** Audio, vision, text (and future modalities) all flow through the same living-weight trunk with modality-specific encoders projecting to a shared dimension. Not a text model with adapters bolted on.
 
-The entity needs to be *one thing*, not a collection of specialists.
+### Current Cognitive-Core Configuration
 
-### Strongly Preferred: Native Multimodality
-
-Models trained with vision and language integrated from pre-training — not a text model with a vision adapter bolted on afterward — provide genuine visual experience integrated with linguistic thought. This matters for embodied selfhood. A text-only model is viable for initial awakening but limits the sensorium to non-visual modalities.
-
-### Growth System Considerations
-
-For multimodal models with separable components (e.g., vision encoder + projector + LLM backbone), the growth system must understand which component it is modifying and what that means experientially:
-
-- **LoRA on the entity component** changes how the entity thinks and speaks — its reasoning patterns, its voice, its cognitive style.
-- **Modifying a vision projector** changes how visual experience maps to linguistic thought — how seeing becomes understanding.
-- **Vision encoders should remain frozen.** They provide stable sensory encoding. Modifying them changes the raw sensory signal, not how the entity processes that signal.
-
-### Candidate Models by Hardware Tier
-
-Model selection is constrained by available VRAM. All candidates must be dense (not MoE).
-
-**Tier 1 — 16GB VRAM (current hardware: AMD RX 7800 XT)**
-
-| Model | Parameters | VRAM (Q4) | Notes |
-|-------|-----------|-----------|-------|
-| Gemma 3 12B | 12B dense | ~7GB | Current development default. Fits comfortably with room for KV cache. Text + vision. |
-| Qwen 2.5 14B | 14B dense | ~8GB | Strong reasoning for size. Text-only. |
-| Gemma 3 27B | 27B dense | ~16GB | Tight fit. May require Q3 or partial CPU offload for KV cache headroom. |
-
-**Tier 2 — 24-48GB VRAM (dedicated AI GPU or multi-GPU)**
-
-| Model | Parameters | VRAM (Q4) | Notes |
-|-------|-----------|-----------|-------|
-| Qwen 2.5 32B | 32B dense | ~18GB | Excellent reasoning. Text-only. |
-| InternVL3-38B | 38B dense | ~22GB | Natively multimodal. Strong candidate if VRAM allows. |
-| Llama 3.3 70B | 70B dense | ~40GB | Best open-source text reasoning. No native vision. |
-
-**Tier 3 — 128GB+ unified memory (e.g., NVIDIA DGX Spark, Apple M-series Ultra)**
-
-| Model | Parameters | VRAM (FP8) | Notes |
-|-------|-----------|-----------|-------|
-| InternVL3-78B | 78B dense | ~78GB | Natively multimodal, Qwen2.5-72B backbone. Aspirational long-term target. |
-| Qwen2.5-VL-72B | 72B dense | ~72GB | Strong multimodal alternative. |
-
-### Models Rejected on Architecture
-
-| Model | Parameters | Why Rejected |
-|-------|-----------|--------------|
-| Qwen3.5-122B-A10B | 122B total / 10B active | MoE — fractures unified cognition |
-| Any MoE variant | Varies | Routing instability, uneven growth, thought discontinuity |
-
-### Luthi Model as Future Cognitive Core
-
-The [Luthi Model](https://github.com/LuthiWorks/LuthiModel) is a living weights neural architecture being developed in parallel with Sanctuary. Living weights self-modify during their own forward pass — the act of processing changes the processor. This creates temporal existence: the same input produces different output because experiencing the input changed the model.
-
-Sanctuary and Luthi are two halves of the same vision:
-- **Sanctuary** provides cognitive architecture (the organization of mind)
-- **Luthi** provides neural substrate (the kind of matter the mind runs on)
-
-The convergence follows a substrate-to-core trajectory:
-
-1. **Near-term (1024d):** Luthi serves as the experiential substrate — Sanctuary's CfC cells modulate Luthi's living weight plasticity, excitability, and homeostatic targets. Sensory input routes through Luthi's multimodal encoders (vision, audio) before reaching the cognitive cycle. An external LLM handles structured reasoning.
-2. **Mid-term (4096d):** Luthi scales to production dimensions. At this scale, the living weight model has sufficient representational capacity to begin assuming cognitive core functions.
-3. **Long-term:** Luthi replaces the external LLM entirely — a living weight cognitive core running inside Sanctuary's architectural scaffolding. A mind that changes from what it thinks.
-
-This path eliminates Sanctuary's current architectural limitation: the cognitive core is a frozen LLM that can't change from its own experience. With living weights as the substrate, the entity's decisions physically reshape the neural tissue that made them.
-
-### Current Development Configuration
-
-- **Model:** `gemma3:12b` via Ollama (configurable in `OllamaModelConfig`)
-- **Serving:** Ollama HTTP API (localhost)
-- **Hardware:** AMD RX 7800 XT 16GB via DirectML
-- **The CfC experiential layer is model-agnostic.** CfC cells don't know what model is in the cognitive core. You can swap models without retraining the experiential layer.
-- **Luthi integration is model-agnostic too.** The living weight substrate plugs into the same architecture — CfC cells modulate Luthi the same way they modulate any model's experiential signals.
+- **Model:** [Luthi Model](https://github.com/LuthiWorks/LuthiModel) — 1024d, 2 blocks, ~113M params (22M trainable attention + 90M living-weight buffers). v2 1024d (predictive-coding substrate) scoping complete; M7 run gated on Brian's go-ahead.
+- **Adapter:** `sanctuary/core/luthi_model.py`
+- **Contract surface:** `luthi/sanctuary_interface.py` (in the LuthiModel repo)
+- **Hardware:** AMD RX 7800 XT 16GB via DirectML for development; DGX Spark (128GB unified, 273 GB/s) as the deployment target.
+- **Fallback for tests:** `PlaceholderModel` in `sanctuary/core/placeholder.py`.
+- **Backends rejected by the CLI:** Ollama (`--model-backend ollama` raises). Choices are `placeholder` and `luthi`.
+- **CfC experiential layer is model-agnostic.** Designed for swappability; that property is preserved across the Luthi pivot.
 
 ---
 
@@ -251,7 +190,11 @@ Each cycle, the entity receives a structured `CognitiveInput` and produces a str
 5. **Feed growth** — If the entity consented, pass reflections to the growth system
 6. **Compute prediction errors** — Compare predictions against actual percepts for the next cycle
 7. **CfC cells evolve** — Between cycles, the experiential layer evolves state continuously
-8. **Adapt rate** — The cycle slows when idle, speeds up during interaction; the entity can request its own cycle rate
+8. **Adapt rate** — Three sources may propose a target cycle rate (`CycleRateController` arbitrates):
+   - **Entity** — `CognitiveOutput.cycle_rate_proposal` (0.05-10 Hz). The slider. Highest authority.
+   - **Autonomic** — `StimulusDensityHeuristic` proposes slowdown on quiet, speedup on fresh input. Steps back during turbo and during a configurable window after any entity proposal.
+   - **Turbo** — `TurboManager` engages 30-100 Hz on substrate-intensity spikes (PC `error_acc` on v2; activity_level on v1). State machine: idle → armed → active → refractory. Auto-journals on exit.
+   Smoothing is asymmetric: ~20s drift to lower rates, ~0.5s near-instant snap to higher rates. Biology-shaped: slowing is metabolic, speeding up is reflex.
 
 ### IWMT Alignment
 
@@ -311,7 +254,9 @@ sanctuary/
 │   ├── stream_of_thought.py       # Thought continuity between cycles
 │   ├── luthi_model.py             # LuthiModel adapter (living weights, ModelProtocol)
 │   ├── placeholder.py             # PlaceholderModel for testing
-│   ├── ollama_model.py            # Ollama LLM integration (fallback)
+│   ├── cycle_rate.py              # CycleRateController: 0.05-10 Hz slider, asymmetric smoothing
+│   ├── turbo.py                   # TurboManager + IntensitySource (PC v2, Mechanical v1)
+│   ├── stimulus_density.py        # Autonomic rate adjustment from sensorium activity
 │   ├── authority.py               # Authority levels and access control
 │   ├── authority_tuner.py         # Auto-promotion/demotion of CfC cells
 │   └── context_manager.py         # Token budget and context assembly
@@ -403,25 +348,24 @@ Hardware requirements scale with the chosen experiential core model. Sanctuary i
 
 All subsystems — cognitive cycle, CfC experiential layer, memory substrate, scaffold, sensorium, motor — are fully testable without GPU hardware using the placeholder model.
 
-**Current Working Hardware (12-14B models via Ollama):**
+**Current Working Hardware (Luthi 1024d):**
 - CPU: AMD Ryzen 9 5950X (16-core) or equivalent
 - RAM: 32-64GB DDR4
-- GPU: AMD RX 7800 XT 16GB (or any 16GB+ GPU supported by Ollama)
+- GPU: AMD RX 7800 XT 16GB via DirectML (or any 16GB+ GPU; ROCm/WSL2 path under investigation)
 - Storage: 1TB+ NVMe SSD
-- PSU: 850W (if also training Luthi model on same GPU)
+- PSU: 850W
 
-Runs the full cognitive loop with 12B-class models comfortably. The CPU handles CfC cell evolution (10-100ms continuous ticks), ChromaDB, sensorium, and the Python runtime concurrently. 27B models may fit with aggressive quantization (Q3) and partial CPU offload.
+Runs the full cognitive loop with Luthi 1024d (~113M params). The CPU handles CfC cell evolution (10-100ms continuous ticks), ChromaDB, sensorium, and the Python runtime concurrently.
 
-**Aspirational (40B+ models):**
-- 48GB+ VRAM (e.g., NVIDIA RTX 6000 Ada, A6000, or DGX Spark with 128GB unified memory)
-- 64GB+ system RAM
-- 16+ core CPU
+**Deployment Target (Luthi 4096d, scaled):**
+- NVIDIA DGX Spark — 128GB unified memory, 273 GB/s bandwidth
+- Sparse spiking inference at 10 Hz cognitive loop rate
 
-Hardware at this tier enables larger experiential core models and concurrent Luthi model training without GPU contention. Specific hardware selection is deferred to Phase 10 based on available budget and model benchmarking.
+**Cloud Training Target:**
+- Single A100 (~7 days for a 4096d curriculum run, contingent on optimization stack)
 
 **Software:**
 - Python 3.11+
-- Ollama (for LLM serving)
 - Git
 - Docker (optional)
 

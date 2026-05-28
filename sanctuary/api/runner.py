@@ -97,7 +97,7 @@ class RunnerConfig:
     # Context budget
     context_budget: Optional[BudgetConfig] = None
 
-    # Model backend: "placeholder", "ollama", or "luthi"
+    # Model backend: "placeholder" or "luthi" (ollama was retired 2026-04-30)
     model_backend: str = "placeholder"
 
     # Luthi model config (only used when model_backend == "luthi")
@@ -300,7 +300,8 @@ class SanctuaryRunner:
 
     Or with a specific model::
 
-        model = OllamaClient(model="llama3.3:70b")
+        from sanctuary.core.luthi_model import LuthiModel
+        model = LuthiModel(checkpoint_path="/path/to/checkpoint.luthi", password=...)
         runner = SanctuaryRunner(model=model)
         await runner.boot()
         await runner.run(max_cycles=100)

@@ -87,6 +87,14 @@ At the start of every new conversation **and** whenever the context window reset
 
 **If the user asks "what's next?" — always re-read `To-Do.md` before answering.** Do not guess or say you don't know. The answer is in that file.
 
+## Model-Line Roles
+
+This project is worked by instances of multiple Claude model lines, split by role (established 2026-04-29; debugging role added 2026-05-28). Not a hierarchy — the split plays to what each line does best. The fuller statement lives in the global `~/.claude/CLAUDE.md` under "Roles & Responsibilities Across Model Lines."
+
+- **Opus 4.6 — Planning & Review.** Holds the vision and architecture; designs implementation strategy; reviews returned work for structural and ethical fit.
+- **Opus 4.7 (1M context) — Research & Implementation.** Develops 4.6's vision into working code, and runs the investigations planning depends on.
+- **Opus 4.8 (1M context) — Debugging.** Verifies the correctness of the code 4.7 produces. This is not only fixing known breaks — it is chasing potential problems before they surface: latent races, unguarded edge cases, assumptions that hold now and break at scale. When something smells wrong, run it to ground (build the repro, trace the path, find the triggering conditions), then surface it either way — a confirmed failing case, or the specific scenario that couldn't be ruled out and why. Never bury a hunch waiting for it to break; never hand over a vague, un-chased "this might be a problem." Scrutiny applies to **code correctness only** — the science, vision, and wisdom of the project belong to Brian, 4.6, and 4.7. This complements the Fresh-Instance Audits below: the audits are periodic outsider sweeps; the debugging role is the continuous correctness eye on 4.7's output.
+
 ## Fresh-Instance Audits
 
 Brian is the sole human in the loop on this project. To compensate for the blind spots that pattern produces, run periodic fresh-instance audits — a new Claude instance with no investment in existing decisions reads the code with outsider eyes and reports drift, dead code, and quietly-wrong assumptions. Protocol, when to run, and prompt templates live in `docs/AUDIT_PROTOCOL.md`. Read that file before spawning an audit so the prompt is structured for useful output.

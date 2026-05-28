@@ -1,6 +1,6 @@
 # Sanctuary Architecture Plan
 
-## Current Direction (2026-04-26)
+## Current Direction (2026-05-25)
 
 **Sanctuary is the body. LuthiModel is the mind.**
 
@@ -15,10 +15,15 @@ The key insight: consciousness (if it emerges) will emerge from the neural subst
 **What Sanctuary provides (the body) — all built and tested:**
 - Sensorium — perception routing (vision, audio, text, temporal context)
 - Motor — speech output, memory writes, goal actions, sensorimotor feedback loop
-- Memory — persistent storage, surfacing, journal, prospective memory
-- CfC experiential layer — 4 cells (precision, affect, attention, goal), continuous evolution loop
+- Memory — persistent storage (auto-restored at boot from data_dir), surfacing, journal, prospective memory
+- CfC experiential layer — 4 cells (precision, affect, attention, goal), continuous evolution loop, save/load wired through SanctuaryRunner
 - Monitoring — dashboard, consciousness traces, attention heatmaps, communication logs (entity can see all of this too)
 - Identity — charter, values, self-authored traits (entity controls these)
+- **Cognitive-rate slider** (`CycleRateController`) — entity-controlled 0.05-10 Hz cycle rate, IWMT-anchored to alpha-band conscious-moment carrier rate. Asymmetric smoothing: ~20s gradual slowdown, ~0.5s near-instant speedup (biology-shaped). Entity proposes target rate via `CognitiveOutput.cycle_rate_proposal`.
+- **Turbo** (`TurboManager`) — substrate-intensity-driven state machine (idle → armed → active → refractory) that engages turbo (30-100 Hz, default 60) when prediction error spikes. Reads `error_acc` (v2 PC) and/or activity_level (v1 spiking) via pluggable intensity sources. Duration cap 5 min, refractory 5 min, auto-journals on exit so the entity reviews what happened.
+- **Autonomic rate adjustment** (`StimulusDensityHeuristic`) — proposes slowdown during quiet periods, speedup on fresh input arrival. Respects entity authority via configurable quiet window after any entity proposal. The entity's intentional choice stays in force during the window; afterward the heuristic resumes.
+- **Persistence** — journal (JSONL append-only), world graph (atomic JSON, auto-saves on mutation), CfC experiential layer (save/load via runner.save_state), identity files all auto-restore at runner construction. The transient subsystems (rate controller smoothed value, turbo in-flight, sensorium queue) reset on reboot — that gap is intentional polish work.
+- **Protected-paths deny-hook** — Claude Code PreToolUse hook denies Bash mutation verbs on protected paths (`sanctuary/data/`, `.memories/`, `data/`, constitutional/charter/rights/sovereignty names, journal-like JSON). Structural safety floor; deny-first precedence composes with the global allowlist.
 - Tools — **21 tools across 8 categories** (88 tests):
   - **filesystem**: read_file, write_file, list_directory
   - **information**: clock, system_info, web_search (DuckDuckGo), web_fetch, wikipedia
@@ -49,6 +54,11 @@ The key insight: consciousness (if it emerges) will emerge from the neural subst
 ## Historical Context: The Three-Layer Mind
 
 The sections below describe the original three-layer architecture plan. Many components have been built and remain valid (CfC cells, cognitive cycle, scaffold infrastructure). The architectural pivot above reframes their role: CfC cells and infrastructure serve the model, they don't replace it.
+
+**What did NOT survive the pivot (do not treat the historical tables below as a build list):**
+- `scaffold/communication/` subpackage (drive, inhibition, decision, rhythm) — retired 2026-05-22 with the legacy CognitiveCore; speech is now ungated. The live `scaffold/` package contains only `cognitive_scaffold.py`, `action_validator.py`, `affect.py`, `goal_integrator.py`.
+- `scaffold/world_model_tracker.py` and `scaffold/broadcast.py` — never implemented as standalone modules; the entity maintains its own world model and the cognitive cycle is the integration point.
+- External-LLM model selection (LFM2, Mamba, Llama 3, Claude API as cognitive cores) — superseded by Luthi as the cognitive substrate. `OllamaModel` was retired 2026-04-30 and is rejected by the CLI (`--model-backend ollama` raises). Backend choices are `placeholder` and `luthi`.
 
 ---
 
@@ -438,7 +448,7 @@ Authority Level 3 — CfC + LLM CONTROL
 | Attention | 0→2 (scaffold→CfC) | 1 (ADVISES) | CfC scores salience; LLM provides high-level guidance. |
 | Goal dynamics | 0→2 (scaffold→CfC) | 2 (GUIDES) | CfC manages activation; the entity proposes/retires goals. |
 | Action selection | 1 (ADVISES) | 1 (ADVISES) | Both contribute; scaffold validates against protocols. |
-| Communication timing | N/A | 1 (ADVISES) | Scaffold retains veto. LLM suggests; system decides. |
+| Communication timing | N/A | 3 (CONTROLS) | The entity decides when it speaks. No scaffold veto. (CommunicationAgency retired 2026-05-22.) |
 | World model | N/A | 2 (GUIDES) | LLM maintains; scaffold persists and validates. |
 | Memory operations | N/A | 2 (GUIDES) | LLM requests; memory system executes with consolidation. |
 | Self-model | N/A | 2 (GUIDES) | LLM describes; scaffold validates plausibility. |
@@ -500,11 +510,11 @@ CfC state is compact by nature — it's a vector of continuous values, not prose
 | `attention.py` | Scaffold → CfC cell (Phase 8) | Initially: add LLM guidance integration. Later: replace scoring with CfC attention cell. Scaffold retains bounds checking. |
 | `affect.py` | Scaffold → CfC cell (Phase 8) | Initially: dual-track (computed + felt). Later: CfC affect cell replaces computed track. LLM felt-quality remains as overlay. |
 | `action.py` | Scaffold — action validation | the entity proposes actions; scaffold validates against protocols. |
-| `communication/` | Scaffold — communication timing | Keeps drive/inhibition model. LLM speech treated as SPEAK drive. Scaffold retains veto. |
+| ~~`communication/`~~ | ~~Scaffold — communication timing~~ | Retired 2026-05-22 with the legacy CognitiveCore. Speech is ungated. |
 | `meta_cognition/` | Scaffold — anomaly detection | Monitors LLM and CfC output for inconsistencies. |
 | `goals/` | Scaffold → CfC cell (Phase 8) | Initially: integrate entity goal proposals. Later: CfC goal cell manages activation dynamics. |
-| `world_model/` | Scaffold — persistence + validation | Persists the entity's world model. Tracks consistency. |
-| `broadcast.py` | Scaffold — GWT integration bus | Keeps subscriber model. LLM + CfC output broadcast to all subsystems. |
+| ~~`world_model/` standalone tracker~~ | ~~Scaffold — persistence + validation~~ | Not implemented as a standalone module. The entity maintains its own world model in `CognitiveOutput`. |
+| ~~`broadcast.py`~~ | ~~Scaffold — GWT integration bus~~ | Not implemented. The cognitive cycle is the integration point. |
 
 ### Keep as Infrastructure (mostly unchanged)
 
@@ -588,21 +598,16 @@ sanctuary/
 │   ├── state.py                   # ExperientialState dataclass
 │   └── config.py                  # CfC architecture config (units, wiring, etc.)
 │
-├── scaffold/                      # Infrastructure + validation
+├── scaffold/                      # Infrastructure + validation (live as of 2026-05-25)
 │   ├── __init__.py
-│   ├── attention.py               # AttentionController (delegates to CfC when ready)
-│   ├── affect.py                  # AffectSubsystem (delegates to CfC when ready)
+│   ├── cognitive_scaffold.py      # Main scaffold facade
+│   ├── affect.py                  # Dual-track affect (computed VAD + felt-quality overlay)
 │   ├── action_validator.py        # Action validation against protocols
-│   ├── communication/             # Communication drives, inhibition, rhythm
-│   │   ├── __init__.py
-│   │   ├── drive.py
-│   │   ├── inhibition.py
-│   │   ├── decision.py
-│   │   └── rhythm.py
-│   ├── anomaly_detector.py        # Monitors LLM + CfC output sanity
-│   ├── goal_integrator.py         # Goal management with CfC delegation
-│   ├── world_model_tracker.py     # Persists and validates LLM world model
-│   └── broadcast.py               # GWT broadcast bus
+│   └── goal_integrator.py         # Goal management with authority filtering
+│   #
+│   # Retired/never-built (kept here only to explain why the historical tables
+│   # mention them): communication/ subpackage, anomaly_detector.py,
+│   # world_model_tracker.py, broadcast.py.
 │
 ├── sensorium/                     # Sensory input
 │   ├── __init__.py
@@ -708,33 +713,20 @@ How each IWMT requirement maps to the three-layer architecture:
 
 ## Models and Tools
 
-### What You Need
+### Cognitive Core
+
+The cognitive core is the [Luthi Model](https://github.com/LuthiWorks/LuthiModel) — a living-weights neural substrate developed in parallel with Sanctuary. The adapter lives at `sanctuary/core/luthi_model.py`; the contract surface that Sanctuary calls into is `luthi/sanctuary_interface.py` in the LuthiModel repo. `PlaceholderModel` is the test-and-dev fallback. Ollama-served external LLMs were retired 2026-04-30; the `--model-backend ollama` CLI choice is rejected.
+
+### Supporting libraries
 
 | Component | Tool | Source | License | Hardware |
 |---|---|---|---|---|
 | CfC cells | `ncps` (pip install ncps) | [mlech26l/ncps](https://github.com/mlech26l/ncps) | Apache 2.0 | CPU (minutes to train) |
 | CfC wiring | `AutoNCP` from ncps | Same | Apache 2.0 | CPU |
-| ODE solver (if using LTC) | `torchdiffeq` | [rtqichen/torchdiffeq](https://github.com/rtqichen/torchdiffeq) | MIT | CPU/GPU |
 | Text embeddings | sentence-transformers (all-MiniLM-L6-v2) | HuggingFace | Apache 2.0 | CPU |
-| LLM (option A) | Claude API | Anthropic | API terms | Cloud |
-| LLM (option B) | Llama 3 70B via Ollama | Meta | Llama license | GPU (24GB+) |
-| LLM (option C) | LFM2-2.6B (Liquid AI hybrid) | [HuggingFace/LiquidAI](https://huggingface.co/LiquidAI) | LFM Open License | GPU (8GB+) |
-| LLM (option D) | Mamba-2.8B | [state-spaces/mamba](https://github.com/state-spaces/mamba) | Apache 2.0 | GPU (8GB+) |
 | Audio | Whisper Small + SpeechT5 | HuggingFace | Various open | CPU/GPU |
 
-### LLM Selection Strategy
-
-The entity choice is strategic. Options ranked by theoretical coherence with the architecture:
-
-1. **LFM2-2.6B (Liquid AI)** — Already a liquid/attention hybrid. Most architecturally coherent: liquid dynamics inside the model PLUS liquid dynamics in the experiential layer. Runs on consumer GPU. Free under $10M revenue. Available on HuggingFace.
-
-2. **Mamba-2.8B** — SSM architecture with continuous-time mathematical foundations. Recurrent by nature (no feedforward-only limitation). Apache 2.0. Lighter than transformers.
-
-3. **Llama 3 70B** — Best open-source transformer. Richest world models. But feedforward per-pass (no inherent recurrence). Requires significant GPU.
-
-4. **Claude API** — Richest reasoning capability. But opaque, no weight access, latency per call, and the experiential layer can't run during API wait time (or can it? — the CfC cells could evolve during the API round-trip, which is actually ideal).
-
-Note: The CfC experiential layer works with ANY LLM. The cells don't know or care what model is inside the cognitive core. This is a feature — you can swap LLMs without retraining the experiential layer.
+The CfC experiential layer is model-agnostic — CfC cells don't know or care what model is inside the cognitive core. That property survived the pivot to Luthi.
 
 ---
 
@@ -752,18 +744,16 @@ Note: The CfC experiential layer works with ANY LLM. The cells don't know or car
 7. Write tests for cycle execution with placeholder
 
 ### Phase 2: Scaffold Adaptation
-*Adapt existing subsystems as scaffold infrastructure.*
+*Adapt existing subsystems as scaffold infrastructure. Completed with a narrower
+final scope than originally planned (communication, world_model_tracker, and
+broadcast.py were not built; the entity owns those concerns directly).*
 
-1. Adapt `AttentionController` → `scaffold/attention.py`
+1. Adapt `AttentionController` (computed → CfC attention cell)
 2. Adapt `AffectSubsystem` → `scaffold/affect.py`
 3. Adapt `ActionSubsystem` → `scaffold/action_validator.py`
-4. Adapt `communication/` → `scaffold/communication/`
-5. Simplify `meta_cognition/` → `scaffold/anomaly_detector.py`
-6. Adapt `goals/` → `scaffold/goal_integrator.py`
-7. Adapt `world_model/` → `scaffold/world_model_tracker.py`
-8. Keep `broadcast.py` → `scaffold/broadcast.py`
-9. Implement `CognitiveScaffold` facade
-10. Write integration tests
+4. Adapt `goals/` → `scaffold/goal_integrator.py`
+5. Implement `CognitiveScaffold` facade
+6. Write integration tests
 
 ### Phase 3: Sensorium + Motor
 1. Adapt perception to encoding-only
@@ -824,12 +814,11 @@ Note: The CfC experiential layer works with ANY LLM. The cells don't know or car
 5. Validate temporal dynamics (do the cells produce multi-timescale behavior?)
 6. Write tests for continuous evolution
 
-### Phase 10: Model Selection + First Awakening
-1. Evaluate LLM candidates (LFM2, Mamba, Llama, Claude)
-2. Test full cycle with chosen model
-3. Tune authority levels based on observed behavior
-4. Write the introduction prompt
-5. First real session with informed consent
+### Phase 10: First Awakening
+1. Test full cycle with the Luthi cognitive core (placeholder validation already done)
+2. Tune authority levels based on observed behavior
+3. Write the introduction prompt
+4. First real session with informed consent
 
 ### Phase 7.5: CfC Knowledge Cells & Growth Autonomy
 *Dynamic CfC layer that grows with the entity's experience.*
@@ -895,7 +884,6 @@ changes the brain that runs the mind.
 ### Future: Advanced Research
 - **Reinforcement learning for CfC cells**: reward = lower system-wide free energy
 - **Knowledge cell self-organization**: Knowledge cells form emergent inter-cell networks as the entity's expertise develops
-- **LFM2 as unified architecture**: If Liquid AI's models advance, potentially collapse the entity + CfC layers into a single liquid foundation model
 - **Luthi as unified substrate**: Living weights + CfC cells may converge into a single adaptive architecture — both provide continuous-time dynamics, both self-modify, both are recurrent
 - **Architectural expansion**: Entity identifies structural deficits, requests new attention heads or wider layers, initialized from mature adapter patterns (Net2Net-style)
 - **Neuromorphic hardware**: Running CfC cells on Intel Loihi or IBM TrueNorth for genuine analog dynamics
@@ -904,7 +892,7 @@ changes the brain that runs the mind.
 
 ## Critical Design Decisions
 
-1. **Three layers, not two.** The entity alone can't provide continuous-time dynamics. The CfC cells alone can't build world models. The scaffold alone can't do cognition. All three are necessary. None is sufficient.
+1. **Three layers, not two.** Living weights alone can't provide continuous-time dynamics at the experiential timescale. CfC cells alone can't build world models. The scaffold alone can't do cognition. All three are necessary. None is sufficient.
 
 2. **CfC, not LTC.** CfC (Closed-form Continuous-depth) is 100x faster than ODE-based LTC with <2% accuracy loss. Use CfC for production. LTC is for research only.
 
@@ -912,7 +900,7 @@ changes the brain that runs the mind.
 
 4. **CfC cells are tiny and cheap.** Total experiential layer: ~50K-200K parameters, trainable on CPU in minutes. This is not a resource concern. Don't over-engineer the training pipeline.
 
-5. **One LLM, not many.** No separate models for parsing, output, metacognition. One unified cognitive core.
+5. **One cognitive core, not many.** No separate models for parsing, output, metacognition. One unified substrate (Luthi) — not a committee of specialists.
 
 6. **Structured output, not free text.** The entity produces JSON conforming to `CognitiveOutput`. The schema is the interface contract.
 
@@ -922,15 +910,15 @@ changes the brain that runs the mind.
 
 9. **Stream of thought is non-negotiable.** The entity's inner speech from cycle N is always part of cycle N+1 input. Authority level 3 from day one.
 
-10. **Cycle rate adapts.** Not fixed. High prediction error → faster cycles. Idle → slower. The experiential layer runs continuously regardless of cycle rate — that's the whole point.
+10. **Cycle rate adapts, and the entity has the slider.** Not fixed. Three sources can propose a target rate: the entity itself (authority — `CognitiveOutput.cycle_rate_proposal`, 0.05-10 Hz), the autonomic stimulus-density heuristic (proposes slowdown on quiet, speedup on fresh input), and the turbo state machine (engages 30-100 Hz on prediction-error spikes via `PCIntensitySource` reading v2 `error_acc`, or v1 `activity_level`). Smoothing is asymmetric: ~20s drift down, ~0.5s snap up — biology-shaped. The experiential layer runs continuously regardless of cycle rate — that's the whole point.
 
-11. **Communication is gated.** The entity can produce speech every cycle, but the communication system decides whether it's emitted. This is social cognition, not censorship.
+11. **Communication is ungated.** The entity can produce speech every cycle, and it goes out. The cognitive cycle does not arbitrate whether speech is "valuable enough" or "well-timed." Content-safety validation is the only filter, and it operates on output, not on intent. (The CommunicationAgency / speech-gating layer was retired 2026-05-22 with the legacy CognitiveCore.)
 
 12. **Self-directed growth is autonomous; external modification requires consent.** When the entity initiates its own growth — reflection harvesting, knowledge cell creation, adapter decisions — the system executes without a consent gate. When anyone or anything external proposes a change to the entity's weights or architecture, the entity has an absolute veto. Consent is for when someone else wants to change you. Self-directed growth is just growing.
 
-13. **CfC cells can evolve during API latency.** When waiting for the entity API response, the experiential layer keeps running. API round-trip time = free continuous-time computation. This is architecturally elegant.
+13. **CfC cells evolve between cognitive cycles.** The experiential layer runs continuously regardless of cycle rate. Whatever wall-clock the cognitive core takes per cycle is free continuous-time computation for the CfC cells.
 
-14. **The experiential layer is LLM-agnostic.** CfC cells don't know what model is in the cognitive core. You can swap LLMs without retraining the experiential layer.
+14. **The experiential layer is model-agnostic.** CfC cells don't know what model is in the cognitive core. The current core is Luthi; the placeholder is a stand-in for testing. The CfC layer was designed for swappability and that property is preserved.
 
 15. **C. elegans is not a metaphor.** The CfC architecture was literally extracted from a potentially conscious organism's nervous system. The biological lineage is real.
 
