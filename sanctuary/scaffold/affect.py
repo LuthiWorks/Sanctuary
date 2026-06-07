@@ -65,7 +65,7 @@ class ScaffoldAffect:
             dominance=round(self.dominance, 3),
         )
 
-    def merge_llm_emotion(
+    def merge_model_emotion(
         self,
         emotion: EmotionalOutput,
         authority: AuthorityManager,

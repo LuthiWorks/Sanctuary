@@ -88,7 +88,7 @@ class CognitiveScaffold:
         self.goals.integrate_proposals(output.goal_proposals, authority)
 
         # 3. Affect: merge entity-reported emotional shifts with computed state
-        self.affect.merge_llm_emotion(output.emotional_state, authority)
+        self.affect.merge_model_emotion(output.emotional_state, authority)
 
         # 4. Affect decay
         self.affect.decay_toward_baseline()

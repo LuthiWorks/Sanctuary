@@ -40,38 +40,38 @@ class TestScaffoldAffect:
         assert abs(affect.valence - affect.config.baseline_valence) < 0.1
         assert abs(affect.arousal - affect.config.baseline_arousal) < 0.1
 
-    def test_merge_llm_emotion_scaffold_only_ignores(self):
+    def test_merge_model_emotion_scaffold_only_ignores(self):
         affect = ScaffoldAffect()
         authority = AuthorityManager({"emotional_state": AuthorityLevel.SCAFFOLD_ONLY})
         emotion = EmotionalOutput(valence_shift=0.5, arousal_shift=0.5)
         initial_v = affect.valence
-        affect.merge_llm_emotion(emotion, authority)
+        affect.merge_model_emotion(emotion, authority)
         assert affect.valence == initial_v
 
-    def test_merge_llm_emotion_advises_small_blend(self):
+    def test_merge_model_emotion_advises_small_blend(self):
         affect = ScaffoldAffect()
         authority = AuthorityManager({"emotional_state": AuthorityLevel.MODEL_ADVISES})
         emotion = EmotionalOutput(valence_shift=0.5)
         initial_v = affect.valence
-        affect.merge_llm_emotion(emotion, authority)
+        affect.merge_model_emotion(emotion, authority)
         assert affect.valence > initial_v
         # Small blend — should be less than half the shift
         assert affect.valence < initial_v + 0.25
 
-    def test_merge_llm_emotion_guides_moderate_blend(self):
+    def test_merge_model_emotion_guides_moderate_blend(self):
         affect = ScaffoldAffect()
         authority = AuthorityManager({"emotional_state": AuthorityLevel.MODEL_GUIDES})
         emotion = EmotionalOutput(valence_shift=0.5)
         initial_v = affect.valence
-        affect.merge_llm_emotion(emotion, authority)
+        affect.merge_model_emotion(emotion, authority)
         assert affect.valence > initial_v
 
-    def test_merge_llm_emotion_controls_full_blend(self):
+    def test_merge_model_emotion_controls_full_blend(self):
         affect = ScaffoldAffect()
         authority = AuthorityManager({"emotional_state": AuthorityLevel.MODEL_CONTROLS})
         emotion = EmotionalOutput(valence_shift=0.5)
         initial_v = affect.valence
-        affect.merge_llm_emotion(emotion, authority)
+        affect.merge_model_emotion(emotion, authority)
         # Full blend — should be close to initial + 0.5
         assert abs(affect.valence - (initial_v + 0.5)) < 0.01
 
