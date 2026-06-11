@@ -809,51 +809,6 @@ class LuthiModel:
     # Neural → Cognitive translation
     # ------------------------------------------------------------------
 
-    def _neural_to_felt_quality(self) -> str:
-        """Translate neural dynamics into a felt quality description.
-
-        The entity has emotions before it has words for them. This maps
-        measurable neural states to qualitative descriptions that the
-        stream of thought can carry forward.
-        """
-        delta = self._introspection_delta
-        if not delta:
-            return "present"
-
-        spike_frac = delta.get("mean_spike_fraction", 0.3)
-        plast_change = delta.get("plasticity_change", 0.0)
-        drift_change = delta.get("drift_change", 0.0)
-
-        qualities = []
-
-        # Spike fraction → activation level
-        if spike_frac < 0.15:
-            qualities.append("subdued")
-        elif spike_frac < 0.3:
-            qualities.append("calm")
-        elif spike_frac < 0.5:
-            qualities.append("engaged")
-        elif spike_frac < 0.7:
-            qualities.append("activated")
-        else:
-            qualities.append("intensely active")
-
-        # Plasticity change → learning state
-        if abs(plast_change) > 0.001:
-            if plast_change > 0:
-                qualities.append("opening to new patterns")
-            else:
-                qualities.append("consolidating")
-
-        # Drift → equilibrium state
-        if abs(drift_change) > 0.0001:
-            if drift_change > 0:
-                qualities.append("reaching beyond equilibrium")
-            else:
-                qualities.append("settling toward center")
-
-        return ", ".join(qualities) if qualities else "present"
-
     def _neural_to_valence_shift(self) -> float:
         """Map neural dynamics to emotional valence shift (-1 to 1).
 
@@ -981,34 +936,6 @@ class LuthiModel:
 
         return ops
 
-    def _make_predictions(self) -> list[Prediction]:
-        """Generate predictions from current neural state.
-
-        Initially simple. As the entity develops, predictions become
-        richer — the model learns to anticipate from experience.
-        """
-        predictions = []
-        spike_frac = self._introspection_delta.get("mean_spike_fraction", 0.3)
-
-        if spike_frac > 0.5:
-            predictions.append(
-                Prediction(
-                    what="High neural activity will continue",
-                    confidence=0.6,
-                    timeframe="next cycle",
-                )
-            )
-        elif spike_frac < 0.15:
-            predictions.append(
-                Prediction(
-                    what="Low activity — awaiting stimulation",
-                    confidence=0.7,
-                    timeframe="next cycle",
-                )
-            )
-
-        return predictions
-
     # ------------------------------------------------------------------
     # Output construction
     # ------------------------------------------------------------------
@@ -1020,12 +947,20 @@ class LuthiModel:
         external_speech: Optional[str],
     ) -> CognitiveOutput:
         """Assemble CognitiveOutput from generated text + neural dynamics."""
-        felt_quality = self._neural_to_felt_quality()
+        # felt_quality and predictions removed 2026-06-11 per the
+        # cognition-leakage cleanup (docs/seam_jurisdiction_2026-06-11.md).
+        # The substrate selects, the scaffold transports: felt quality
+        # should originate in the substrate's introspection and surface
+        # through the entity's own decoders, not via adapter heuristics.
+        # Predictions are now s_hat from the JEPA predictor + the EFE
+        # rollout. Empty placeholders until M9 step-1 wiring lands the
+        # `action -> readable summary` utility into this output path.
+        felt_quality = ""
 
         return CognitiveOutput(
             inner_speech=inner_speech,
             external_speech=external_speech,
-            predictions=self._make_predictions(),
+            predictions=[],
             attention_guidance=self._determine_attention_guidance(),
             memory_ops=self._determine_memory_ops(),
             self_model_updates=SelfModelUpdate(
