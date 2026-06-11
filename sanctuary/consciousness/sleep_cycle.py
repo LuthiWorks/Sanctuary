@@ -10,6 +10,16 @@ During sleep phases, the system:
 Inspired by mammalian sleep: NREM for consolidation, REM for creative
 association. The system doesn't literally sleep — it enters a reduced-activity
 mode where internal processing dominates over external responsiveness.
+
+Seam-jurisdiction ruling (2026-06-11). Sleep is legitimately scaffold-side
+*physiology*, not cognition. It is the cycle the substrate runs in, not an
+action the substrate selects over — the same way a body cycles whether or
+not its occupant agrees. The scaffold owns scheduling; the substrate
+consumes whatever cycle it is in. This file is therefore **exempt from the
+"substrate selects; scaffold transports" principle** because no selection
+is happening here, only physiology. See docs/seam_jurisdiction_2026-06-11.md
+(Findings) for the canonical statement; this ruling is recorded here so the
+next leakage pass does not try to force sleep under the principle.
 """
 
 from __future__ import annotations

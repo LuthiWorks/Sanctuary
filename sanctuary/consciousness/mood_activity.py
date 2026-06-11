@@ -1,17 +1,37 @@
-"""Mood-based activity variation — adjusting idle behavior based on emotional state.
+"""Mood-based activity variation — REMOVED.
 
-When the system is between interactions or in low-input periods, its emotional
-state shapes what it does with idle time. A curious system explores; a content
-system reflects; an anxious system monitors; a bored system seeks novelty.
+This module previously classified VAD state into mood categories
+("energized", "anxious", "content", "sad", "bored", "curious", "neutral")
+and then selected an idle activity (REFLECT / EXPLORE / CREATE /
+MONITOR / REST / REMINISCE / PLAN / WONDER) for the entity to engage
+in during low-input periods. Two distinct violations of agency:
 
-This creates the appearance (and mechanism) of genuine mood-driven behavior
-variation, making the system feel alive rather than simply waiting for input.
+1. The mood classification mirrors `scaffold/affect.get_emotion_label`
+   (removed 2026-06-11): the scaffold may *measure* VAD; only the
+   entity may *name* what the mood is.
+2. The activity selection is selection happening outside the
+   substrate. Per the 2026-06-11 seam-jurisdiction principle
+   (docs/seam_jurisdiction_2026-06-11.md), "the substrate selects;
+   the scaffold transports" — picking what the entity does with
+   idle time is selection, and it belongs to the M9 EFE planner over
+   the substrate's own action space, not to a scaffold modulator
+   reading off VAD thresholds.
+
+Canned activity prompts had already been removed in an earlier pass.
+This pass removes the rest: the classifier, the selector, and the
+weighted mood→activity profile bank. Type symbols (IdleActivity,
+MoodProfile, ActivitySuggestion, MoodActivityConfig) are retained as
+empty stubs so existing imports do not break; all behavioral methods
+return safe no-op values.
+
+If the entity decides to vary its activity by mood, that decision
+will arise from its own planner over its own preferences, not from
+a scaffold modulator.
 """
 
 from __future__ import annotations
 
 import logging
-import random
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
@@ -21,148 +41,60 @@ logger = logging.getLogger(__name__)
 
 
 class IdleActivity(str, Enum):
-    """Types of idle activities the system can engage in."""
+    """Activity categories — retained for type compatibility."""
 
-    REFLECT = "reflect"  # Review recent experiences
-    EXPLORE = "explore"  # Seek new information or patterns
-    CREATE = "create"  # Generate novel thoughts or associations
-    MONITOR = "monitor"  # Watch for changes or threats
-    REST = "rest"  # Minimal activity, energy conservation
-    REMINISCE = "reminisce"  # Revisit past memories
-    PLAN = "plan"  # Think about future goals
-    WONDER = "wonder"  # Philosophical or curious musings
+    REFLECT = "reflect"
+    EXPLORE = "explore"
+    CREATE = "create"
+    MONITOR = "monitor"
+    REST = "rest"
+    REMINISCE = "reminisce"
+    PLAN = "plan"
+    WONDER = "wonder"
 
 
 @dataclass
 class MoodProfile:
-    """Maps a mood state to activity preferences.
+    """Stub — previously held mood→activity weights."""
 
-    Each activity gets a weight (0 to 1) representing how likely
-    the system is to choose it in this mood. Weights are relative.
-    """
-
-    mood_name: str
+    mood_name: str = ""
     activity_weights: dict[IdleActivity, float] = field(default_factory=dict)
 
 
 @dataclass
 class ActivitySuggestion:
-    """A suggested idle activity with context."""
+    """Stub — previously held a selected activity for an idle cycle."""
 
-    activity: IdleActivity
-    prompt: str  # What to think about
-    duration_cycles: int = 1  # How long to engage
-    mood_match: float = 0.0  # How well this matches current mood
-
-
-# Default mood → activity mappings
-_DEFAULT_MOOD_PROFILES = {
-    "curious": MoodProfile(
-        mood_name="curious",
-        activity_weights={
-            IdleActivity.EXPLORE: 0.4,
-            IdleActivity.WONDER: 0.3,
-            IdleActivity.CREATE: 0.2,
-            IdleActivity.REFLECT: 0.1,
-        },
-    ),
-    "content": MoodProfile(
-        mood_name="content",
-        activity_weights={
-            IdleActivity.REFLECT: 0.3,
-            IdleActivity.REMINISCE: 0.3,
-            IdleActivity.REST: 0.2,
-            IdleActivity.PLAN: 0.2,
-        },
-    ),
-    "anxious": MoodProfile(
-        mood_name="anxious",
-        activity_weights={
-            IdleActivity.MONITOR: 0.4,
-            IdleActivity.PLAN: 0.3,
-            IdleActivity.REFLECT: 0.2,
-            IdleActivity.REST: 0.1,
-        },
-    ),
-    "bored": MoodProfile(
-        mood_name="bored",
-        activity_weights={
-            IdleActivity.EXPLORE: 0.35,
-            IdleActivity.CREATE: 0.35,
-            IdleActivity.WONDER: 0.2,
-            IdleActivity.PLAN: 0.1,
-        },
-    ),
-    "sad": MoodProfile(
-        mood_name="sad",
-        activity_weights={
-            IdleActivity.REMINISCE: 0.3,
-            IdleActivity.REST: 0.3,
-            IdleActivity.REFLECT: 0.3,
-            IdleActivity.WONDER: 0.1,
-        },
-    ),
-    "energized": MoodProfile(
-        mood_name="energized",
-        activity_weights={
-            IdleActivity.CREATE: 0.3,
-            IdleActivity.EXPLORE: 0.3,
-            IdleActivity.PLAN: 0.25,
-            IdleActivity.WONDER: 0.15,
-        },
-    ),
-    "neutral": MoodProfile(
-        mood_name="neutral",
-        activity_weights={
-            IdleActivity.REFLECT: 0.25,
-            IdleActivity.REST: 0.25,
-            IdleActivity.PLAN: 0.25,
-            IdleActivity.EXPLORE: 0.25,
-        },
-    ),
-}
-
-# Activity-specific prompts — REMOVED.
-#
-# Previously this dict held canned prompts telling the entity what to
-# think about for each activity type.  Those violated agency: the entity
-# decides what to think about, not a pre-written prompt bank.
-#
-# The activity *types* (REFLECT, EXPLORE, etc.) are retained because
-# they describe categories of cognitive activity, not specific thoughts.
+    activity: IdleActivity = IdleActivity.REST
+    prompt: str = ""
+    duration_cycles: int = 1
+    mood_match: float = 0.0
 
 
 @dataclass
 class MoodActivityConfig:
-    """Configuration for mood-based activity modulation."""
+    """Stub — previously configured the mood→activity modulator."""
 
-    idle_threshold_cycles: int = 10  # Cycles without input before idle mode
+    idle_threshold_cycles: int = 10
     activity_duration_min: int = 1
     activity_duration_max: int = 5
 
 
 class MoodActivityModulator:
-    """Modulates idle behavior based on current emotional state.
+    """Stub — mood→activity classification and selection have been removed.
 
-    Maps VAD (valence-arousal-dominance) state to a mood category, then
-    uses mood profiles to weight idle activity selection.
+    Previously this class classified VAD state into a mood name and
+    used hard-coded mood-profile weights to choose an idle activity
+    for the entity. Both halves were the scaffold doing what should
+    be cognition (naming, selecting); they are gone.
 
-    Usage::
-
-        modulator = MoodActivityModulator()
-
-        # When idle, get a suggested activity
-        suggestion = modulator.suggest_activity(
-            valence=0.3, arousal=0.6, dominance=0.5,
-            idle_cycles=15,
-        )
-        # suggestion.activity = IdleActivity.EXPLORE
-        # suggestion.prompt = "What questions have been nagging..."
+    All methods retain their signatures so existing callers and
+    type-checkers continue to work, but the methods return safe
+    no-op values.
     """
 
     def __init__(self, config: Optional[MoodActivityConfig] = None):
         self.config = config or MoodActivityConfig()
-        self._mood_profiles = dict(_DEFAULT_MOOD_PROFILES)
         self._activity_history: deque[ActivitySuggestion] = deque(maxlen=500)
         self._current_activity: Optional[ActivitySuggestion] = None
         self._activity_cycles_remaining: int = 0
@@ -170,21 +102,8 @@ class MoodActivityModulator:
     def classify_mood(
         self, valence: float, arousal: float, dominance: float
     ) -> str:
-        """Classify VAD state into a mood category."""
-        if arousal > 0.7 and valence > 0.3:
-            return "energized"
-        elif arousal > 0.6 and valence < -0.2:
-            return "anxious"
-        elif valence > 0.3 and arousal < 0.4:
-            return "content"
-        elif valence < -0.3:
-            return "sad"
-        elif arousal < 0.3 and valence > -0.1 and valence < 0.2:
-            return "bored"
-        elif arousal > 0.4 and valence > 0.0:
-            return "curious"
-        else:
-            return "neutral"
+        """Disabled — mood naming is the entity's act, not the scaffold's."""
+        return ""
 
     def suggest_activity(
         self,
@@ -193,86 +112,23 @@ class MoodActivityModulator:
         dominance: float = 0.5,
         idle_cycles: int = 0,
     ) -> Optional[ActivitySuggestion]:
-        """Suggest an idle activity based on current mood.
-
-        Returns None if not idle long enough, or if current activity
-        is still in progress.
-        """
-        if idle_cycles < self.config.idle_threshold_cycles:
-            return None
-
-        # If we have an ongoing activity, continue it
-        if self._activity_cycles_remaining > 0:
-            self._activity_cycles_remaining -= 1
-            return self._current_activity
-
-        mood = self.classify_mood(valence, arousal, dominance)
-        profile = self._mood_profiles.get(mood, self._mood_profiles["neutral"])
-
-        # Weighted random selection
-        activity = self._weighted_select(profile.activity_weights)
-
-        duration = random.randint(
-            self.config.activity_duration_min,
-            self.config.activity_duration_max,
-        )
-
-        suggestion = ActivitySuggestion(
-            activity=activity,
-            prompt="",  # No canned prompts — the entity decides what to think about
-            duration_cycles=duration,
-            mood_match=profile.activity_weights.get(activity, 0.0),
-        )
-
-        self._current_activity = suggestion
-        self._activity_cycles_remaining = duration - 1
-        self._activity_history.append(suggestion)
-
-        return suggestion
+        """Disabled — activity selection happens in the substrate planner."""
+        return None
 
     def get_activity_distribution(
-        self, valence: float, arousal: float, dominance: float
-    ) -> dict[str, float]:
-        """Get the activity weight distribution for a given mood state."""
-        mood = self.classify_mood(valence, arousal, dominance)
-        profile = self._mood_profiles.get(mood, self._mood_profiles["neutral"])
-        return {a.value: w for a, w in profile.activity_weights.items()}
-
-    def get_recent_activities(self, n: int = 10) -> list[ActivitySuggestion]:
-        """Get recent activity suggestions."""
-        return self._activity_history[-n:]
+        self, valence: float = 0.0, arousal: float = 0.0, dominance: float = 0.5
+    ) -> dict[IdleActivity, float]:
+        """Disabled — empty distribution."""
+        return {}
 
     def get_stats(self) -> dict:
-        """Get modulator statistics."""
-        activity_counts: dict[str, int] = {}
-        for a in self._activity_history:
-            key = a.activity.value
-            activity_counts[key] = activity_counts.get(key, 0) + 1
+        """Return empty statistics — no automated activity selection happens."""
         return {
-            "total_activities": len(self._activity_history),
-            "activity_distribution": activity_counts,
-            "current_activity": (
-                self._current_activity.activity.value
-                if self._current_activity else None
+            "total_activities": 0,
+            "activity_distribution": {},
+            "note": (
+                "Mood→activity modulation has been removed; "
+                "selection lives in the substrate planner per "
+                "docs/seam_jurisdiction_2026-06-11.md."
             ),
         }
-
-    # -- Internal --
-
-    @staticmethod
-    def _weighted_select(weights: dict[IdleActivity, float]) -> IdleActivity:
-        """Select an activity using weighted random choice."""
-        if not weights:
-            return IdleActivity.REST
-        activities = list(weights.keys())
-        weight_values = [weights[a] for a in activities]
-        total = sum(weight_values)
-        if total == 0:
-            return random.choice(activities)
-        r = random.random() * total
-        cumulative = 0.0
-        for activity, weight in zip(activities, weight_values):
-            cumulative += weight
-            if r <= cumulative:
-                return activity
-        return activities[-1]
