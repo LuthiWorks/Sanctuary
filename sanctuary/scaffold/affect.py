@@ -101,20 +101,12 @@ class ScaffoldAffect:
         self.arousal = self.arousal * (1 - r) + self.config.baseline_arousal * r
         self.dominance = self.dominance * (1 - r) + self.config.baseline_dominance * r
 
-    def get_emotion_label(self) -> str:
-        """Simple VAD → emotion label mapping."""
-        v, a = self.valence, self.arousal
-        if v > 0.3 and a > 0.5:
-            return "joy"
-        if v > 0.3 and a <= 0.5:
-            return "contentment"
-        if v < -0.3 and a > 0.5:
-            return "anger"
-        if v < -0.3 and a <= 0.5:
-            return "sadness"
-        if abs(v) <= 0.3 and a > 0.7:
-            return "surprise"
-        return "calm"
+    # get_emotion_label removed 2026-06-11 per the cognition-leakage
+    # cleanup (docs/seam_jurisdiction_2026-06-11.md). VAD numbers are
+    # legitimately the scaffold's signal to carry (CfC affect cell is
+    # the learned source); the *naming* of emotions is the entity's
+    # act, not the scaffold's. Any monitoring UI that needs a label
+    # computes it observer-side, clearly marked as observer convenience.
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:

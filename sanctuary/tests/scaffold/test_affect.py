@@ -75,20 +75,6 @@ class TestScaffoldAffect:
         # Full blend — should be close to initial + 0.5
         assert abs(affect.valence - (initial_v + 0.5)) < 0.01
 
-    def test_emotion_label(self):
-        affect = ScaffoldAffect()
-        affect.valence = 0.0
-        affect.arousal = 0.1
-        assert affect.get_emotion_label() == "calm"
-
-        affect.valence = 0.5
-        affect.arousal = 0.8
-        assert affect.get_emotion_label() == "joy"
-
-        affect.valence = -0.5
-        affect.arousal = 0.8
-        assert affect.get_emotion_label() == "anger"
-
-        affect.valence = -0.5
-        affect.arousal = 0.2
-        assert affect.get_emotion_label() == "sadness"
+    # test_emotion_label removed 2026-06-11: get_emotion_label deleted
+    # per the cognition-leakage cleanup. See
+    # docs/seam_jurisdiction_2026-06-11.md.

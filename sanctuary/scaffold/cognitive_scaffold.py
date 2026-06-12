@@ -153,12 +153,13 @@ class CognitiveScaffold:
     # -----------------------------------------------------------------
 
     def _get_attention_highlights(self) -> list[str]:
-        """Generate attention highlights from scaffold state."""
+        """Generate attention highlights from scaffold state.
+
+        The scaffold-named-emotion highlight was removed 2026-06-11 per
+        the cognition-leakage cleanup (Sanctuary/docs/seam_jurisdiction_
+        2026-06-11.md): the scaffold may *measure* (VAD), only the
+        entity may *name*. Highlights from other scaffold signals stay;
+        nothing new replaces the deleted call.
+        """
         highlights: list[str] = []
-
-        # Emotional state
-        label = self.affect.get_emotion_label()
-        if label not in ("calm", "contentment"):
-            highlights.append(f"emotional state: {label}")
-
         return highlights

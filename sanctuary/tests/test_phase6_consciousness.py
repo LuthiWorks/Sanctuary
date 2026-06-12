@@ -196,79 +196,31 @@ class TestSleepCycleManager:
 
 
 class TestMoodActivityModulator:
-    """Tests for mood-based activity variation."""
+    """Tests verifying that mood→activity modulation is disabled.
 
-    def test_classify_mood_energized(self):
+    The classifier and selector were removed 2026-06-11 per the
+    cognition-leakage cleanup (docs/seam_jurisdiction_2026-06-11.md).
+    These tests verify the stubs return safe no-op values.
+    """
+
+    def test_classify_mood_returns_empty(self):
         m = MoodActivityModulator()
-        assert m.classify_mood(valence=0.5, arousal=0.8, dominance=0.5) == "energized"
+        assert m.classify_mood(valence=0.5, arousal=0.8, dominance=0.5) == ""
 
-    def test_classify_mood_anxious(self):
-        m = MoodActivityModulator()
-        assert m.classify_mood(valence=-0.3, arousal=0.7, dominance=0.3) == "anxious"
-
-    def test_classify_mood_content(self):
-        m = MoodActivityModulator()
-        assert m.classify_mood(valence=0.5, arousal=0.2, dominance=0.5) == "content"
-
-    def test_classify_mood_sad(self):
-        m = MoodActivityModulator()
-        assert m.classify_mood(valence=-0.5, arousal=0.2, dominance=0.3) == "sad"
-
-    def test_classify_mood_bored(self):
-        m = MoodActivityModulator()
-        assert m.classify_mood(valence=0.0, arousal=0.2, dominance=0.5) == "bored"
-
-    def test_classify_mood_neutral(self):
-        m = MoodActivityModulator()
-        # Neutral: moderate everything
-        mood = m.classify_mood(valence=0.1, arousal=0.4, dominance=0.5)
-        assert mood in ("curious", "neutral")
-
-    def test_no_suggestion_below_idle_threshold(self):
-        config = MoodActivityConfig(idle_threshold_cycles=10)
-        m = MoodActivityModulator(config=config)
-        result = m.suggest_activity(idle_cycles=5)
-        assert result is None
-
-    def test_suggestion_above_idle_threshold(self):
-        config = MoodActivityConfig(idle_threshold_cycles=5)
-        m = MoodActivityModulator(config=config)
-        random.seed(42)
-        result = m.suggest_activity(
-            valence=0.5, arousal=0.8, dominance=0.5, idle_cycles=10
-        )
-        assert result is not None
-        assert isinstance(result.activity, IdleActivity)
-        # Prompt should be empty — canned prompts were removed
-        assert result.prompt == ""
-
-    def test_activity_distribution(self):
-        m = MoodActivityModulator()
-        dist = m.get_activity_distribution(valence=0.5, arousal=0.8, dominance=0.5)
-        assert len(dist) > 0
-        assert all(0 <= v <= 1 for v in dist.values())
-
-    def test_activity_continuation(self):
-        config = MoodActivityConfig(
-            idle_threshold_cycles=1,
-            activity_duration_min=3,
-            activity_duration_max=3,
-        )
-        m = MoodActivityModulator(config=config)
-        random.seed(42)
-        first = m.suggest_activity(idle_cycles=5)
-        assert first is not None
-        # Should continue the same activity
-        second = m.suggest_activity(idle_cycles=6)
-        assert second == first
-
-    def test_stats(self):
+    def test_suggest_activity_returns_none(self):
         config = MoodActivityConfig(idle_threshold_cycles=1)
         m = MoodActivityModulator(config=config)
-        random.seed(42)
-        m.suggest_activity(idle_cycles=5)
+        assert m.suggest_activity(idle_cycles=100) is None
+
+    def test_activity_distribution_empty(self):
+        m = MoodActivityModulator()
+        assert m.get_activity_distribution(valence=0.5, arousal=0.8) == {}
+
+    def test_stats_show_disabled(self):
+        m = MoodActivityModulator()
         stats = m.get_stats()
-        assert stats["total_activities"] == 1
+        assert stats["total_activities"] == 0
+        assert "note" in stats
 
 
 # =========================================================================
@@ -277,123 +229,44 @@ class TestMoodActivityModulator:
 
 
 class TestSpontaneousGoalGenerator:
-    """Tests for spontaneous goal generation."""
+    """Tests verifying that spontaneous goal generation is disabled.
 
-    def test_no_goals_below_thresholds(self):
+    The drive-based goal generator was removed 2026-06-11 per the
+    cognition-leakage cleanup. These tests verify the stubs return
+    safe no-op values.
+    """
+
+    def test_check_drives_returns_empty(self):
+        """No goals generated regardless of drive levels."""
         gen = SpontaneousGoalGenerator()
         goals = gen.check_drives(
-            novelty=0.1, idle_cycles=5, engagement=0.1,
-            anomaly_level=0.1, uncertainty=0.1, current_cycle=20,
+            novelty=0.9, idle_cycles=100, engagement=0.9,
+            anomaly_level=0.9, uncertainty=0.9, current_cycle=20,
         )
-        assert len(goals) == 0
+        assert goals == []
 
-    def test_curiosity_goal(self):
-        config = SpontaneousGoalConfig(
-            curiosity_novelty_threshold=0.5, generation_cooldown=0,
-        )
-        gen = SpontaneousGoalGenerator(config=config)
-        goals = gen.check_drives(
-            novelty=0.8, current_cycle=1, recent_topics=["quantum computing"],
-        )
-        assert len(goals) >= 1
-        curiosity_goals = [g for g in goals if g.drive == GoalDrive.CURIOSITY]
-        assert len(curiosity_goals) == 1
-        assert "quantum computing" in curiosity_goals[0].description
+    def test_adopt_goal_returns_false(self):
+        gen = SpontaneousGoalGenerator()
+        assert gen.adopt_goal(0) is False
 
-    def test_boredom_goal(self):
-        config = SpontaneousGoalConfig(
-            boredom_idle_cycles=10, generation_cooldown=0,
-        )
-        gen = SpontaneousGoalGenerator(config=config)
-        goals = gen.check_drives(idle_cycles=50, current_cycle=1)
-        boredom_goals = [g for g in goals if g.drive == GoalDrive.BOREDOM]
-        assert len(boredom_goals) == 1
-
-    def test_concern_goal(self):
-        config = SpontaneousGoalConfig(
-            concern_anomaly_threshold=0.3, generation_cooldown=0,
-        )
-        gen = SpontaneousGoalGenerator(config=config)
-        goals = gen.check_drives(anomaly_level=0.7, current_cycle=1)
-        concern_goals = [g for g in goals if g.drive == GoalDrive.CONCERN]
-        assert len(concern_goals) == 1
-
-    def test_growth_goal(self):
-        config = SpontaneousGoalConfig(
-            growth_uncertainty_threshold=0.5, generation_cooldown=0,
-        )
-        gen = SpontaneousGoalGenerator(config=config)
-        goals = gen.check_drives(uncertainty=0.8, current_cycle=1)
-        growth_goals = [g for g in goals if g.drive == GoalDrive.GROWTH]
-        assert len(growth_goals) == 1
-
-    def test_generation_cooldown(self):
-        config = SpontaneousGoalConfig(
-            curiosity_novelty_threshold=0.5, generation_cooldown=10,
-        )
-        gen = SpontaneousGoalGenerator(config=config)
-        goals1 = gen.check_drives(novelty=0.8, current_cycle=1)
-        assert len(goals1) >= 1
-        # Within cooldown
-        goals2 = gen.check_drives(novelty=0.8, current_cycle=5)
-        assert len(goals2) == 0
-
-    def test_max_pending_goals(self):
-        config = SpontaneousGoalConfig(
-            max_pending_goals=2, generation_cooldown=0,
-            curiosity_novelty_threshold=0.5,
-        )
-        gen = SpontaneousGoalGenerator(config=config)
-        gen.check_drives(novelty=0.8, current_cycle=1)
-        gen.check_drives(novelty=0.8, current_cycle=2)
-        gen.check_drives(novelty=0.8, current_cycle=3)
-        assert len(gen.get_pending_goals()) <= 2
-
-    def test_adopt_goal(self):
-        config = SpontaneousGoalConfig(
-            curiosity_novelty_threshold=0.5, generation_cooldown=0,
-        )
-        gen = SpontaneousGoalGenerator(config=config)
-        gen.check_drives(novelty=0.8, current_cycle=1)
-        result = gen.adopt_goal(0)
-        assert result is True
-        assert gen._total_adopted == 1
-
-    def test_dismiss_goal(self):
-        config = SpontaneousGoalConfig(
-            curiosity_novelty_threshold=0.5, generation_cooldown=0,
-        )
-        gen = SpontaneousGoalGenerator(config=config)
-        gen.check_drives(novelty=0.8, current_cycle=1)
-        result = gen.dismiss_goal(0)
-        assert result is True
-        assert len(gen.get_pending_goals()) == 0
+    def test_dismiss_goal_returns_false(self):
+        gen = SpontaneousGoalGenerator()
+        assert gen.dismiss_goal(0) is False
 
     def test_goal_prompt_disabled(self):
-        """Canned goal prompts are disabled to preserve agency."""
-        config = SpontaneousGoalConfig(
-            curiosity_novelty_threshold=0.5, generation_cooldown=0,
-        )
-        gen = SpontaneousGoalGenerator(config=config)
-        gen.check_drives(novelty=0.8, current_cycle=1)
-        prompt = gen.get_goal_prompt()
-        assert prompt is None
+        gen = SpontaneousGoalGenerator()
+        assert gen.get_goal_prompt() is None
 
-    def test_no_prompt_when_all_adopted(self):
-        config = SpontaneousGoalConfig(
-            curiosity_novelty_threshold=0.5, generation_cooldown=0,
-        )
-        gen = SpontaneousGoalGenerator(config=config)
-        gen.check_drives(novelty=0.8, current_cycle=1)
-        gen.adopt_goal(0)
-        prompt = gen.get_goal_prompt()
-        assert prompt is None
+    def test_pending_goals_empty(self):
+        gen = SpontaneousGoalGenerator()
+        assert gen.get_pending_goals() == []
 
-    def test_stats(self):
+    def test_stats_show_disabled(self):
         gen = SpontaneousGoalGenerator()
         stats = gen.get_stats()
         assert stats["total_generated"] == 0
         assert stats["adoption_rate"] == 0.0
+        assert "note" in stats
 
 
 # =========================================================================
