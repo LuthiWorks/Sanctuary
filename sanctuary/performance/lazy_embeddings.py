@@ -60,7 +60,21 @@ class LazyEmbeddingCache:
         config: Optional[LazyEmbeddingConfig] = None,
     ):
         self.config = config or LazyEmbeddingConfig()
-        self._compute_fn = compute_fn or self._default_compute
+        if compute_fn is None:
+            # No silent fallback. A hash-based pseudo-embedding would let
+            # production compute meaningless vectors and corrupt every
+            # similarity / retrieval built on this cache without ever
+            # failing -- the worst kind of bug, because it looks like it
+            # works. Require a real embedder explicitly. Tests that only
+            # exercise cache mechanics (eviction, TTL, hit-rate) should
+            # pass compute_fn=LazyEmbeddingCache.deterministic_test_embedding.
+            raise ValueError(
+                "LazyEmbeddingCache requires an explicit compute_fn (a real "
+                "embedding function). There is no default: a fabricated "
+                "embedding would silently corrupt similarity. For tests, pass "
+                "compute_fn=LazyEmbeddingCache.deterministic_test_embedding."
+            )
+        self._compute_fn = compute_fn
         self._cache: OrderedDict[str, _CacheEntry] = OrderedDict()
         self._hits: int = 0
         self._misses: int = 0
@@ -159,8 +173,16 @@ class LazyEmbeddingCache:
         return hashlib.md5(text.encode()).hexdigest()
 
     @staticmethod
-    def _default_compute(text: str) -> list[float]:
-        """Default (placeholder) embedding function — returns hash-based vector."""
-        # Simple deterministic pseudo-embedding for testing
+    def deterministic_test_embedding(text: str) -> list[float]:
+        """Deterministic hash-based pseudo-embedding -- FOR TESTS ONLY.
+
+        This is NOT a real embedding: it is an MD5-derived 16-dim vector
+        with no semantic meaning. It exists so cache-mechanics tests
+        (eviction, TTL, hit-rate) have a cheap, deterministic embedder
+        without loading a model. It must be passed *explicitly* as
+        ``compute_fn`` -- it is never a silent default, because using it
+        in production would fabricate similarity. Naming it loudly so no
+        one mistakes it for a usable embedder.
+        """
         h = hashlib.md5(text.encode()).digest()
         return [b / 255.0 for b in h]  # 16-dimensional normalized vector

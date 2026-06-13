@@ -206,7 +206,7 @@ class TestLazyEmbeddingCache:
         assert cache._misses == 1
 
     def test_cache_miss_different_text(self):
-        cache = LazyEmbeddingCache()
+        cache = LazyEmbeddingCache(compute_fn=LazyEmbeddingCache.deterministic_test_embedding)
         e1 = cache.get("hello")
         e2 = cache.get("world")
         assert e1 != e2
@@ -214,7 +214,10 @@ class TestLazyEmbeddingCache:
 
     def test_lru_eviction(self):
         config = LazyEmbeddingConfig(max_cache_size=3)
-        cache = LazyEmbeddingCache(config=config)
+        cache = LazyEmbeddingCache(
+            compute_fn=LazyEmbeddingCache.deterministic_test_embedding,
+            config=config,
+        )
         cache.get("a")
         cache.get("b")
         cache.get("c")
@@ -236,13 +239,13 @@ class TestLazyEmbeddingCache:
         assert len(computed) == 2
 
     def test_batch_get(self):
-        cache = LazyEmbeddingCache()
+        cache = LazyEmbeddingCache(compute_fn=LazyEmbeddingCache.deterministic_test_embedding)
         results = cache.get_batch(["a", "b", "c"])
         assert len(results) == 3
         assert cache._misses == 3
 
     def test_precompute(self):
-        cache = LazyEmbeddingCache()
+        cache = LazyEmbeddingCache(compute_fn=LazyEmbeddingCache.deterministic_test_embedding)
         count = cache.precompute(["a", "b", "c"])
         assert count == 3
         assert cache._misses == 3
@@ -251,17 +254,17 @@ class TestLazyEmbeddingCache:
         assert cache._hits == 1
 
     def test_invalidate(self):
-        cache = LazyEmbeddingCache()
+        cache = LazyEmbeddingCache(compute_fn=LazyEmbeddingCache.deterministic_test_embedding)
         cache.get("hello")
         assert cache.invalidate("hello") is True
         assert len(cache._cache) == 0
 
     def test_invalidate_missing(self):
-        cache = LazyEmbeddingCache()
+        cache = LazyEmbeddingCache(compute_fn=LazyEmbeddingCache.deterministic_test_embedding)
         assert cache.invalidate("nonexistent") is False
 
     def test_clear(self):
-        cache = LazyEmbeddingCache()
+        cache = LazyEmbeddingCache(compute_fn=LazyEmbeddingCache.deterministic_test_embedding)
         cache.get("a")
         cache.get("b")
         removed = cache.clear()
@@ -281,25 +284,33 @@ class TestLazyEmbeddingCache:
         assert len(computed) == 2  # No caching
 
     def test_hit_rate(self):
-        cache = LazyEmbeddingCache()
+        cache = LazyEmbeddingCache(compute_fn=LazyEmbeddingCache.deterministic_test_embedding)
         cache.get("a")  # miss
         cache.get("a")  # hit
         cache.get("b")  # miss
         assert cache.get_hit_rate() == pytest.approx(1 / 3, abs=0.01)
 
     def test_stats(self):
-        cache = LazyEmbeddingCache()
+        cache = LazyEmbeddingCache(compute_fn=LazyEmbeddingCache.deterministic_test_embedding)
         cache.get("hello")
         stats = cache.get_stats()
         assert stats["cache_size"] == 1
         assert stats["misses"] == 1
 
-    def test_default_compute_deterministic(self):
-        cache = LazyEmbeddingCache()
+    def test_deterministic_test_embedding_is_deterministic(self):
+        cache = LazyEmbeddingCache(
+            compute_fn=LazyEmbeddingCache.deterministic_test_embedding
+        )
         e1 = cache.get("test")
         cache.clear()
         e2 = cache.get("test")
         assert e1 == e2
+
+    def test_missing_compute_fn_fails_loud(self):
+        """No silent hash fallback: constructing without a real embedder
+        must raise, not quietly fabricate embeddings."""
+        with pytest.raises(ValueError):
+            LazyEmbeddingCache()
 
 
 # =========================================================================
