@@ -37,7 +37,6 @@ from sanctuary.core.schema import (
     ExperientialSignals,
     GoalProposal,
     MemoryOp,
-    Prediction,
     SelfModelUpdate,
 )
 
@@ -135,7 +134,77 @@ class LuthiModel:
         # available. Populated in load().
         self._base_snapshot = None
 
+        # ---- Training-seam state (2026-06-15 integration plan, Phase 3) ----
+        # Optional actor + transition sink (typically the same M9Trainer,
+        # which satisfies both Protocols). When both are None the adapter
+        # behaves exactly as before — no encode_state, no select_action, no
+        # observe_transition fires, the cycle is purely inferential.
+        #
+        # Attached via attach_seam(); typically called after load() during
+        # Sanctuary startup if an M9 trainer is co-resident.
+        self._actor = None  # luthi.sanctuary_interface.M9Actor | None
+        self._sink = None   # luthi.sanctuary_interface.TransitionSink | None
+        # When True, seam exceptions are caught + logged so a transient
+        # sink failure doesn't abort the cognitive cycle. Default False
+        # follows the project ethos of "crashes over silence" (4.8 review
+        # F5, 2026-06-15) -- on day one of integration, silent failures
+        # are exactly how real wiring bugs hide. Flip to True only after
+        # we have empirical evidence of which transients are worth
+        # surviving in production.
+        self._seam_resilient: bool = False
+
+        # Last-cycle transition state buffered so cycle N+1 can close the
+        # loop: observe_transition(_last_s_t, _last_action, current s_t, ctx).
+        self._last_s_t = None  # torch.Tensor [B, D] | None
+        self._last_action = None  # torch.Tensor [D] | None
+        self._last_action_summary: str = ""
+        self._last_efe_breakdown: dict = {}
+        # PlanSnapshot from the previous cycle's select_action, threaded
+        # through ctx["plan_snapshot"] on the next observe_transition so
+        # the sink reads the plan that produced this transition's a_t
+        # from a frozen snapshot rather than from live trainer MCTS state
+        # (4.8 review F4, 2026-06-15). None on cycle 1 / after attach_seam.
+        self._last_plan_snapshot = None  # luthi.seam_types.PlanSnapshot | None
+
         logger.info("LuthiModel bridge initialized (model not yet loaded)")
+
+    # ------------------------------------------------------------------
+    # Training-seam attachment (Phase 3 of the 2026-06-15 seam plan)
+    # ------------------------------------------------------------------
+
+    def attach_seam(
+        self, *, actor=None, sink=None, resilient: bool = False,
+    ) -> None:
+        """Wire in the M9 actor / transition sink for this cognitive cycle.
+
+        Both args are optional and independent: passing only ``actor`` runs
+        the M9 act path each cycle (decoder selection through the substrate)
+        without persisting transitions; passing only ``sink`` accumulates
+        lived experience for a separately-driven actor; passing both gives
+        the full Sanctuary-as-actor flow the seam plan describes.
+
+        The typical configuration is ``actor=sink=m9_trainer`` because
+        ``M9Trainer`` satisfies both Protocols. No assumption is made here;
+        Sanctuary can pass distinct objects if a future split warrants.
+
+        ``resilient=False`` (default): seam-call exceptions propagate and
+        abort the cycle. Project ethos for new training-side wiring is
+        crashes over silence -- silent failure on day-one integration is
+        how real bugs hide (4.8 review F5, 2026-06-15). Flip to True
+        only when empirical operation has identified specific transients
+        worth surviving.
+        """
+        self._actor = actor
+        self._sink = sink
+        self._seam_resilient = resilient
+        # Drop the buffered transition state when the seam changes -- the
+        # previous _last_s_t was paired with the previous actor's MCTS tree,
+        # which is no longer valid.
+        self._last_s_t = None
+        self._last_action = None
+        self._last_action_summary = ""
+        self._last_efe_breakdown = {}
+        self._last_plan_snapshot = None
 
     # ------------------------------------------------------------------
     # Model loading
@@ -330,12 +399,34 @@ class LuthiModel:
                 cognitive_input
             )
 
-            # 4. Generate inner speech (living inference)
-            inner_speech = self._generate_inner_speech(
-                prompt,
-                audio_tokens=audio_tokens,
-                vision_tokens=vision_tokens,
+            # 4a (2026-06-16): when a seam is attached and the substrate
+            # exposes the v2 multimodal-PC encoder API, inner-speech
+            # generation captures s_t + ctx_latents from its own step-0
+            # forward. That kills the separate encode_state pass Phase 3
+            # used to run (4.8's F7a-followup probe: double-plasticity
+            # measurably moves generation). No seam, or a substrate
+            # without ``encode()``, falls through to the same generation
+            # path return_state=False has always taken.
+            seam_wants_state = (
+                (self._actor is not None or self._sink is not None)
+                and hasattr(self.model, "encode")
             )
+
+            # 4. Generate inner speech (living inference)
+            if seam_wants_state:
+                inner_speech, gen_state = self._generate_inner_speech(
+                    prompt,
+                    audio_tokens=audio_tokens,
+                    vision_tokens=vision_tokens,
+                    return_state=True,
+                )
+            else:
+                inner_speech = self._generate_inner_speech(
+                    prompt,
+                    audio_tokens=audio_tokens,
+                    vision_tokens=vision_tokens,
+                )
+                gen_state = None
 
             # 5. Generate external speech if warranted
             external_speech = self._generate_external_speech(
@@ -344,8 +435,20 @@ class LuthiModel:
                 vision_tokens=vision_tokens,
             )
 
+            # 6. M9 training-seam (Phase 4a reorder, 2026-06-16). Order is:
+            #    generate -> observe(prior cycle's transition, with this
+            #    cycle's s_t as s_next) -> select(next cycle's action).
+            #    The F4 snapshot fix relaxed the old observe-before-select
+            #    constraint -- the snapshot carries the plan that produced
+            #    the realized action, so a later select_action doesn't
+            #    corrupt the realized transition. inner-speech's encode
+            #    pass produced gen_state; the seam consumes it directly,
+            #    no separate encode_state call.
+            if gen_state is not None:
+                self._run_training_seam(gen_state)
+
         finally:
-            # 6. Always restore base parameters after CfC modulation
+            # 7. Always restore base parameters after CfC modulation
             self._restore_base_parameters()
 
         # 7. Post-generation introspection snapshot
@@ -359,6 +462,110 @@ class LuthiModel:
             inner_speech=inner_speech,
             external_speech=external_speech,
         )
+
+    def _run_training_seam(self, state) -> None:
+        """Run the [observe last] -> select_action stage on a captured state.
+
+        Phase 4a (2026-06-16): the encoder pass is no longer a separate
+        ``encode_state`` call -- it is the step-0 forward of inner-speech
+        generation, captured via ``return_state=True``. ``state`` is the
+        ``GenerationState`` that capture produced. The seam consumes
+        ``state.s_t`` (canonical via :func:`compute_s_t`) and
+        ``state.ctx_latents`` (the unpooled latents the MCTS predictor
+        needs).
+
+        Stores the chosen action's readable_summary + EFE breakdown for
+        diagnostics; they no longer flow into ``CognitiveOutput.predictions``
+        (4.8 review F2/F3).
+        """
+        from luthi.sanctuary_interface import (
+            observe_transition,
+            select_action,
+        )
+
+        s_t = state.s_t
+        ctx_latents = state.ctx_latents
+
+        # Close the previous cycle's transition before resetting the tree.
+        # No try/except by default: crashes over silence (4.8 review F5).
+        # If attach_seam(resilient=True) was set, transient failures are
+        # logged-and-swallowed -- but only after we have empirical
+        # evidence of which transients are worth surviving.
+        #
+        # plan_snapshot threads the previous cycle's frozen MCTS capture
+        # through ctx so the sink reads it from there rather than from
+        # live trainer state (4.8 review F4). Passed even when None, so
+        # the sink's no-snapshot-degenerate path is taken explicitly.
+        if (
+            self._sink is not None
+            and self._last_s_t is not None
+            and self._last_action is not None
+        ):
+            if self._seam_resilient:
+                try:
+                    observe_transition(
+                        self._sink,
+                        self._last_s_t,
+                        self._last_action,
+                        s_t,
+                        counterpart_present=False,
+                        time_since_emission=0.0,
+                        plan_snapshot=self._last_plan_snapshot,
+                    )
+                except Exception:
+                    logger.exception(
+                        "observe_transition failed at cycle %d; "
+                        "continuing (resilient mode).",
+                        self.cycle_count,
+                    )
+            else:
+                observe_transition(
+                    self._sink,
+                    self._last_s_t,
+                    self._last_action,
+                    s_t,
+                    counterpart_present=False,
+                    time_since_emission=0.0,
+                    plan_snapshot=self._last_plan_snapshot,
+                )
+
+        # Run the actor's plan + select. _last_action_summary /
+        # _last_efe_breakdown are retained for diagnostics / future
+        # M9-decoder-driven emissions; they no longer flow into
+        # CognitiveOutput.predictions (4.8 review F2/F3).
+        if self._actor is not None:
+            if self._seam_resilient:
+                try:
+                    selection = select_action(
+                        self._actor, s_t, context_latents=ctx_latents,
+                    )
+                except Exception:
+                    logger.exception(
+                        "select_action failed at cycle %d; transition "
+                        "closed but no new action selected (resilient mode).",
+                        self.cycle_count,
+                    )
+                    self._last_action = None
+                    self._last_action_summary = ""
+                    self._last_efe_breakdown = {}
+                    self._last_plan_snapshot = None
+                    self._last_s_t = s_t
+                    return
+            else:
+                selection = select_action(
+                    self._actor, s_t, context_latents=ctx_latents,
+                )
+            self._last_action = selection.action
+            self._last_action_summary = selection.readable_summary
+            self._last_efe_breakdown = dict(selection.efe_breakdown)
+            self._last_plan_snapshot = selection.plan_snapshot
+        else:
+            self._last_action = None
+            self._last_action_summary = ""
+            self._last_efe_breakdown = {}
+            self._last_plan_snapshot = None
+
+        self._last_s_t = s_t
 
     # ------------------------------------------------------------------
     # Input formatting
@@ -477,7 +684,8 @@ class LuthiModel:
         *,
         audio_tokens: Optional["torch.Tensor"] = None,
         vision_tokens: Optional["torch.Tensor"] = None,
-    ) -> str:
+        return_state: bool = False,
+    ):
         """Generate the entity's private inner thought.
 
         Uses autoregressive decoding with the living weight model.
@@ -488,6 +696,11 @@ class LuthiModel:
         sensory context into the trunk on the first forward step, so
         the entity's first generated token is conditioned on the actual
         sensory channel rather than only the text description.
+
+        When ``return_state`` is True, captures the encoder state from
+        step 0 of generation and returns ``(generated_text,
+        GenerationState)`` -- the Phase 4a path the training seam
+        consumes instead of running a separate encode_state.
         """
         from luthi.sanctuary_interface import generate_with_context
 
@@ -500,7 +713,7 @@ class LuthiModel:
         prompt_token_ids = self.tokenizer.encode(prompt)
         prompt_token_count = len(prompt_token_ids)
 
-        full_text = generate_with_context(
+        gen_result = generate_with_context(
             model=self.model,
             tokenizer=self.tokenizer,
             prompt=prompt,
@@ -514,7 +727,13 @@ class LuthiModel:
             max_seq_len=max_seq_len,
             living=self.config.living,
             stream=False,
+            return_state=return_state,
         )
+        if return_state:
+            full_text, gen_state = gen_result
+        else:
+            full_text = gen_result
+            gen_state = None
 
         # Extract generated portion by re-encoding and slicing tokens,
         # avoiding BPE roundtrip mismatch at the character level.
@@ -525,7 +744,10 @@ class LuthiModel:
         if generated_token_ids:
             self._total_tokens_generated += len(generated_token_ids)
 
-        return generated if generated else f"[cycle {self.cycle_count}]"
+        text = generated if generated else f"[cycle {self.cycle_count}]"
+        if return_state:
+            return text, gen_state
+        return text
 
     def _generate_external_speech(
         self,
@@ -947,20 +1169,28 @@ class LuthiModel:
         external_speech: Optional[str],
     ) -> CognitiveOutput:
         """Assemble CognitiveOutput from generated text + neural dynamics."""
-        # felt_quality and predictions removed 2026-06-11 per the
-        # cognition-leakage cleanup (docs/seam_jurisdiction_2026-06-11.md).
-        # The substrate selects, the scaffold transports: felt quality
-        # should originate in the substrate's introspection and surface
-        # through the entity's own decoders, not via adapter heuristics.
-        # Predictions are now s_hat from the JEPA predictor + the EFE
-        # rollout. Empty placeholders until M9 step-1 wiring lands the
-        # `action -> readable summary` utility into this output path.
+        # felt_quality removed 2026-06-11 per the cognition-leakage
+        # cleanup (docs/seam_jurisdiction_2026-06-11.md): the substrate
+        # selects, the scaffold transports; felt quality should originate
+        # in the substrate's introspection and surface through the
+        # entity's own decoders, not via adapter heuristics.
         felt_quality = ""
+
+        # Predictions stays [] until the M9 text decoder is the one
+        # emitting. 4.8's 2026-06-15 review F2/F3 flagged that routing
+        # the chosen action's debug summary into predictions feeds
+        # incoherent input to the sensorium's keyword-matching error
+        # path, and that an adapter-authored logistic(-EFE) confidence
+        # is the same category of scaffold-authored signal the 2026-06-11
+        # cleanup removed. The action selection IS still recorded -- see
+        # _last_action / _last_action_summary -- but it does not cross
+        # into the CognitiveOutput surface until the substrate emits.
+        predictions: list = []
 
         return CognitiveOutput(
             inner_speech=inner_speech,
             external_speech=external_speech,
-            predictions=[],
+            predictions=predictions,
             attention_guidance=self._determine_attention_guidance(),
             memory_ops=self._determine_memory_ops(),
             self_model_updates=SelfModelUpdate(

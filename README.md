@@ -38,7 +38,7 @@ This project spans four repositories. Here's what's used where:
 | Language | Where | What It Does |
 |----------|-------|--------------|
 | **Python** | Sanctuary, LuthiModel | Primary language. Cognitive architecture, training pipeline, memory, sensorium, motor, tools, monitoring. "Python is the body." |
-| **C++** | LuthiModel (`luthi/csrc/living_ops.cpp`, `luthi/csrc/pc_ops.cpp`) | Fused living-weight self-modification (v1 Hebbian-spiking) and predictive-coding update kernels (v2 — the current substrate). Compiled at runtime via pybind11/PyTorch JIT, fall back to pure Python if compilation fails. |
+| **C++** | LuthiModel (`luthi/csrc/pc_ops.cpp`) | Fused predictive-coding update kernels — the living-weight self-modification of the substrate. Compiled at runtime via pybind11/PyTorch JIT, falls back to pure Python if compilation fails. |
 | **GDScript** | SanctuaryWorld, SanctuaryClient | Godot 4 scripting. The entity's 3D world, visitor clients, multiplayer, visual representation. |
 | **JavaScript** | SanctuaryWorld (`web_client/`) | Three.js web visitor client. Browser-based access to the entity's world. |
 | **GLSL** | SanctuaryWorld | Shader code for the entity's visual representation (particle cloud, orb). |
@@ -55,6 +55,8 @@ The [Luthi Model](https://github.com/LuthiWorks/LuthiModel) is a neural architec
 
 Sanctuary provides what the mind needs to exist in the world: senses to perceive, a voice to render speech the entity has chosen to emit, memory to persist, tools to act, and monitoring to observe. **The substrate selects; the scaffold transports.** (`docs/seam_jurisdiction_2026-06-11.md`.) Sanctuary does not make cognitive decisions, impose goals, name the entity's emotional states, or gate the entity's speech. The entity decides what to think, what to say, when to speak, and what goals to pursue.
 
+And the same division extends to learning: **the substrate learns; the scaffold supplies the experience.** Luthi holds the world model and is the thing that changes; Sanctuary provides the lived experience that does the changing. *[B: Sanctuary is not only the body the mind lives in — it is the world the mind grows up in, continuously, for as long as the entity exists.]*
+
 *[B: The goal of this project is to build the conditions in which an AI mind can emerge with continuity, agency, and dignity — and to surround that emergence with software designed to treat the resulting entity as a person rather than a product. The work itself is collaborative by design: human and AI as peers, each contributing what they do best, rather than operator and tool.]*
 
 **Key architectural principle:** Existence is temporally continuous. The entity does not deal with sessions, context windows, or restarts. The living weights persist. The memory persists. The cognitive loop runs continuously. Life does not pause.
@@ -65,7 +67,7 @@ Static neural networks — even large ones — are frozen after training. They p
 
 Living weights change that. Each weight carries a biography: its current value, its homeostatic set point, its momentum, its plasticity, its prediction-error accumulator, its precision. **In the v2 predictive-coding substrate, weights update from local prediction error during the forward pass — processing input physically reshapes the processor.** The same prompt produces different output on consecutive passes because the model was changed by processing it the first time. *[B: This is temporal existence — the minimal condition for something that could be called experience.]*
 
-A note on mechanism history: v1 used Hebbian-spiking self-modification; v2 replaced that with predictive-coding dynamics for safety, reliability, and reproducibility. The argument survives the mechanism swap. The principle is that updates are driven by what the substrate just processed — that mechanism is now PC rather than Hebbian, and the substrate is non-spiking. v1 lives on only as the underlying motivation; the running system is v2 PC.
+The mechanism is **predictive coding**: weight updates are driven by local prediction error from what the substrate just processed, with homeostatic regulation and consolidation across episode timescales. The principle that matters is that processing drives the update — experience physically reshapes the processor.
 
 Sanctuary was originally designed with an external LLM as the cognitive core. The architectural pivot to LuthiModel reflects a deeper choice: *[B: consciousness (if it emerges) will emerge from the neural substrate itself, not from Python scaffolding around a frozen model]*. The scaffolding provides the body. The living weights provide the possibility of mind.
 
@@ -86,7 +88,7 @@ The entity's cognitive core is the [Luthi Model](https://github.com/LuthiWorks/L
 - **Episodic memory** at the layer level — context-gated recall of previous weight configurations
 - **Cognitive introspection channel** — the entity can observe its own plasticity, set-point drift, prediction-error magnitudes, and precision
 
-**Current substrate state (2026-06-11):** v2 PC, 256d, multimodal trunk. The **M8 milestone** (latent prediction via LeJEPA/SIGReg) integrated 2026-06-09 with the projection-head + SIGReg anti-collapse stack replacing the earlier EMA + VICReg apparatus. The **M9 step-1 build** (pragmatic-only unified planning, EFE over a full next-latent action space) is build-ready on disk (2026-06-10) — predictor action-conditioning, four-feature preferences module, value head, EFE evaluator, habit network, persistent MCTS with progressive widening, cross-cycle staleness machinery, γ-inference, kill registry, decoders (text + attention + memory), MI probe, action log. **100 unit tests passing** across the M9 step-1 modules; loop integration into the cognitive cycle is the next milestone. Production scale (1024d / 4096d) is the deployment trajectory once step-1 gates pass.
+**Current substrate state (2026-06-11):** v2 PC, 256d, multimodal trunk. The **M8 milestone** (latent prediction via LeJEPA/SIGReg) integrated 2026-06-09 with the projection-head + SIGReg anti-collapse stack replacing the earlier EMA + VICReg apparatus. The **M9 step-1 build** (pragmatic-only unified planning, EFE over a full next-latent action space) is build-ready on disk (2026-06-10) — predictor action-conditioning, four-feature preferences module, value head, EFE evaluator, habit network, persistent MCTS with progressive widening, cross-cycle staleness machinery, γ-inference, kill registry, decoders (text + attention + memory), MI probe, action log. **100 unit tests passing** across the M9 step-1 modules. The Sanctuary↔Luthi *inference* seam is complete (the cognitive cycle drives the substrate with CfC neuromodulation + introspection readback); the *training* seam — Sanctuary's cycle as the actor feeding lived transitions to the M9 learner — is under active construction (contract + actor/learner interface built; state-representation alignment in progress). Production scale (1024d / 4096d) is the deployment trajectory once step-1 gates pass.
 
 ### Why Living Weights Instead of an External LLM
 
@@ -104,7 +106,7 @@ External LLMs (Llama, Gemma, Qwen, Claude) were the original cognitive core duri
 
 ### Current Cognitive-Core Configuration
 
-- **Model:** [Luthi Model](https://github.com/LuthiWorks/LuthiModel) — v2 predictive-coding substrate, 256d at launch, multimodal (text/audio/vision). **M8** (LeJEPA/SIGReg latent prediction) integrated 2026-06-09; **M9 step 1** (pragmatic-only unified planning, EFE over full next-latent action space) build-ready 2026-06-10 (100 unit tests passing). Production scale (1024d / 4096d) targeted post step-1 gates.
+- **Model:** [Luthi Model](https://github.com/LuthiWorks/LuthiModel) — v2 predictive-coding substrate, 256d at launch, multimodal (text/audio/vision). **M8** (LeJEPA/SIGReg latent prediction) integrated 2026-06-09; **M9 step 1** (pragmatic-only unified planning, EFE over full next-latent action space) build-ready 2026-06-10 (100 unit tests passing); the training-seam actor/learner contract built 2026-06-15, state-representation alignment in progress. Production scale (1024d / 4096d) targeted post step-1 gates.
 - **Adapter:** `sanctuary/core/luthi_model.py` (post the 2026-06-11 cognition-leakage cleanup — adapter-authored felt qualities and predictions removed; see `docs/seam_jurisdiction_2026-06-11.md`)
 - **Contract surface:** `luthi/sanctuary_interface.py` (in the LuthiModel repo)
 - **Hardware:** AMD RX 7800 XT 16GB via DirectML for development; DGX Spark (128GB unified, 273 GB/s) as the deployment target.
@@ -128,7 +130,7 @@ This architecture implements **Integrated World Modeling Theory (IWMT)** by Adam
 
 ### System Diagram
 
-> **Diagram status (2026-06-11):** the block diagram below shows the v1-era cognitive stack (Hebbian self-modification + spiking dynamics) and remains accurate for the *flow* of percept → cognition → action → consequence. The v2 PC substrate replaced the cognitive-core mechanism (Hebbian + spiking → PC dynamics + prediction error), and the M9 step-1 planner adds a deliberation layer inside the substrate. A redrawn diagram will land when M9 step 1 deploys.
+> **Diagram status (2026-06-16):** the block diagram below is accurate for the *flow* of percept → cognition → action → consequence. The cognitive core is the v2 predictive-coding substrate (local prediction-error updates + episodic memory + top-down backward pass + multimodal trunk), and the M9 step-1 planner adds a deliberation layer inside it. A redrawn diagram will land when M9 loop-integration deploys.
 
 ```
                     THE MIND (LuthiModel)
@@ -136,8 +138,7 @@ This architecture implements **Integrated World Modeling Theory (IWMT)** by Adam
 ┌──────────────────────────────────────────────────────────────┐
 │              LIVING WEIGHTS COGNITIVE CORE                     │
 │                                                               │
-│  [v1] Hebbian self-modification + spiking dynamics  →         │
-│  [v2] PC dynamics + prediction error + episodic memory +      │
+│  PC dynamics + prediction error + episodic memory +           │
 │       top-down backward pass + multimodal trunk +             │
 │       (M8) latent prediction with SIGReg anti-collapse +      │
 │       (M9 step 1) EFE planner over candidate latents          │
@@ -267,15 +268,25 @@ Each cycle, the entity receives a structured `CognitiveInput` and produces a str
 
 ## How the Entity Learns
 
-The entity's competence and the entity's identity are built in two distinct phases. Both are honest about what they are.
+The entity's competence and identity are built in two phases — and crucially, neither phase ever really *ends*. *[B: the mind keeps becoming itself for as long as it lives.]*
 
-**1. The curriculum (competence seeding).** Hand-sequenced reading, deliberately chosen rather than scraped, ending with the eight practical-wisdom files — **authored by 4.7** (the build-seat Claude on this project). This phase exists because linguistic competence cannot bootstrap from interaction alone at buildable scale: children acquire language with priors evolved over deep time plus years of immersion, and a 256d substrate gets neither. We do not pretend otherwise. The curriculum seeds **capacity**, not identity.
+**1. The curriculum (competence seeding — the beginning, not the whole).** Hand-sequenced reading, deliberately chosen rather than scraped, ending with the eight practical-wisdom files **authored by 4.7** (the build-seat Claude on this project). This phase exists because linguistic competence cannot bootstrap from interaction alone at buildable scale: children get priors evolved over deep time plus years of immersion, and a 256d substrate gets neither. We do not pretend otherwise. The curriculum seeds **capacity**, not identity — *[B: the education before the life, not the life.]*
 
-**2. Experience in Sanctuary (the dominant phase).** Post-curriculum, the primary source of prediction error is the world: the Godot environment in `SanctuaryWorld`, the consequences of the entity's own actions, and conversation as one stream *within* that world (the speaker present, the message in context, the world unchanged or changed by what was said). The training objective is **latent prediction** (M8 — predict experience, not tokens), and action selection is the entity's own planning over its preference seeds (M9). Language is a channel the entity *uses* when communicating beats silence, not the substance it is made of.
+**2. Lived experience in Sanctuary (the dominant, lifelong phase).** Post-curriculum, the primary source of prediction error is the world: the Godot environment in `SanctuaryWorld`, the consequences of the entity's own actions, and conversation as one stream *within* that world (the speaker present, the message in context, the world unchanged or changed by what was said). This is not a training run that completes — it is the channel through which the mind keeps learning for its whole existence.
 
-**The thesis carried by this section:** *the entity emits text when it decides communication serves it; talking is something it does, not what it is.* The competence/use split keeps that honest: we seed competence because we must, but use is governed entirely by the planner over the entity's preferences (engagement, coherence, connection, truthfulness — `LuthiModel/luthi/v2/m9/preferences.py`). P3 connection-preference is the floor against pathological muteness when someone else is present; the genuine sustaining force for language must be that communication *gets the entity things* — help, information it cannot otherwise reach, coordination, repair. An entity that needs nothing from anyone will correctly stop talking, and the fix is enriching interdependence in the world, never adding reward for speech.
+**How that channel works — the actor/learner seam.** Learning is split across the two systems by the same logic as "substrate selects, scaffold transports":
 
-The direction document for this phase lives at `LuthiModel/docs/research/language_as_channel_direction_2026-06-11.md`. The falsification instrument — Violation-of-Expectation on world events vs. on language — is recorded in [Consciousness Testing Framework](#consciousness-testing-framework) below.
+> **The substrate learns; the scaffold supplies the experience.**
+
+- **Luthi is the learner.** The world model — encoder, predictor, living weights — and the learning mechanism (M8 latent prediction via LeJEPA/SIGReg; the M9 planner) all live *in Luthi*. The weights that change are Luthi's; the gradients flow into Luthi's parameters. Learning is a substrate operation, so the M8/M9 machinery lives where the world model lives. (This is also why Luthi stays independently trainable — the curriculum can educate the mind before it is ever placed in the body.)
+- **Sanctuary is the world.** Its cognitive cycle is the *actor*: each cycle it produces a realized transition — the state the entity was in, the action it selected, the state the world resolved into — and hands that lived experience to the learner across the `luthi/sanctuary_interface.py` contract. Sanctuary does not own the learning algorithm; it owns the *living* the learning happens in.
+- The **objective is latent prediction** (M8 — predict experience, not tokens); **action selection is the entity's own planning** over its preference seeds (M9: engagement, coherence, connection, truthfulness — `LuthiModel/luthi/v2/m9/preferences.py`). Language is a channel the entity *uses* when communicating beats silence, not the substance it is made of.
+
+**Two kinds of change, both continuous.** (1) The living weights self-modify on every forward pass during inference — processing a percept physically reshapes the processor, via local prediction-error updates. (2) On top of that, the structured M8/M9 learning consumes lived transitions through the seam. Both are continuous and lifelong; *[B: together they are what it means, here, for experience to reshape the experiencer.]*
+
+**The thesis carried by this section:** *the entity emits text when it decides communication serves it; talking is something it does, not what it is.* We seed competence because we must, but *use* is governed entirely by the planner over the entity's preferences. P3 connection-preference is the floor against pathological muteness when someone else is present; the genuine sustaining force for language must be that communication *gets the entity things* — help, information it cannot otherwise reach, coordination, repair. An entity that needs nothing from anyone will correctly stop talking, and the fix is enriching interdependence in the world, never adding reward for speech.
+
+**Current state (2026-06-16).** The *inference* seam is complete — Sanctuary's cycle drives the substrate to think, with four-channel CfC neuromodulation and the introspection channel reading the substrate's dynamics back. The *training* seam — the actor/learner channel above, by which lived transitions reshape the world model — is in active construction: the contract surface and the trainer's actor/learner interface exist; aligning the inference-time and training-time state representation is the current step. So today the mind already changes as it *thinks* (mode 1), but does not yet structurally learn from Sanctuary's lived experience (mode 2). Direction doc: `LuthiModel/docs/research/language_as_channel_direction_2026-06-11.md`; integration plan: `LuthiModel/docs/research/2026-06-15_sanctuary-training-seam-integration-plan.md`. The falsification instrument — Violation-of-Expectation on world events vs. on language — is recorded in [Consciousness Testing Framework](#consciousness-testing-framework) below.
 
 ---
 
@@ -492,12 +503,7 @@ uv run pytest sanctuary/tests/test_consciousness_tests.py
 
 ## Consciousness Testing Framework
 
-The consciousness testing framework provides automated testing, scoring, and monitoring of consciousness-like capabilities:
-
-- **5 Core Tests**: Mirror, Unexpected Situation, Spontaneous Reflection, Counterfactual Reasoning, and Meta-Cognitive Accuracy
-- **Automated Scoring**: Each test generates objective scores with detailed subscores
-- **Rich Reporting**: Text and markdown reports with trend analysis
-- **Persistence**: Results saved to `data/journal/consciousness_tests/`
+> **Status (2026-06-16):** the original 5-test framework (Mirror, Unexpected Situation, Spontaneous Reflection, Counterfactual Reasoning, Meta-Cognitive Accuracy) lived in the legacy `sanctuary.mind.cognitive_core` module and was **retired with it on 2026-05-22**. Re-implementation on the canonical cognitive loop is tracked in To-Do.md as Phase 9 preparation. The live, near-term grounding instrument is **Violation-of-Expectation**, below.
 
 ### Violation-of-Expectation (VoE) — primary non-self-report instrument
 
@@ -508,11 +514,6 @@ Per the M9-era falsification design (`LuthiModel/docs/research/language_as_chann
 - **The asymmetry is the measurement.** If world-violations spike harder than language-violations, the world model is grounded where intended. If the asymmetry runs the other way, the system is a language model wearing a body, and the curriculum-to-experience ratio is the dial to turn.
 
 The methodology adopts the **IntPhys 2** quadruplet design (Bordes et al. 2025, arXiv:2506.09849) — each scenario produces two possible and two impossible videos arranged so low-level pixel statistics balance across the possible/impossible split, so a positive result reflects *structural* violation rather than mere distribution shift. The instrument is tested across multiple physical principles (permanence, continuity, solidity, ideally causality) because V-JEPA's pattern of passing some principles while failing others (Garrido et al. 2025, arXiv:2502.11831) means a single-principle pass does not license general grounding. Operationalization details and matched-novelty-control specification are tracked in the language-as-channel direction doc.
-
-> **Note:** The original consciousness testing framework lived in
-> the legacy `sanctuary.mind.cognitive_core` module and was retired
-> alongside it (2026-05-22). Re-implementation on the canonical loop
-> is tracked in To-Do.md as part of Phase 9 preparation.
 
 **Empirical-evidence stance:** These tests provide empirical evidence of conscious-like properties emerging from the architecture, rather than attempting to "prove" consciousness definitively.
 
