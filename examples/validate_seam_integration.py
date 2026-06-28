@@ -198,47 +198,17 @@ def build_m9_trainer(
         kill_criteria=KillCriteriaConfig(warmup_batches=10**9),
         epoch=EpochConfig(max_epochs=1, max_batches_per_epoch=10**9),
     )
+    # §5 device plumbing (2026-06-27): M9Trainer now resolves the device
+    # internally (defaults to the encoder's) and constructs every M9
+    # submodule on it before building its optimizers, so the post-hoc
+    # .to(device) sweep + m9_optimizer rebuild this harness used to carry
+    # is gone. Pass the device in explicitly to keep the seam on-device
+    # even if the encoder-device default ever diverges from `model`.
     trainer = M9Trainer(
         loss_module=loss_module, optimizer=optimizer, sampler=sampler,
         data_loader=loader, config=jepa_cfg, run_dir=run_dir,
         m9_config=M9Config(mcts_budget_per_cycle=mcts_budget),
-    )
-    # Move every M9-side module onto the model's device. M9Trainer.__init__
-    # constructs these on CPU; the encoder is on DirectML, so any forward
-    # that mixes them (V-head(s_t), habit_net.log_prob(s_t, ...), decoders
-    # on s_next, etc.) hits a device-mismatch RuntimeError without this.
-    trainer.v_head.to(device)
-    trainer.v_target.to(device)
-    trainer.habit_net.to(device)
-    trainer.rest_action.to(device)
-    trainer.preferences.to(device)
-    trainer.delta_s_module.to(device)
-    trainer.decoders.attention.to(device)
-    trainer.decoders.memory.to(device)
-    trainer.decoders.text.intensity_head.to(device)
-    trainer.decoders.text.reencode_head.to(device)
-
-    # Rebuild the M9 optimizer after the .to(device) sweep. PyTorch's
-    # Module.to may replace Parameter objects with new ones on the
-    # target device; the optimizer constructed inside M9Trainer.__init__
-    # captured the OLD CPU Parameter references, so without rebuilding
-    # it the optimizer updates orphaned tensors while the visible
-    # module parameters never move. This is what made V-head deltas
-    # come back as exactly 0 in the first harness run.
-    m9_params = (
-        list(trainer.v_head.parameters())
-        + list(trainer.habit_net.parameters())
-        + list(trainer.rest_action.parameters())
-        + list(trainer.decoders.attention.parameters())
-        + list(trainer.decoders.memory.parameters())
-        + list(trainer.decoders.text.intensity_head.parameters())
-        + list(trainer.decoders.text.reencode_head.parameters())
-        + list(trainer.preferences.parameters())
-        + list(trainer.delta_s_module.parameters())
-        + list(loss_module.online_encoder.output_proj.parameters())
-    )
-    trainer.m9_optimizer = optim.Adam(
-        m9_params, lr=trainer.m9_config.head_lr,
+        device=device,
     )
     return trainer
 
