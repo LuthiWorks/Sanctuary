@@ -165,6 +165,14 @@ class LuthiModel:
         # from a frozen snapshot rather than from live trainer MCTS state
         # (4.8 review F4, 2026-06-15). None on cycle 1 / after attach_seam.
         self._last_plan_snapshot = None  # luthi.seam_types.PlanSnapshot | None
+        # Raw step-0 forward inputs from the previous cycle's generation
+        # (GenerationState.context_obs), threaded through
+        # ctx["context_obs"] on the next observe_transition so the learner
+        # can re-encode the context that produced _last_s_t and push a
+        # lived JEPA gradient into the encoder (Item #6, 2026-06-27). None
+        # on cycle 1 / after attach_seam / when the substrate didn't
+        # capture it -- the sink degrades to a head-only update.
+        self._last_context_obs = None  # dict | None
 
         logger.info("LuthiModel bridge initialized (model not yet loaded)")
 
@@ -205,6 +213,7 @@ class LuthiModel:
         self._last_action_summary = ""
         self._last_efe_breakdown = {}
         self._last_plan_snapshot = None
+        self._last_context_obs = None
 
     # ------------------------------------------------------------------
     # Model loading
@@ -485,6 +494,12 @@ class LuthiModel:
 
         s_t = state.s_t
         ctx_latents = state.ctx_latents
+        # Raw step-0 inputs that produced THIS cycle's s_t/ctx_latents.
+        # Buffered into _last_context_obs below so the NEXT cycle can hand
+        # it to the sink as the context that produced the transition's
+        # starting state (Item #6 lived re-encode). None when the
+        # substrate didn't capture it -> sink takes the head-only path.
+        context_obs = state.context_obs
 
         # Close the previous cycle's transition before resetting the tree.
         # No try/except by default: crashes over silence (4.8 review F5).
@@ -511,6 +526,13 @@ class LuthiModel:
                         counterpart_present=False,
                         time_since_emission=0.0,
                         plan_snapshot=self._last_plan_snapshot,
+                        # Item #6: the previous cycle's raw context (which
+                        # produced _last_s_t) so the learner can re-encode
+                        # it; the realized next-state target is the s_next
+                        # positional (current pooled s_t) above. None-safe:
+                        # _last_context_obs is None on the first populated
+                        # cycle -> the sink takes the head-only path.
+                        context_obs=self._last_context_obs,
                     )
                 except Exception:
                     logger.exception(
@@ -527,6 +549,8 @@ class LuthiModel:
                     counterpart_present=False,
                     time_since_emission=0.0,
                     plan_snapshot=self._last_plan_snapshot,
+                    # Item #6: see the resilient branch above.
+                    context_obs=self._last_context_obs,
                 )
 
         # Run the actor's plan + select. _last_action_summary /
@@ -549,6 +573,7 @@ class LuthiModel:
                     self._last_action_summary = ""
                     self._last_efe_breakdown = {}
                     self._last_plan_snapshot = None
+                    self._last_context_obs = context_obs
                     self._last_s_t = s_t
                     return
             else:
@@ -565,6 +590,7 @@ class LuthiModel:
             self._last_efe_breakdown = {}
             self._last_plan_snapshot = None
 
+        self._last_context_obs = context_obs
         self._last_s_t = s_t
 
     # ------------------------------------------------------------------
