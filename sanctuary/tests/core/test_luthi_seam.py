@@ -338,6 +338,95 @@ class TestRunTrainingSeamOrdering:
 
 
 # ---------------------------------------------------------------------------
+# Item #6 — lived-context threading (context_obs + realized_next_state)
+# ---------------------------------------------------------------------------
+
+
+class TestRunTrainingSeamLivedContext:
+    """_run_training_seam threads the PREVIOUS cycle's raw ``context_obs``
+    (the inputs that produced the transition's starting state) and the
+    realized pooled next state into ``observe_transition``'s ctx, so the
+    learner can re-encode and drive a lived JEPA gradient. Back-compat: a
+    GenerationState whose ``context_obs`` is None (uncaptured / pre-#6
+    substrate) leaves no ``context_obs`` key, so the sink takes the
+    head-only path.
+    """
+
+    @staticmethod
+    def _state_with_obs(cycle_idx: int, d_model: int = 8) -> GenerationState:
+        s_t = torch.full((1, d_model), float(cycle_idx))
+        ctx_latents = torch.full((1, 4, d_model), float(cycle_idx))
+        # Distinct per-cycle token window so the threading DIRECTION is
+        # observable -- cycle k's obs carries the value k.
+        context_obs = {
+            "text_tokens": torch.full((1, 4), cycle_idx, dtype=torch.long),
+        }
+        return GenerationState(
+            s_t=s_t, ctx_latents=ctx_latents, context_obs=context_obs,
+        )
+
+    def test_threads_prev_context_obs_with_s_next_target(self, adapter):
+        actor, sink = _FakeActor(), _FakeSink()
+        adapter.attach_seam(actor=actor, sink=sink)
+
+        adapter._run_training_seam(self._state_with_obs(cycle_idx=1))
+        state_2 = self._state_with_obs(cycle_idx=2)
+        adapter._run_training_seam(state_2)
+
+        assert len(sink.calls) == 1
+        call = sink.calls[0]
+        ctx = call["ctx"]
+        # context_obs is the cycle-1 context that produced the transition's
+        # STARTING state (_last_s_t), not cycle 2's -- the learner must
+        # re-encode the context that actually preceded the realized step.
+        assert "context_obs" in ctx
+        assert torch.equal(
+            ctx["context_obs"]["text_tokens"],
+            torch.full((1, 4), 1, dtype=torch.long),
+        )
+        # The lived-JEPA target is the s_next positional itself (cycle-2's
+        # realized pooled s_t) -- no redundant realized_next_state channel.
+        assert "realized_next_state" not in ctx
+        assert torch.equal(call["s_next"], state_2.s_t)
+
+    def test_context_obs_buffer_advances_each_cycle(self, adapter):
+        actor, sink = _FakeActor(), _FakeSink()
+        adapter.attach_seam(actor=actor, sink=sink)
+        for cycle in range(1, 4):
+            adapter._run_training_seam(self._state_with_obs(cycle_idx=cycle))
+        # Cycles 2 and 3 observed; each carries the PRIOR cycle's obs.
+        assert len(sink.calls) == 2
+        assert torch.equal(
+            sink.calls[0]["ctx"]["context_obs"]["text_tokens"],
+            torch.full((1, 4), 1, dtype=torch.long),
+        )
+        assert torch.equal(
+            sink.calls[1]["ctx"]["context_obs"]["text_tokens"],
+            torch.full((1, 4), 2, dtype=torch.long),
+        )
+
+    def test_back_compat_no_context_obs_key_when_uncaptured(self, adapter):
+        # _make_state builds context_obs=None (pre-#6 / uncaptured substrate).
+        actor, sink = _FakeActor(), _FakeSink()
+        adapter.attach_seam(actor=actor, sink=sink)
+        adapter._run_training_seam(_make_state(cycle_idx=1))
+        adapter._run_training_seam(_make_state(cycle_idx=2))
+        # No context_obs key -> the sink's §1 path skips the lived update
+        # and runs head-only.
+        assert "context_obs" not in sink.calls[0]["ctx"]
+
+    def test_attach_seam_clears_context_obs_buffer(self, adapter):
+        actor, sink = _FakeActor(), _FakeSink()
+        adapter.attach_seam(actor=actor, sink=sink)
+        adapter._run_training_seam(self._state_with_obs(cycle_idx=1))
+        assert adapter._last_context_obs is not None
+        # Re-attach drops the buffered transition state (the prior context
+        # belonged to the prior actor's tree -- mirrors _last_s_t reset).
+        adapter.attach_seam(actor=actor, sink=sink)
+        assert adapter._last_context_obs is None
+
+
+# ---------------------------------------------------------------------------
 # F5 — loud-vs-resilient failure modes
 # ---------------------------------------------------------------------------
 
