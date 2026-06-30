@@ -18,16 +18,24 @@ Implements ModelProtocol:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib
 import logging
 import os
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 import torch
+
+from sanctuary.core.async_learner import (
+    AsyncLearner,
+    Transition,
+    detach_context_obs,
+)
 
 from sanctuary.core.schema import (
     AttentionGuidance,
@@ -144,6 +152,18 @@ class LuthiModel:
         # Sanctuary startup if an M9 trainer is co-resident.
         self._actor = None  # luthi.sanctuary_interface.M9Actor | None
         self._sink = None   # luthi.sanctuary_interface.TransitionSink | None
+
+        # ---- §4 async actor/learner boundary (Item #6, 2026-06-29) ----
+        # Coarse single model_lock: the actor (this cycle thread) holds it
+        # across its whole model-touching critical section; the learner holds
+        # it across observe_transition. Created once, shared with the
+        # AsyncLearner. Only contended when an async learner is attached --
+        # _actor_critical_section() returns a nullcontext otherwise, so the
+        # synchronous (async_mode="off") path is byte-for-byte unchanged.
+        self._model_lock = threading.Lock()
+        # Set by attach_seam(async_mode=...). None -> the legacy synchronous
+        # seam (observe_transition runs inline in _run_training_seam_sync).
+        self._async_learner: Optional[AsyncLearner] = None
         # When True, seam exceptions are caught + logged so a transient
         # sink failure doesn't abort the cognitive cycle. Default False
         # follows the project ethos of "crashes over silence" (4.8 review
@@ -182,8 +202,26 @@ class LuthiModel:
 
     def attach_seam(
         self, *, actor=None, sink=None, resilient: bool = False,
+        async_mode: str = "off", queue_maxsize: int = 64,
     ) -> None:
         """Wire in the M9 actor / transition sink for this cognitive cycle.
+
+        ``async_mode`` (§4, Item #6):
+          * ``"off"`` (default) -- legacy synchronous seam. ``observe_transition``
+            runs inline on the cycle thread; no model_lock is taken. Existing
+            behavior, byte-for-byte.
+          * ``"drain"`` -- route transitions through an :class:`AsyncLearner` in
+            synchronous drain mode (deterministic, no background thread) under
+            the coarse model_lock. Same thread, but exercises the async code
+            path; the deterministic mode tests assert against.
+          * ``"threaded"`` -- run the learner on a dedicated background thread.
+            The actor uses the habit-only fast path (``select_action(budget=0)``)
+            and enqueues a detached transition; the learner trains at its own
+            cadence under the model_lock. ``queue_maxsize`` bounds the queue
+            (blocking put -> backpressure, never silent loss).
+
+        Requires ``sink`` for any non-"off" mode (there is nothing to learn from
+        without one).
 
         Both args are optional and independent: passing only ``actor`` runs
         the M9 act path each cycle (decoder selection through the substrate)
@@ -202,6 +240,20 @@ class LuthiModel:
         only when empirical operation has identified specific transients
         worth surviving.
         """
+        if async_mode not in ("off", "drain", "threaded"):
+            raise ValueError(
+                f"async_mode must be 'off', 'drain', or 'threaded', got "
+                f"{async_mode!r}"
+            )
+        if async_mode != "off" and sink is None:
+            raise ValueError(
+                f"async_mode={async_mode!r} requires a sink (nothing to learn "
+                f"from without one)."
+            )
+
+        # Tear down any prior learner thread before swapping the seam.
+        self.shutdown_async_learner()
+
         self._actor = actor
         self._sink = sink
         self._seam_resilient = resilient
@@ -214,6 +266,35 @@ class LuthiModel:
         self._last_efe_breakdown = {}
         self._last_plan_snapshot = None
         self._last_context_obs = None
+
+        if async_mode == "off":
+            self._async_learner = None
+        else:
+            self._async_learner = AsyncLearner(
+                sink, self._model_lock,
+                mode=async_mode, maxsize=queue_maxsize, resilient=resilient,
+            )
+            self._async_learner.start()  # no-op for drain mode
+
+    def shutdown_async_learner(self) -> None:
+        """Stop and join the background learner thread, if any.
+
+        Idempotent. Call on Sanctuary shutdown (or before re-attaching a seam).
+        Re-raises a non-resilient learner-thread error so a background failure
+        cannot vanish silently.
+        """
+        if self._async_learner is not None:
+            self._async_learner.stop()
+            self._async_learner = None
+
+    def _actor_critical_section(self):
+        """The actor's model_lock when an async learner is attached, else a
+        nullcontext. Held across the full model-touching span of _think_sync
+        (modulate -> generate -> select(budget=0) -> restore) so the learner's
+        concurrent observe_transition can never tear a read or a write."""
+        if self._async_learner is not None:
+            return self._model_lock
+        return contextlib.nullcontext()
 
     # ------------------------------------------------------------------
     # Model loading
@@ -388,91 +469,208 @@ class LuthiModel:
         """Synchronous core — runs on a worker thread."""
         from luthi.sanctuary_interface import get_introspection
 
-        # 1. Pre-generation introspection snapshot
-        if self.config.introspect:
-            self._pre_state = get_introspection(self.model)
+        # §4 deadlock-safe enqueue: the ACTOR's whole model-touching span runs
+        # under _actor_critical_section() (the coarse model_lock when an async
+        # learner is attached, else a nullcontext). The completed transition is
+        # captured by the seam but enqueued AFTER the lock releases -- a blocking
+        # put() while holding the lock would wait on a learner that needs the
+        # lock to drain. `pending` carries it out of the critical section.
+        pending: Optional[Transition] = None
+        with self._actor_critical_section():
+            # 1. Pre-generation introspection snapshot
+            if self.config.introspect:
+                self._pre_state = get_introspection(self.model)
 
-        # 2. CfC modulation — affective system shapes living dynamics
-        self._apply_cfc_modulation(cognitive_input.experiential_state)
+            # 2. CfC modulation — affective system shapes living dynamics
+            self._apply_cfc_modulation(cognitive_input.experiential_state)
 
-        try:
-            # 3. Format input as text
-            prompt = self._format_input(cognitive_input)
+            try:
+                # 3. Format input as text
+                prompt = self._format_input(cognitive_input)
 
-            # 3b. Encode any sensory percepts (audio waveform / image tensor)
-            #     so they ride into generation as cross-modal context, not
-            #     just as text descriptions in the prompt. Dual path: the
-            #     tensor flows to the trunk via the encoder; the text
-            #     description still seeds the prompt for cognitive context.
-            audio_tokens, vision_tokens = self._encode_sensory_percepts(
-                cognitive_input
-            )
+                # 3b. Encode any sensory percepts (audio waveform / image
+                #     tensor) so they ride into generation as cross-modal
+                #     context, not just as text descriptions in the prompt.
+                #     Dual path: the tensor flows to the trunk via the encoder;
+                #     the text description still seeds the prompt for context.
+                audio_tokens, vision_tokens = self._encode_sensory_percepts(
+                    cognitive_input
+                )
 
-            # 4a (2026-06-16): when a seam is attached and the substrate
-            # exposes the v2 multimodal-PC encoder API, inner-speech
-            # generation captures s_t + ctx_latents from its own step-0
-            # forward. That kills the separate encode_state pass Phase 3
-            # used to run (4.8's F7a-followup probe: double-plasticity
-            # measurably moves generation). No seam, or a substrate
-            # without ``encode()``, falls through to the same generation
-            # path return_state=False has always taken.
-            seam_wants_state = (
-                (self._actor is not None or self._sink is not None)
-                and hasattr(self.model, "encode")
-            )
+                # 4a (2026-06-16): when a seam is attached and the substrate
+                # exposes the v2 multimodal-PC encoder API, inner-speech
+                # generation captures s_t + ctx_latents from its own step-0
+                # forward. That kills the separate encode_state pass Phase 3
+                # used to run (4.8's F7a-followup probe: double-plasticity
+                # measurably moves generation). No seam, or a substrate
+                # without ``encode()``, falls through to the same generation
+                # path return_state=False has always taken.
+                seam_wants_state = (
+                    (self._actor is not None or self._sink is not None)
+                    and hasattr(self.model, "encode")
+                )
 
-            # 4. Generate inner speech (living inference)
-            if seam_wants_state:
-                inner_speech, gen_state = self._generate_inner_speech(
-                    prompt,
+                # 4. Generate inner speech (living inference)
+                if seam_wants_state:
+                    inner_speech, gen_state = self._generate_inner_speech(
+                        prompt,
+                        audio_tokens=audio_tokens,
+                        vision_tokens=vision_tokens,
+                        return_state=True,
+                    )
+                else:
+                    inner_speech = self._generate_inner_speech(
+                        prompt,
+                        audio_tokens=audio_tokens,
+                        vision_tokens=vision_tokens,
+                    )
+                    gen_state = None
+
+                # 5. Generate external speech if warranted
+                external_speech = self._generate_external_speech(
+                    cognitive_input,
                     audio_tokens=audio_tokens,
                     vision_tokens=vision_tokens,
-                    return_state=True,
                 )
-            else:
-                inner_speech = self._generate_inner_speech(
-                    prompt,
-                    audio_tokens=audio_tokens,
-                    vision_tokens=vision_tokens,
-                )
-                gen_state = None
 
-            # 5. Generate external speech if warranted
-            external_speech = self._generate_external_speech(
-                cognitive_input,
-                audio_tokens=audio_tokens,
-                vision_tokens=vision_tokens,
-            )
+                # 6. M9 training-seam (Phase 4a reorder, 2026-06-16). Order is:
+                #    generate -> observe(prior cycle's transition, with this
+                #    cycle's s_t as s_next) -> select(next cycle's action).
+                #    The F4 snapshot fix relaxed the old observe-before-select
+                #    constraint -- the snapshot carries the plan that produced
+                #    the realized action, so a later select_action doesn't
+                #    corrupt the realized transition. inner-speech's encode
+                #    pass produced gen_state; the seam consumes it directly,
+                #    no separate encode_state call. In async mode the seam
+                #    returns the completed prior-cycle transition for enqueue
+                #    AFTER the lock (deadlock guard); in sync mode it runs
+                #    observe_transition inline and returns None.
+                if gen_state is not None:
+                    pending = self._run_training_seam(gen_state)
 
-            # 6. M9 training-seam (Phase 4a reorder, 2026-06-16). Order is:
-            #    generate -> observe(prior cycle's transition, with this
-            #    cycle's s_t as s_next) -> select(next cycle's action).
-            #    The F4 snapshot fix relaxed the old observe-before-select
-            #    constraint -- the snapshot carries the plan that produced
-            #    the realized action, so a later select_action doesn't
-            #    corrupt the realized transition. inner-speech's encode
-            #    pass produced gen_state; the seam consumes it directly,
-            #    no separate encode_state call.
-            if gen_state is not None:
-                self._run_training_seam(gen_state)
+            finally:
+                # 7. Always restore base parameters after CfC modulation
+                self._restore_base_parameters()
 
-        finally:
-            # 7. Always restore base parameters after CfC modulation
-            self._restore_base_parameters()
+            # 7b. Post-generation introspection snapshot (still inside the
+            #     actor critical section: it reads live model dynamics the
+            #     learner mutates).
+            if self.config.introspect:
+                self._post_state = get_introspection(self.model)
+                self._compute_introspection_delta()
 
-        # 7. Post-generation introspection snapshot
-        if self.config.introspect:
-            self._post_state = get_introspection(self.model)
-            self._compute_introspection_delta()
+        # 8. Enqueue the completed transition OUTSIDE model_lock (deadlock
+        #    guard). In threaded mode this is a blocking put -> backpressure,
+        #    never silent loss; in drain mode it runs observe synchronously.
+        if pending is not None and self._async_learner is not None:
+            self._async_learner.submit(pending)
 
-        # 8. Translate neural dynamics → CognitiveOutput
+        # 9. Translate neural dynamics → CognitiveOutput (cached introspection
+        #    state only; no live-model read, so it is safe outside the lock).
         return self._build_output(
             cognitive_input=cognitive_input,
             inner_speech=inner_speech,
             external_speech=external_speech,
         )
 
-    def _run_training_seam(self, state) -> None:
+    def _run_training_seam(self, state) -> Optional[Transition]:
+        """Dispatch the training seam by mode.
+
+        Sync (async_mode="off"): run observe_transition inline and select with
+        the default budget -- the legacy path, unchanged. Returns None.
+
+        Async (drain/threaded): capture the completed prior-cycle transition as
+        a detached :class:`Transition`, select the next action via the
+        habit-only fast path (budget=0), and return the transition for enqueue
+        AFTER the model_lock releases (deadlock guard).
+        """
+        if self._async_learner is not None:
+            return self._run_training_seam_async(state)
+        self._run_training_seam_sync(state)
+        return None
+
+    def _run_training_seam_async(self, state) -> Optional[Transition]:
+        """Async seam: capture the prior-cycle transition + habit-only select.
+
+        Runs inside the actor critical section (model_lock). Does NOT call
+        observe_transition -- that is the learner's job, off this thread. The
+        completed transition is captured from the buffered ``_last_*`` BEFORE
+        ``select_action`` overwrites them, then returned to ``_think_sync`` for
+        enqueue outside the lock.
+
+        select_action uses ``budget=0`` (habit-net fast path, no MCTS on the hot
+        path -- §4). Consequence: the captured ``plan_snapshot`` is degenerate
+        (no MCTS visits), so the learner's habit-distill takes the sample-NLL
+        fallback. Off-path learner-side MCTS distill lands in §6; until then this
+        is the accepted §4 behavior (action quality is not the smoke metric).
+        """
+        from luthi.sanctuary_interface import select_action
+
+        s_t = state.s_t
+        ctx_latents = state.ctx_latents
+        context_obs = state.context_obs
+
+        # 1. Capture the COMPLETED previous-cycle transition before select
+        #    overwrites _last_*. Detach every tensor: no autograd graph may
+        #    cross the queue (assert_detached re-checks at submit). The F4
+        #    self-describing snapshot makes observe-after-select safe.
+        pending: Optional[Transition] = None
+        if (
+            self._sink is not None
+            and self._last_s_t is not None
+            and self._last_action is not None
+        ):
+            pending = Transition(
+                s_t=self._last_s_t.detach().clone(),
+                a_t=self._last_action.detach().clone(),
+                s_next=s_t.detach().clone(),  # realized pooled next state
+                counterpart_present=False,
+                time_since_emission=0.0,
+                # PlanSnapshot fields are detached at construction; pass through.
+                plan_snapshot=self._last_plan_snapshot,
+                context_obs=detach_context_obs(self._last_context_obs),
+            )
+
+        # 2. Actor fast path: habit-only select (budget=0). No MCTS on the hot
+        #    path; the learner owns the tree.
+        if self._actor is not None:
+            if self._seam_resilient:
+                try:
+                    selection = select_action(
+                        self._actor, s_t, context_latents=ctx_latents, budget=0,
+                    )
+                except Exception:
+                    logger.exception(
+                        "select_action failed at cycle %d (resilient); "
+                        "transition captured but no new action selected.",
+                        self.cycle_count,
+                    )
+                    self._last_action = None
+                    self._last_action_summary = ""
+                    self._last_efe_breakdown = {}
+                    self._last_plan_snapshot = None
+                    self._last_context_obs = context_obs
+                    self._last_s_t = s_t
+                    return pending
+            else:
+                selection = select_action(
+                    self._actor, s_t, context_latents=ctx_latents, budget=0,
+                )
+            self._last_action = selection.action
+            self._last_action_summary = selection.readable_summary
+            self._last_efe_breakdown = dict(selection.efe_breakdown)
+            self._last_plan_snapshot = selection.plan_snapshot
+        else:
+            self._last_action = None
+            self._last_action_summary = ""
+            self._last_efe_breakdown = {}
+            self._last_plan_snapshot = None
+
+        self._last_context_obs = context_obs
+        self._last_s_t = s_t
+        return pending
+
+    def _run_training_seam_sync(self, state) -> None:
         """Run the [observe last] -> select_action stage on a captured state.
 
         Phase 4a (2026-06-16): the encoder pass is no longer a separate

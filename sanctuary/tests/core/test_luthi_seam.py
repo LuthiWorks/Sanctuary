@@ -115,10 +115,12 @@ class _FakeActor:
         self.d_model = d_model
         self.call_count = 0
         self.last_s_t: torch.Tensor | None = None
+        self.last_kwargs: dict = {}
 
     def select_action(self, s_t: torch.Tensor, **kwargs: Any) -> ActionSelection:
         self.call_count += 1
         self.last_s_t = s_t
+        self.last_kwargs = dict(kwargs)
         plan = PlanSnapshot(
             visit_distribution=torch.tensor([1.0]),
             candidate_actions=torch.zeros(1, self.d_model),
@@ -492,3 +494,150 @@ class TestPredictionsAlwaysEmpty:
             external_speech=None,
         )
         assert out.predictions == []
+
+
+# ---------------------------------------------------------------------------
+# §4 — async actor/learner wiring (Item #6, 2026-06-29)
+# ---------------------------------------------------------------------------
+
+
+class TestAttachSeamAsync:
+    def test_default_off_no_learner(self, adapter):
+        adapter.attach_seam(actor=_FakeActor(), sink=_FakeSink())
+        assert adapter._async_learner is None
+
+    def test_drain_creates_learner(self, adapter):
+        adapter.attach_seam(
+            actor=_FakeActor(), sink=_FakeSink(), async_mode="drain",
+        )
+        assert adapter._async_learner is not None
+        assert adapter._async_learner.mode == "drain"
+
+    def test_async_requires_sink(self, adapter):
+        with pytest.raises(ValueError, match="requires a sink"):
+            adapter.attach_seam(actor=_FakeActor(), async_mode="drain")
+
+    def test_bad_async_mode_rejected(self, adapter):
+        with pytest.raises(ValueError, match="async_mode must be"):
+            adapter.attach_seam(
+                actor=_FakeActor(), sink=_FakeSink(), async_mode="bogus",
+            )
+
+    def test_reattach_stops_prior_threaded_learner(self, adapter):
+        adapter.attach_seam(
+            actor=_FakeActor(), sink=_FakeSink(), async_mode="threaded",
+        )
+        assert adapter._async_learner is not None
+        # Re-attach off must tear the thread down cleanly.
+        adapter.attach_seam(actor=_FakeActor(), sink=_FakeSink())
+        assert adapter._async_learner is None
+
+
+class TestRunTrainingSeamAsync:
+    """Async seam: _run_training_seam returns the completed prior-cycle
+    transition (captured BEFORE select overwrites _last_*); the actor uses the
+    habit-only fast path (budget=0); _think_sync enqueues the transition AFTER
+    the lock. We replicate that enqueue step here (drain runs observe inline)."""
+
+    @staticmethod
+    def _seam_and_enqueue(adapter, state):
+        # Mirror _think_sync: capture inside the (here-uncontended) lock, then
+        # submit OUTSIDE it. Returns the pending transition (or None).
+        pending = adapter._run_training_seam(state)
+        if pending is not None and adapter._async_learner is not None:
+            adapter._async_learner.submit(pending)
+        return pending
+
+    def test_actor_uses_budget_zero(self, adapter):
+        actor = _FakeActor()
+        adapter.attach_seam(actor=actor, sink=_FakeSink(), async_mode="drain")
+        self._seam_and_enqueue(adapter, _make_state(cycle_idx=1))
+        assert actor.last_kwargs.get("budget") == 0, (
+            "async actor must take the habit-only fast path (no MCTS on the "
+            "hot path)"
+        )
+
+    def test_first_cycle_selects_no_observe(self, adapter):
+        actor, sink = _FakeActor(), _FakeSink()
+        adapter.attach_seam(actor=actor, sink=sink, async_mode="drain")
+        pending = self._seam_and_enqueue(adapter, _make_state(cycle_idx=1))
+        assert pending is None, "no prior transition exists on cycle 1"
+        assert sink.calls == []
+        assert actor.call_count == 1
+        assert adapter._last_s_t is not None
+        assert adapter._last_action is not None
+
+    def test_second_cycle_closes_prior_via_drain(self, adapter):
+        actor, sink = _FakeActor(), _FakeSink()
+        adapter.attach_seam(actor=actor, sink=sink, async_mode="drain")
+
+        self._seam_and_enqueue(adapter, _make_state(cycle_idx=1))
+        first_s_t = adapter._last_s_t
+        first_action = adapter._last_action
+
+        state_2 = _make_state(cycle_idx=2)
+        self._seam_and_enqueue(adapter, state_2)
+
+        # Drain mode ran observe synchronously: the prior transition closed.
+        assert len(sink.calls) == 1
+        call = sink.calls[0]
+        # The captured transition is the PRIOR cycle's (s_t/a_t), with this
+        # cycle's s_t as the realized next state -- captured before select
+        # overwrote _last_*.
+        assert torch.equal(call["s_t"], first_s_t)
+        assert torch.equal(call["a_t"], first_action)
+        assert torch.equal(call["s_next"], state_2.s_t)
+        # F4 self-describing snapshot belongs to cycle 1 (whose action this
+        # realizes), not cycle 2's most recent select.
+        assert call["ctx"]["plan_snapshot"].r_best == 1.0
+        assert actor.call_count == 2
+
+    def test_payload_crossing_queue_is_detached(self, adapter):
+        actor, sink = _FakeActor(), _FakeSink()
+        adapter.attach_seam(actor=actor, sink=sink, async_mode="drain")
+        self._seam_and_enqueue(adapter, _make_state(cycle_idx=1))
+        self._seam_and_enqueue(adapter, _make_state(cycle_idx=2))
+        call = sink.calls[0]
+        for key in ("s_t", "a_t", "s_next"):
+            assert not call[key].requires_grad, f"{key} crossed the queue with grad"
+
+    def test_threads_prev_context_obs(self, adapter):
+        actor, sink = _FakeActor(), _FakeSink()
+        adapter.attach_seam(actor=actor, sink=sink, async_mode="drain")
+
+        def _state(cycle):
+            s_t = torch.full((1, 8), float(cycle))
+            ctx_latents = torch.full((1, 4, 8), float(cycle))
+            obs = {"text_tokens": torch.full((1, 4), cycle, dtype=torch.long)}
+            return GenerationState(
+                s_t=s_t, ctx_latents=ctx_latents, context_obs=obs,
+            )
+
+        self._seam_and_enqueue(adapter, _state(1))
+        self._seam_and_enqueue(adapter, _state(2))
+        call = sink.calls[0]
+        # The observed transition carries cycle 1's context (which produced
+        # its starting state), not cycle 2's.
+        assert "context_obs" in call["ctx"]
+        assert torch.equal(
+            call["ctx"]["context_obs"]["text_tokens"],
+            torch.full((1, 4), 1, dtype=torch.long),
+        )
+
+    def test_threaded_mode_routes_to_sink(self, adapter):
+        actor, sink = _FakeActor(), _FakeSink()
+        adapter.attach_seam(
+            actor=actor, sink=sink, async_mode="threaded", queue_maxsize=8,
+        )
+        try:
+            self._seam_and_enqueue(adapter, _make_state(cycle_idx=1))  # no obs
+            self._seam_and_enqueue(adapter, _make_state(cycle_idx=2))  # enqueues
+            adapter._async_learner.wait_until_drained()
+            assert len(sink.calls) == 1
+            assert call_r_best(sink) == 1.0
+        finally:
+            adapter.shutdown_async_learner()
+
+
+def call_r_best(sink) -> float:
+    return sink.calls[0]["ctx"]["plan_snapshot"].r_best
