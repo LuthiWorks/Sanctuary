@@ -33,7 +33,12 @@ logger = logging.getLogger(__name__)
 
 # Default port for health server
 DEFAULT_HEALTH_PORT = 8000
-DEFAULT_HEALTH_HOST = "0.0.0.0"
+# Secure by default: loopback only. /status and /metrics expose detailed
+# internal state (goals, authority levels, introspection) with no auth, so the
+# server must not be reachable from the network unless an operator explicitly
+# opts in (e.g. SANCTUARY_HEALTH_HOST=0.0.0.0). The in-container Docker
+# HEALTHCHECK curls localhost, so loopback binding does not affect liveness.
+DEFAULT_HEALTH_HOST = "127.0.0.1"
 
 
 class HealthServer:
