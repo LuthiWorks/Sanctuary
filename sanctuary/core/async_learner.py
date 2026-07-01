@@ -314,9 +314,36 @@ class AsyncLearner:
                 if not self.resilient:
                     # Stop the thread; the error is surfaced on the controlling
                     # thread at stop() and to the actor at the next submit().
+                    # Drain whatever is still queued first (marking each done)
+                    # so a waiting wait_until_drained()/stop() releases instead
+                    # of deadlocking on queue.join() -- hang over silence.
                     self._running = False
+                    self._drain_remaining()
                     return
                 continue
+            self._queue.task_done()
+
+    def _drain_remaining(self) -> None:
+        """Mark every still-queued item done after a fatal learner death.
+
+        Without this, items queued behind the one that failed never get a
+        ``task_done``, so ``queue.join()`` (``wait_until_drained``) and a
+        blocking sentinel ``put`` (``stop``) would deadlock forever. The items
+        are discarded -- the learner is dead and the error is already surfaced
+        to the actor (next ``submit``) and re-raised at ``stop``.
+
+        NB a narrow race remains: a ``submit`` that passed its ``_error`` check
+        microseconds before the death can land one orphan item after this
+        drains to empty. ``stop`` is unaffected (it joins the *thread*, not the
+        queue); only a concurrent ``wait_until_drained`` could then hang. Rare
+        at smoke (death is exceptional, the actor submits once per cycle) and
+        the real fix is the scale-step double-buffer, not more lock juggling.
+        """
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                return
             self._queue.task_done()
 
     def wait_until_drained(self) -> None:
@@ -336,7 +363,15 @@ class AsyncLearner:
         """
         if self.mode != "threaded" or self._thread is None:
             return
-        self._queue.put(_SHUTDOWN)
+        try:
+            # Timed put, not blocking: a dead learner won't drain, and a full
+            # queue must not freeze shutdown on a sentinel nobody will consume.
+            self._queue.put(_SHUTDOWN, timeout=timeout)
+        except queue.Full:
+            logger.warning(
+                "AsyncLearner.stop: queue full, _SHUTDOWN not delivered "
+                "(learner likely already dead); joining the thread anyway."
+            )
         self._thread.join(timeout)
         alive = self._thread.is_alive()
         self._thread = None

@@ -158,7 +158,7 @@ class LuthiModel:
         # across its whole model-touching critical section; the learner holds
         # it across observe_transition. Created once, shared with the
         # AsyncLearner. Only contended when an async learner is attached --
-        # _actor_critical_section() returns a nullcontext otherwise, so the
+        # _model_critical_section() returns a nullcontext otherwise, so the
         # synchronous (async_mode="off") path is byte-for-byte unchanged.
         self._model_lock = threading.Lock()
         # Set by attach_seam(async_mode=...). None -> the legacy synchronous
@@ -287,11 +287,14 @@ class LuthiModel:
             self._async_learner.stop()
             self._async_learner = None
 
-    def _actor_critical_section(self):
-        """The actor's model_lock when an async learner is attached, else a
-        nullcontext. Held across the full model-touching span of _think_sync
-        (modulate -> generate -> select(budget=0) -> restore) so the learner's
-        concurrent observe_transition can never tear a read or a write."""
+    def _model_critical_section(self):
+        """The shared model_lock when an async learner is attached, else a
+        nullcontext. Held across any span that reads/writes the living model
+        concurrently with the learner thread: the actor's full _think_sync span
+        (modulate -> generate -> select(budget=0) -> restore) AND consolidate()'s
+        living-weight writes (which race the learner during NREM). When no async
+        learner is attached the synchronous path is byte-for-byte unchanged
+        (nullcontext)."""
         if self._async_learner is not None:
             return self._model_lock
         return contextlib.nullcontext()
@@ -470,13 +473,13 @@ class LuthiModel:
         from luthi.sanctuary_interface import get_introspection
 
         # §4 deadlock-safe enqueue: the ACTOR's whole model-touching span runs
-        # under _actor_critical_section() (the coarse model_lock when an async
+        # under _model_critical_section() (the coarse model_lock when an async
         # learner is attached, else a nullcontext). The completed transition is
         # captured by the seam but enqueued AFTER the lock releases -- a blocking
         # put() while holding the lock would wait on a learner that needs the
         # lock to drain. `pending` carries it out of the critical section.
         pending: Optional[Transition] = None
-        with self._actor_critical_section():
+        with self._model_critical_section():
             # 1. Pre-generation introspection snapshot
             if self.config.introspect:
                 self._pre_state = get_introspection(self.model)
@@ -1460,25 +1463,37 @@ class LuthiModel:
 
         consolidated_blocks = 0
 
-        for block in self.model.blocks:
-            ffn = getattr(block, "living_ffn", None)
-            if ffn is None:
-                continue
+        # §4 race fix (Window A audit, 2026-06-29): consolidate() writes
+        # set_point/plasticity in-place on the living weights while the async
+        # learner concurrently writes weight/theta under model_lock, and NREM
+        # consolidation overlaps cognition (cognitive_cycle.py: the model still
+        # thinks/drains while consolidating). In-place ATen ops release the GIL,
+        # so without the lock this is a genuine C++-level data race on the
+        # substrate. Hold the shared model_lock for the whole write loop. The
+        # lock is non-reentrant but safe: consolidate runs after think() has
+        # released it, so there is no self-deadlock. (Brian holds the deeper
+        # call -- quiesce the learner during NREM vs. just serialize here; this
+        # is the correctness floor.)
+        with self._model_critical_section():
+            for block in self.model.blocks:
+                ffn = getattr(block, "living_ffn", None)
+                if ffn is None:
+                    continue
 
-            with torch.no_grad():
-                # 1. Set points drift toward current weights
-                if hasattr(ffn, "set_point") and hasattr(ffn, "weight"):
-                    delta = ffn.weight.data - ffn.set_point
-                    ffn.set_point += delta * self.config.consolidation_rate
+                with torch.no_grad():
+                    # 1. Set points drift toward current weights
+                    if hasattr(ffn, "set_point") and hasattr(ffn, "weight"):
+                        delta = ffn.weight.data - ffn.set_point
+                        ffn.set_point += delta * self.config.consolidation_rate
 
-                # 2. Plasticity rebalances toward mean
-                if hasattr(ffn, "plasticity"):
-                    mean_p = ffn.plasticity.mean()
-                    target = mean_p.expand_as(ffn.plasticity)
-                    rate = self.config.plasticity_rebalance_rate
-                    ffn.plasticity.mul_(1.0 - rate).add_(target * rate)
+                    # 2. Plasticity rebalances toward mean
+                    if hasattr(ffn, "plasticity"):
+                        mean_p = ffn.plasticity.mean()
+                        target = mean_p.expand_as(ffn.plasticity)
+                        rate = self.config.plasticity_rebalance_rate
+                        ffn.plasticity.mul_(1.0 - rate).add_(target * rate)
 
-            consolidated_blocks += 1
+                consolidated_blocks += 1
 
         logger.info(
             "Luthi consolidation: %d blocks processed (cycle %d)",
