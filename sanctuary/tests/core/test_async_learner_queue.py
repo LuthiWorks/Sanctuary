@@ -289,3 +289,181 @@ def test_clone_living_buffers_is_a_read_barrier():
     assert not torch.equal(snap[".weight"], model.weight)
     assert not torch.equal(snap[".episode_contexts"], model.episode_contexts)
     assert int(snap[".episode_count"].item()) == 2, "snapshot must be frozen"
+
+
+# ----------------------------------------------------------------------
+# Fix B regression: a dead learner must not hang its waiters
+# ----------------------------------------------------------------------
+def test_threaded_learner_death_drains_and_does_not_hang():
+    """Non-resilient learner death must drain the items queued behind the
+    failed one (so wait_until_drained()/stop() release) AND re-raise the error
+    at stop(). Without the drain, queue.join() deadlocks forever -- the exact
+    hang Window A's audit caught. Hang over silence."""
+    submitted = threading.Event()
+
+    class _BoomAfterAllQueued:
+        def __init__(self):
+            self.calls = 0
+
+        def observe_transition(self, *a, **k):
+            self.calls += 1
+            # Block the first observe until the actor has queued everything, so
+            # the items-behind-the-failure case is deterministic (no race).
+            submitted.wait(timeout=5.0)
+            raise ValueError("boom in the learner")
+
+    learner = AsyncLearner(
+        _BoomAfterAllQueued(), threading.Lock(), mode="threaded", maxsize=16,
+    )
+    learner.start()
+    n = 6
+    for i in range(n):
+        learner.submit(_detached_transition(i))  # all queued (maxsize > n)
+    submitted.set()  # unblock the first observe -> raise -> drain the rest
+
+    learner.wait_until_drained()  # must NOT hang
+    with pytest.raises(ValueError, match="boom in the learner"):
+        learner.stop()
+    assert learner.errors == 1
+
+
+# ----------------------------------------------------------------------
+# Minimal threaded smoke against the REAL M9Trainer (luthi-gated)
+# ----------------------------------------------------------------------
+# Window A: "A and B only actually bite against the real substrate." Unit tests
+# above use a fake sink; this drives the real lived-JEPA observe_transition on
+# the learner thread, with the actor's encode held under the SAME model_lock --
+# the faithful coarse-lock smoke. Skips cleanly without LUTHI_PATH.
+import os  # noqa: E402
+import sys  # noqa: E402
+
+_LUTHI_PATH = os.environ.get("LUTHI_PATH", "")
+if _LUTHI_PATH and _LUTHI_PATH not in sys.path:
+    sys.path.insert(0, _LUTHI_PATH)
+try:
+    import torch.optim as optim
+    from luthi.sanctuary_interface import encode_state
+    from luthi.v2.jepa_loss import JEPALoss
+    from luthi.v2.jepa_runner import (
+        CheckpointConfig, EpochConfig, KillCriteriaConfig, LoggingConfig,
+        ModalitySampler, RunnerConfig, SamplerConfig,
+    )
+    from luthi.v2.m9.runner import M9Config, M9Trainer
+    from luthi.v2.multimodal_model_pc import MultimodalPredictiveCodingLM
+    _HAVE_LUTHI = True
+except ImportError:
+    _HAVE_LUTHI = False
+
+requires_luthi = pytest.mark.skipif(
+    not _HAVE_LUTHI, reason="luthi not importable; set LUTHI_PATH",
+)
+
+_VOCAB, _D, _SEQ, _B = 32, 32, 16, 2
+
+
+class _TextLoader:
+    def __init__(self, seed: int = 0):
+        self.gen = torch.Generator().manual_seed(seed)
+
+    def next_batch(self, modality: str) -> dict:
+        assert modality == "text"
+        return {
+            "text_tokens": torch.randint(
+                0, _VOCAB, (_B, _SEQ), generator=self.gen,
+            )
+        }
+
+    def batch_token_count(self, modality, batch):
+        return int(batch["text_tokens"].numel())
+
+    def corpus_sizes_tokens(self):
+        return {"text": 1000}
+
+
+def _build_real_trainer(run_dir, *, seed: int = 7):
+    torch.manual_seed(seed)
+    model = MultimodalPredictiveCodingLM(
+        vocab_size=_VOCAB, d_model=_D, n_blocks=2, n_heads=2,
+        ffn_expansion=1, max_seq_len=_SEQ,
+        max_audio_tokens=_SEQ, max_vision_tokens=_SEQ,
+        backward_pass_enabled=False,
+    )
+    loss_module = JEPALoss(online_encoder=model)
+    optimizer = optim.AdamW(
+        [p for p in loss_module.parameters() if p.requires_grad], lr=1e-3,
+    )
+    loader = _TextLoader(seed=seed)
+    sampler_cfg = SamplerConfig(
+        corpus_sizes_tokens=loader.corpus_sizes_tokens(), alpha=0.7,
+    )
+    cfg = RunnerConfig(
+        sampler=sampler_cfg,
+        checkpoint=CheckpointConfig(interval_seconds=10**9, rolling_slots=3),
+        logging=LoggingConfig(
+            light_interval_batches=10**9, deep_interval_batches=10**9,
+        ),
+        kill_criteria=KillCriteriaConfig(warmup_batches=10**9),
+        epoch=EpochConfig(max_epochs=1, max_batches_per_epoch=10**9),
+    )
+    return M9Trainer(
+        loss_module=loss_module, optimizer=optimizer,
+        sampler=ModalitySampler(sampler_cfg), data_loader=loader,
+        config=cfg, run_dir=run_dir,
+        # Isolate the lived gradient (replay off) so theta_version advances
+        # exactly once per lived cycle -> a clean consistency assertion.
+        m9_config=M9Config(
+            mcts_budget_per_cycle=4, lived_lr=1e-2, corpus_replay_ratio=0.0,
+        ),
+    )
+
+
+@requires_luthi
+def test_threaded_real_trainer_smoke(tmp_path):
+    """K lived cycles through the threaded learner against the REAL M9Trainer.
+    The actor's encode runs UNDER model_lock (mimicking _think_sync); the
+    learner's observe runs under the same lock. Asserts no NaN/divergence
+    (errors==0), produced==consumed, and a consistent final theta-version
+    (exactly +K with replay off -> no torn/lost lived updates under the lock)."""
+    trainer = _build_real_trainer(tmp_path)
+    enc = trainer.loss_module.online_encoder
+    lock = threading.Lock()
+    learner = AsyncLearner(trainer, lock, mode="threaded", maxsize=8)
+    learner.start()
+
+    theta_before = trainer.staleness.theta_version
+    k = 6
+    try:
+        for i in range(k):
+            # Actor perception writes living weights -> hold the lock, exactly
+            # as the real cycle does. Build the detached transition, submit
+            # OUTSIDE the lock (deadlock guard).
+            with lock:
+                s_t = encode_state(
+                    enc, text_tokens=torch.randint(0, _VOCAB, (1, _SEQ)),
+                    pool=True,
+                )
+                s_next = encode_state(
+                    enc, text_tokens=torch.randint(0, _VOCAB, (1, _SEQ)),
+                    pool=True,
+                )
+            learner.submit(Transition(
+                s_t=s_t.detach(),
+                a_t=torch.randn(1, _D),
+                s_next=s_next.detach(),
+                context_obs={"text_tokens": torch.randint(0, _VOCAB, (1, _SEQ))},
+            ))
+        learner.wait_until_drained()
+    finally:
+        learner.stop()  # re-raises any learner-thread error (NaN-kill etc.)
+        trainer.action_log.close()  # Windows: release the handle before tmp rmtree
+
+    assert learner.errors == 0
+    assert learner.produced == k
+    assert learner.consumed == k
+    assert trainer.staleness.theta_version == theta_before + k, (
+        "lived theta-version must advance exactly once per cycle -- a torn or "
+        "lost update under the coarse lock would break this"
+    )
+    last = learner.last_metrics
+    assert "lived_l_pred" in last
+    assert last["lived_l_pred"] == last["lived_l_pred"], "lived_l_pred is NaN"

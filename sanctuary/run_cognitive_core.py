@@ -44,8 +44,13 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument(
         "--host",
         type=str,
-        default=os.environ.get("SANCTUARY_HEALTH_HOST", "0.0.0.0"),
-        help="Health check server host (default: 0.0.0.0)",
+        default=os.environ.get("SANCTUARY_HEALTH_HOST", "127.0.0.1"),
+        help=(
+            "Health check server host (default: 127.0.0.1, loopback only). "
+            "The in-container HEALTHCHECK curls localhost, so this default "
+            "keeps liveness working while /status and /metrics stay off the "
+            "network. Set SANCTUARY_HEALTH_HOST=0.0.0.0 to expose externally."
+        ),
     )
     parser.add_argument(
         "--no-health-server",

@@ -119,6 +119,19 @@ ipython_config.py
 venv/
 env/
 
+# Private / personal data — MUST NOT be committed (repo is public).
+# These were tracked historically and untracked on 2026-07-01; the files
+# stay on disk locally but never re-enter git. See the security branch that
+# removed them. Note: untracking does not scrub them from past history.
+data/user_mappings.json
+data/wallet/
+data/exports/
+data/economy/
+sanctuary/data/chroma/
+sanctuary/data/introspection/
+sanctuary/data/checkpoints/
+*.sqlite3
+
 # Model and memory storage
 model_cache/
 memories/

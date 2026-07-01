@@ -47,6 +47,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import os
@@ -60,7 +61,68 @@ from aiohttp import web, WSMsgType
 logger = logging.getLogger(__name__)
 
 DEFAULT_WS_PORT = 8765
-DEFAULT_WS_HOST = "0.0.0.0"
+# Secure by default: bind loopback only. A publicly-reachable bind is an
+# explicit choice the operator makes by passing host="0.0.0.0" (and is then
+# required to configure auth — see the auth-required logic in __init__).
+DEFAULT_WS_HOST = "127.0.0.1"
+
+# ---------------------------------------------------------------------------
+# Authorization model
+# ---------------------------------------------------------------------------
+# A token's `permissions` tier maps to a set of capabilities. Every inbound
+# message is checked against the capability it requires — the tier is enforced
+# on the SERVER, per message, not merely recorded at connect time and trusted
+# to the client. Deny by default: a permissions string absent from this map
+# grants no capabilities at all.
+#
+#   chat            -- inject `message` text into the cognitive loop (/ws)
+#   view_status     -- pull full system status (status_request /ws, and the
+#                      detailed HTTP /status body)
+#   world_authority -- write the entity's PERCEIVED WORLD on /ws/world
+#                      (scene_state, collisions, visitor presence/chat). This
+#                      is the authoritative sensory feed into the mind, so it
+#                      is the highest-trust capability and `full`-only. The
+#                      Godot world host holds a `full` token and aggregates
+#                      individual visitors; visitors do NOT connect to
+#                      /ws/world directly.
+CAP_CHAT = "chat"
+CAP_VIEW_STATUS = "view_status"
+CAP_WORLD_AUTHORITY = "world_authority"
+
+PERMISSION_CAPABILITIES: dict[str, frozenset[str]] = {
+    "full": frozenset({CAP_CHAT, CAP_VIEW_STATUS, CAP_WORLD_AUTHORITY}),
+    "view_chat": frozenset({CAP_CHAT, CAP_VIEW_STATUS}),
+    "chat_only": frozenset({CAP_CHAT}),
+}
+
+
+def _profile_has_cap(profile: Optional[dict], capability: str) -> bool:
+    """True if the authenticated profile's tier grants `capability`.
+
+    Deny by default — a missing profile or an unrecognised permissions string
+    yields no capabilities.
+    """
+    if not profile:
+        return False
+    tier = profile.get("permissions", "")
+    return capability in PERMISSION_CAPABILITIES.get(tier, frozenset())
+
+
+def _is_loopback_host(host: str) -> bool:
+    """True if `host` is loopback-only (not reachable from the network).
+
+    An empty host or ``0.0.0.0`` / ``::`` binds all interfaces and is NOT
+    loopback. A hostname we can't parse as an IP is treated as non-loopback
+    (fail safe — assume reachable).
+    """
+    if host in ("localhost",):
+        return True
+    if not host:
+        return False
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 # Audit 2026-05-10: WebSocket auth.
 # Tokens are read from `sanctuary/data/ws_tokens.json` (or the path in the
@@ -102,21 +164,36 @@ class SanctuaryWebServer:
         # Token registry. Empty dict = no auth configured. Loaded once at
         # __init__; restart the server to pick up new tokens.
         self._tokens: dict[str, dict[str, Any]] = self._load_tokens()
-        self._auth_required = (
-            os.environ.get("SANCTUARY_WS_AUTH_REQUIRED", "").lower() == "true"
-        )
+        # Secure by default. SANCTUARY_WS_AUTH_REQUIRED:
+        #   "true"  -> always require auth (refuse to run without tokens)
+        #   "false" -> never require auth (explicit insecure opt-in)
+        #   unset   -> require auth IFF the server is reachable beyond
+        #              loopback. Local dev on 127.0.0.1 stays frictionless;
+        #              a network-facing bind refuses to run unauthenticated.
+        _auth_env = os.environ.get("SANCTUARY_WS_AUTH_REQUIRED", "").lower()
+        if _auth_env == "true":
+            self._auth_required = True
+        elif _auth_env == "false":
+            self._auth_required = False
+        else:
+            self._auth_required = not _is_loopback_host(self._host)
         if not self._tokens:
             if self._auth_required:
                 raise RuntimeError(
-                    "SANCTUARY_WS_AUTH_REQUIRED=true but no token file found. "
-                    "Create sanctuary/data/ws_tokens.json with at least one "
-                    "token, or set SANCTUARY_WS_TOKENS_FILE to its path."
+                    "WebSocket auth is required but no token file was found. "
+                    f"The server is bound to {self._host!r}, which is reachable "
+                    "beyond loopback. Create sanctuary/data/ws_tokens.json (or "
+                    "set SANCTUARY_WS_TOKENS_FILE), bind to 127.0.0.1 for local "
+                    "dev, or set SANCTUARY_WS_AUTH_REQUIRED=false to override "
+                    "(NOT recommended on a reachable interface)."
                 )
             logger.warning(
-                "WebSocket auth disabled — no tokens loaded. Anyone reaching "
-                "this port can inject input or fake events. Create "
-                "sanctuary/data/ws_tokens.json and set "
-                "SANCTUARY_WS_AUTH_REQUIRED=true to harden."
+                "WebSocket auth disabled — no tokens loaded. Every client is "
+                "treated as full-permission. This is tolerated only because the "
+                "server is bound to a loopback address (%s); do not expose this "
+                "port. Create sanctuary/data/ws_tokens.json to enable per-tier "
+                "authorization.",
+                self._host,
             )
         else:
             logger.info(
@@ -336,7 +413,7 @@ class SanctuaryWebServer:
         try:
             async for msg in ws:
                 if msg.type == WSMsgType.TEXT:
-                    await self._handle_client_message(ws, msg.data)
+                    await self._handle_client_message(ws, msg.data, profile)
                 elif msg.type == WSMsgType.ERROR:
                     logger.warning(
                         "WebSocket error: %s", ws.exception()
@@ -350,10 +427,39 @@ class SanctuaryWebServer:
 
         return ws
 
-    async def _handle_client_message(
-        self, ws: web.WebSocketResponse, raw: str
+    async def _deny(
+        self,
+        ws: web.WebSocketResponse,
+        profile: Optional[dict],
+        action: str,
+        capability: str,
     ) -> None:
-        """Process a message from a WebSocket client."""
+        """Reject an action the profile's tier does not authorize."""
+        name = (profile or {}).get("name", "<anonymous>")
+        tier = (profile or {}).get("permissions", "<none>")
+        logger.warning(
+            "permission denied: client %r (tier=%s) attempted %r "
+            "(requires capability %r)",
+            name, tier, action, capability,
+        )
+        await self._send_ws(ws, {
+            "type": "permission_denied",
+            "action": action,
+            "required": capability,
+            "content": (
+                f"Your access tier ({tier}) is not permitted to: {action}"
+            ),
+        })
+
+    async def _handle_client_message(
+        self, ws: web.WebSocketResponse, raw: str, profile: Optional[dict] = None
+    ) -> None:
+        """Process a message from a WebSocket client.
+
+        Every message type is authorized against the connection's profile
+        before it takes effect — the permission tier is enforced here, not
+        trusted to the client.
+        """
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
@@ -366,7 +472,12 @@ class SanctuaryWebServer:
         msg_type = data.get("type", "")
 
         if msg_type == "message":
-            content = data.get("content", "").strip()
+            if not _profile_has_cap(profile, CAP_CHAT):
+                await self._deny(ws, profile, "inject message", CAP_CHAT)
+                return
+            # Coerce defensively: a non-string content must not crash the
+            # connection via .strip() (unvalidated client input).
+            content = str(data.get("content", "")).strip()
             if content and self._runner:
                 self._runner.inject_text(content, source="user:desktop")
                 logger.debug("User input injected: %s", content[:100])
@@ -377,6 +488,11 @@ class SanctuaryWebServer:
                 })
 
         elif msg_type == "status_request":
+            if not _profile_has_cap(profile, CAP_VIEW_STATUS):
+                await self._deny(
+                    ws, profile, "request system status", CAP_VIEW_STATUS
+                )
+                return
             if self._runner:
                 status = self._runner.get_status()
                 await self._send_ws(ws, {
@@ -408,8 +524,11 @@ class SanctuaryWebServer:
         # Authenticate before accepting any inbound scene-state or
         # command_result messages — the world client's input is just as
         # security-sensitive as the GUI's, even though it's machine-to-
-        # machine. Profile not currently used here but reserved for future
-        # per-world permission gating.
+        # machine. The profile is enforced per-message in
+        # _handle_world_message: writing the entity's perceived world
+        # requires the world_authority capability (full tier). Connecting is
+        # allowed for any authenticated client so a view-only observer can
+        # still receive the (privacy-gated) state broadcasts.
         profile = await self._authenticate_ws(ws, channel="/ws/world")
         if profile is None:
             return ws
@@ -431,7 +550,7 @@ class SanctuaryWebServer:
         try:
             async for msg in ws:
                 if msg.type == WSMsgType.TEXT:
-                    await self._handle_world_message(ws, msg.data)
+                    await self._handle_world_message(ws, msg.data, profile)
                 elif msg.type == WSMsgType.ERROR:
                     logger.warning(
                         "World WebSocket error: %s", ws.exception()
@@ -463,9 +582,17 @@ class SanctuaryWebServer:
         return ws
 
     async def _handle_world_message(
-        self, ws: web.WebSocketResponse, raw: str
+        self, ws: web.WebSocketResponse, raw: str, profile: Optional[dict] = None
     ) -> None:
-        """Process a message from the Godot world client."""
+        """Process a message from the Godot world client.
+
+        Every inbound world message writes the entity's perceived reality —
+        scene state, collisions, visitor presence and chat all become percepts
+        in the cognitive loop. That authoritative sensory write requires the
+        world_authority capability (the full tier held by the trusted world
+        host). Without it the message is rejected: an under-privileged client
+        cannot spoof the world or impersonate a visitor into the entity's mind.
+        """
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
@@ -476,6 +603,12 @@ class SanctuaryWebServer:
             return
 
         msg_type = data.get("type", "")
+
+        if not _profile_has_cap(profile, CAP_WORLD_AUTHORITY):
+            await self._deny(
+                ws, profile, f"world message '{msg_type}'", CAP_WORLD_AUTHORITY
+            )
+            return
 
         if msg_type == "scene_state":
             self._inject_scene_state_percept(data)
