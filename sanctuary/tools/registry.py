@@ -16,9 +16,10 @@ Results come back as percepts in the next cognitive cycle.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Callable, Awaitable, Optional
 
@@ -39,6 +40,41 @@ class ToolSpec:
     parameters: dict[str, str]  # param_name -> description
     safety: ToolSafety = ToolSafety.OPEN
     category: str = ""
+
+
+@dataclass(frozen=True)
+class ToolPolicy:
+    """The graduated-capability gate: decides whether a tool may execute.
+
+    OPEN tools always run. GATED tools -- code execution, shell, file writes,
+    app launch: anything irreversible or with a large blast radius -- are
+    DENIED BY DEFAULT and become available only when capability is
+    deliberately granted, one of three ways:
+
+      - ``allow_gated=True``            every gated tool runs. A wide grant;
+                                        intended for a supervised session, not
+                                        the autonomous loop.
+      - name in ``enabled_gated``       that specific gated tool runs. This is
+                                        the normal expand-carefully path --
+                                        grant ``run_code`` without granting
+                                        ``shell``.
+      - ``confirm(spec, params)`` True  a human-in-the-loop hook approves this
+                                        one call (may be sync or async).
+
+    The default ``ToolPolicy()`` denies every gated tool. That is the project's
+    stated posture -- substrate first, no motor access, then expand carefully
+    -- expressed as the safe default rather than left to the caller to
+    remember. A denied call is not an error in the tool; it returns a failed
+    ToolResult the entity perceives, and is logged for audit.
+    """
+
+    allow_gated: bool = False
+    enabled_gated: frozenset[str] = frozenset()
+    confirm: Optional[Callable[[ToolSpec, dict], Any]] = None
+
+    def with_enabled(self, *names: str) -> "ToolPolicy":
+        """Return a copy that additionally grants the named gated tools."""
+        return replace(self, enabled_gated=self.enabled_gated | frozenset(names))
 
 
 @dataclass
@@ -68,11 +104,25 @@ class ToolRegistry:
         result = await registry.execute("read_file", {"path": "/some/file.txt"})
     """
 
-    def __init__(self):
+    def __init__(self, policy: Optional[ToolPolicy] = None):
         self._tools: dict[str, ToolSpec] = {}
         self._executors: dict[str, Callable[..., Awaitable[ToolResult]]] = {}
         self._history: list[ToolResult] = []
         self._max_history: int = 500
+        # The graduated-capability gate. Defaults to deny-all-gated.
+        self._policy: ToolPolicy = policy or ToolPolicy()
+
+    @property
+    def policy(self) -> ToolPolicy:
+        return self._policy
+
+    def set_policy(self, policy: ToolPolicy) -> None:
+        """Replace the active tool policy (e.g. to widen capability)."""
+        self._policy = policy
+
+    def enable_gated(self, *names: str) -> None:
+        """Grant specific gated tools -- the expand-carefully entry point."""
+        self._policy = self._policy.with_enabled(*names)
 
     def register(
         self,
@@ -94,8 +144,37 @@ class ToolRegistry:
         self._executors[name] = execute
         logger.info("Tool registered: %s (%s)", name, category)
 
+    async def _authorize(
+        self, spec: ToolSpec, params: dict[str, Any]
+    ) -> tuple[bool, Optional[str]]:
+        """Apply the tool policy. Returns (allowed, deny_reason)."""
+        if spec.safety != ToolSafety.GATED:
+            return True, None
+
+        policy = self._policy
+        if policy.allow_gated or spec.name in policy.enabled_gated:
+            return True, None
+
+        if policy.confirm is not None:
+            decision = policy.confirm(spec, params)
+            if inspect.isawaitable(decision):
+                decision = await decision
+            if decision:
+                return True, None
+            return False, "gated tool denied by confirmation hook"
+
+        return False, (
+            f"tool '{spec.name}' is gated and not enabled; grant it via "
+            f"ToolPolicy (enabled_gated / allow_gated / a confirm hook)"
+        )
+
     async def execute(self, name: str, params: dict[str, Any]) -> ToolResult:
-        """Execute a tool by name with given parameters."""
+        """Execute a tool by name with given parameters.
+
+        Gated tools are authorized against the active :class:`ToolPolicy`
+        before running; a denied call returns a failed ToolResult (never
+        executes) and is logged for audit.
+        """
         if name not in self._tools:
             result = ToolResult(
                 tool_name=name,
@@ -107,6 +186,25 @@ class ToolRegistry:
 
         spec = self._tools[name]
         executor = self._executors[name]
+
+        allowed, deny_reason = await self._authorize(spec, params)
+        if not allowed:
+            logger.warning("Tool %s BLOCKED by policy: %s", name, deny_reason)
+            result = ToolResult(
+                tool_name=name,
+                success=False,
+                error=f"blocked by tool policy: {deny_reason}",
+            )
+            self._record(result)
+            return result
+
+        if spec.safety == ToolSafety.GATED:
+            # Gated == "logged" per the safety contract: leave an audit line
+            # whenever an irreversible-capability tool actually runs.
+            logger.info(
+                "GATED tool authorized: %s (param keys: %s)",
+                name, sorted(params.keys()),
+            )
 
         start = time.perf_counter()
         try:

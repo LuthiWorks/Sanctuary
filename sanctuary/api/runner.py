@@ -62,6 +62,7 @@ from sanctuary.motor.motor import Motor
 from sanctuary.scaffold.cognitive_scaffold import CognitiveScaffold
 from sanctuary.sensorium.sensorium import Sensorium
 from sanctuary.tools.builtin import create_default_registry, register_self_knowledge_tools
+from sanctuary.tools.registry import ToolPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,11 @@ class RunnerConfig:
     # Identity
     data_dir: str = "data/identity"
     charter_path: Optional[str] = None
+
+    # Tools — graduated capability. Gated tools (run_code, shell, write_file,
+    # launch_app) are denied by default; list the ones to grant here as the
+    # entity's capability is deliberately expanded. Empty = no gated tools.
+    enabled_gated_tools: tuple[str, ...] = ()
 
     # Context budget
     context_budget: Optional[BudgetConfig] = None
@@ -467,8 +473,14 @@ class SanctuaryRunner:
         )
 
         # --- Tools ---
-
-        self.tools = create_default_registry()
+        # Deny-by-default gate on irreversible/high-blast-radius tools; the
+        # config lists any gated tools deliberately granted (graduated
+        # capability — substrate first, motor access expanded carefully).
+        self.tools = create_default_registry(
+            policy=ToolPolicy(
+                enabled_gated=frozenset(self._config.enabled_gated_tools)
+            )
+        )
 
         # Register tool execution hook — runs after each cycle,
         # executes any tool_requests from the model's output,

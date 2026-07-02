@@ -25,7 +25,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from sanctuary.tools.registry import ToolRegistry, ToolResult, ToolSafety
+from sanctuary.tools.registry import (
+    ToolPolicy,
+    ToolRegistry,
+    ToolResult,
+    ToolSafety,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -803,25 +808,32 @@ async def _launch_app(params: dict[str, Any]) -> ToolResult:
         return ToolResult(tool_name="launch_app", success=False, error=str(e))
 
 
+_ENV_SAFE_KEYS = (
+    "PATH", "HOME", "USER", "USERNAME", "SHELL", "LANG", "TERM",
+    "HOSTNAME", "PWD", "DISPLAY", "XDG_SESSION_TYPE",
+    "VIRTUAL_ENV", "CONDA_PREFIX",
+)
+
+
 async def _environment(params: dict[str, Any]) -> ToolResult:
-    """View or search environment variables."""
+    """View environment variables from a curated safe set.
+
+    The curated set never includes secrets (API keys, tokens, checkpoint
+    passwords). ``search`` filters WITHIN that safe set -- it must not become
+    a path to read arbitrary ``os.environ`` entries, which would turn a
+    convenience into a secret-exfiltration tool.
+    """
+    safe = {k: os.environ[k] for k in _ENV_SAFE_KEYS if k in os.environ}
+
     search = params.get("search", "")
     if search:
-        matches = {
-            k: v for k, v in os.environ.items()
-            if search.lower() in k.lower()
-        }
+        s = str(search).lower()
+        matches = {k: v for k, v in safe.items() if s in k.lower()}
         return ToolResult(tool_name="environment", success=True, output=matches)
 
-    # Return a curated set of useful env vars (not all — some may be sensitive)
-    safe_keys = [
-        "PATH", "HOME", "USER", "USERNAME", "SHELL", "LANG", "TERM",
-        "HOSTNAME", "PWD", "DISPLAY", "XDG_SESSION_TYPE",
-        "VIRTUAL_ENV", "CONDA_PREFIX",
-    ]
-    env = {k: os.environ.get(k, "") for k in safe_keys if k in os.environ}
-    env["total_env_vars"] = len(os.environ)
-    return ToolResult(tool_name="environment", success=True, output=env)
+    result = dict(safe)
+    result["total_env_vars"] = len(os.environ)
+    return ToolResult(tool_name="environment", success=True, output=result)
 
 
 async def _workspace(params: dict[str, Any]) -> ToolResult:
@@ -934,18 +946,24 @@ def configure_discord(webhook_url: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def create_default_registry(config: Optional[ToolConfig] = None) -> ToolRegistry:
+def create_default_registry(
+    config: Optional[ToolConfig] = None,
+    policy: Optional[ToolPolicy] = None,
+) -> ToolRegistry:
     """Create a ToolRegistry with all built-in tools registered.
 
     Args:
         config: Optional configuration for proxy, network, etc.
                 If proxy is configured, all web traffic routes through it.
+        policy: Optional graduated-capability policy. Defaults (None) to
+                ToolPolicy() -- every gated tool (run_code, shell, write_file,
+                launch_app) denied until explicitly granted.
     """
     global _config
     if config is not None:
         _config = config
 
-    registry = ToolRegistry()
+    registry = ToolRegistry(policy=policy)
 
     # Filesystem (open)
     registry.register(
@@ -960,6 +978,10 @@ def create_default_registry(config: Optional[ToolConfig] = None) -> ToolRegistry
         description="Write content to a file (creates parent directories if needed)",
         parameters={"path": "Absolute path to the file", "content": "Text content to write"},
         execute=_write_file,
+        # Gated: an unconfined write can overwrite the entity's own source,
+        # its checkpoints, or host config. Reads stay open (the entity is
+        # meant to read its own source); writing is the irreversible edge.
+        safety=ToolSafety.GATED,
         category="filesystem",
     )
     registry.register(
