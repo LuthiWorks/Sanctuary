@@ -18,10 +18,19 @@ Authored by Fable 5 (adversarial seat), 2026-07-02.
 """
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from sanctuary.tools import builtin
-from sanctuary.tools.builtin import _read_file, _write_file, _list_directory
+from sanctuary.tools.builtin import (
+    _SandboxError,
+    _final_path_of_fd,
+    _read_file,
+    _verify_fd_in_roots,
+    _write_file,
+    _list_directory,
+)
 
 
 @pytest.fixture
@@ -132,3 +141,53 @@ async def test_symlink_inside_root_pointing_outside_denied(root, tmp_path):
     result = await _read_file({"path": str(link / "secret.txt")})
     assert not result.success
     assert "outside the allowed" in result.error
+
+
+# ---------------------------------------------------------------------------
+# Handle-based verification (the TOCTOU closer) -- tested directly, since the
+# race itself is not deterministically reproducible.
+# ---------------------------------------------------------------------------
+
+
+def test_final_path_of_fd_matches_the_open_file(tmp_path):
+    f = tmp_path / "real.txt"
+    f.write_text("x", encoding="utf-8")
+    fd = os.open(str(f), os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    try:
+        real = _final_path_of_fd(fd)
+    finally:
+        os.close(fd)
+    if real is None:
+        pytest.skip("no handle->path primitive on this platform")
+    # The handle's real path must point at the same file we opened.
+    assert real.resolve() == f.resolve()
+
+
+def test_verify_fd_rejects_out_of_root_handle(monkeypatch, tmp_path):
+    # A handle opened on a file OUTSIDE the roots must be rejected by the
+    # handle check, independent of the pre-open path check.
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("x", encoding="utf-8")
+    monkeypatch.setattr(builtin._config, "filesystem_roots", (str(root),))
+
+    fd = os.open(str(outside), os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    try:
+        if _final_path_of_fd(fd) is None:
+            pytest.skip("no handle->path primitive on this platform")
+        with pytest.raises(_SandboxError):
+            _verify_fd_in_roots(fd, str(outside))
+    finally:
+        os.close(fd)
+
+
+def test_verify_fd_allows_in_root_handle(monkeypatch, tmp_path):
+    inside = tmp_path / "inside.txt"
+    inside.write_text("x", encoding="utf-8")
+    monkeypatch.setattr(builtin._config, "filesystem_roots", (str(tmp_path),))
+    fd = os.open(str(inside), os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    try:
+        _verify_fd_in_roots(fd, str(inside))  # must not raise
+    finally:
+        os.close(fd)

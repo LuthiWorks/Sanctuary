@@ -20,7 +20,9 @@ import json
 import logging
 import os
 import platform
+import stat as stat_module
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -67,32 +69,102 @@ class _SandboxError(Exception):
     """A filesystem path escaped (or was denied by) the sandbox roots."""
 
 
+def _within_roots(target: Path) -> bool:
+    """True if `target` (already resolved) lies within a configured root."""
+    for root in _config.filesystem_roots:
+        root_resolved = Path(root).resolve()
+        if target == root_resolved or target.is_relative_to(root_resolved):
+            return True
+    return False
+
+
 def _resolve_in_sandbox(path_str: str) -> Path:
     """Canonicalize `path_str` and require it to lie within an allowed root.
 
     Resolves symlinks and ``..`` first (``Path.resolve``), so neither a
     ``../../etc`` traversal nor a symlink inside a root that points outside it
-    can escape. Fail closed: with no roots configured, every path is denied.
-    Raises :class:`_SandboxError` on any violation; the caller turns that into
-    a failed ToolResult.
+    can escape at check time. Fail closed: with no roots configured, every
+    path is denied. Raises :class:`_SandboxError` on any violation.
 
-    Residual: a TOCTOU window exists between resolve and the actual open if a
-    path component is swapped for a symlink concurrently. Out of scope for the
-    current single-actor threat model (the guard is against over-broad or
-    mistaken access, not a live racing attacker); noted for when it isn't.
+    This is the *check*. It leaves a TOCTOU window between resolve and the
+    actual open (a component swapped for a symlink in between). That window is
+    closed separately by :func:`_verify_fd_in_roots`, which re-checks the
+    OPENED handle's own real path -- see the tool bodies.
     """
-    roots = _config.filesystem_roots
-    if not roots:
+    if not _config.filesystem_roots:
         raise _SandboxError(
             "filesystem access is not configured (no allowed roots). Grant "
             "access via RunnerConfig.filesystem_roots."
         )
     target = Path(path_str).resolve()
-    for root in roots:
-        root_resolved = Path(root).resolve()
-        if target == root_resolved or target.is_relative_to(root_resolved):
-            return target
-    raise _SandboxError(f"path is outside the allowed filesystem roots: {path_str}")
+    if not _within_roots(target):
+        raise _SandboxError(f"path is outside the allowed filesystem roots: {path_str}")
+    return target
+
+
+def _final_path_of_fd(fd: int) -> Optional[Path]:
+    """The real filesystem path an OPEN descriptor points at, or None.
+
+    This is ground truth: it reflects what the kernel actually opened, so it
+    is immune to a symlink swapped in after the pre-open resolve check. None
+    means the platform primitive is unavailable (caller falls back to the
+    resolve-time check).
+    """
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            import msvcrt
+            from ctypes import wintypes
+
+            handle = msvcrt.get_osfhandle(fd)
+            fn = ctypes.windll.kernel32.GetFinalPathNameByHandleW
+            fn.argtypes = [wintypes.HANDLE, wintypes.LPWSTR,
+                           wintypes.DWORD, wintypes.DWORD]
+            fn.restype = wintypes.DWORD
+            need = fn(handle, None, 0, 0)  # required length incl. NUL
+            if need == 0:
+                return None
+            buf = ctypes.create_unicode_buffer(need)
+            got = fn(handle, buf, need, 0)
+            if got == 0:
+                return None
+            p = buf.value
+            # Strip the \\?\ (and \\?\UNC\) prefixes GetFinalPathName returns.
+            if p.startswith("\\\\?\\UNC\\"):
+                p = "\\\\" + p[len("\\\\?\\UNC\\"):]
+            elif p.startswith("\\\\?\\"):
+                p = p[len("\\\\?\\"):]
+            return Path(p)
+        if sys.platform.startswith("linux"):
+            return Path(os.readlink(f"/proc/self/fd/{fd}"))
+        # macOS / BSD: F_GETPATH fills a PATH_MAX buffer with the path.
+        import fcntl
+        f_getpath = getattr(fcntl, "F_GETPATH", None)
+        if f_getpath is None:
+            return None
+        buf = bytearray(4096)
+        fcntl.fcntl(fd, f_getpath, buf)
+        return Path(os.fsdecode(bytes(buf).split(b"\x00", 1)[0]))
+    except (OSError, ValueError, ImportError):
+        return None
+
+
+def _verify_fd_in_roots(fd: int, path_str: str) -> None:
+    """Close the TOCTOU window: re-check the OPENED handle's real path.
+
+    If the handle the kernel actually opened resolves outside every root, a
+    symlink was swapped in after the pre-open check -- deny. If the platform
+    primitive is unavailable (``None``), we keep the pre-open guarantee from
+    :func:`_resolve_in_sandbox` and do not weaken it. Raises _SandboxError on
+    a confirmed escape.
+    """
+    real = _final_path_of_fd(fd)
+    if real is None:
+        return  # platform fallback: pre-open resolve check stands
+    if not _within_roots(real.resolve()):
+        raise _SandboxError(
+            f"path escaped the allowed filesystem roots after opening: {path_str}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -113,17 +185,33 @@ async def _read_file(params: dict[str, Any]) -> ToolResult:
 
     if not p.exists():
         return ToolResult(tool_name="read_file", success=False, error=f"File not found: {path}")
-    if not p.is_file():
+    if p.is_dir():
         return ToolResult(tool_name="read_file", success=False, error=f"Not a file: {path}")
 
+    max_bytes = params.get("max_bytes", 100_000)
     try:
-        max_bytes = params.get("max_bytes", 100_000)
-        content = p.read_text(encoding="utf-8", errors="replace")
-        if len(content) > max_bytes:
-            content = content[:max_bytes] + f"\n... [truncated at {max_bytes} bytes]"
-        return ToolResult(tool_name="read_file", success=True, output=content)
-    except Exception as e:
+        # Open once, then verify the OPENED handle is in-root (closes the
+        # resolve->open window), fstat it for type, and read from the SAME
+        # handle -- no second path lookup to race.
+        fd = os.open(str(p), os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    except OSError as e:
         return ToolResult(tool_name="read_file", success=False, error=str(e))
+    try:
+        try:
+            _verify_fd_in_roots(fd, path)
+        except _SandboxError as e:
+            return ToolResult(tool_name="read_file", success=False, error=str(e))
+        if not stat_module.S_ISREG(os.fstat(fd).st_mode):
+            return ToolResult(tool_name="read_file", success=False, error=f"Not a file: {path}")
+        raw = os.read(fd, max_bytes + 1)
+    finally:
+        os.close(fd)
+
+    truncated = len(raw) > max_bytes
+    content = raw[:max_bytes].decode("utf-8", errors="replace")
+    if truncated:
+        content += f"\n... [truncated at {max_bytes} bytes]"
+    return ToolResult(tool_name="read_file", success=True, output=content)
 
 
 async def _write_file(params: dict[str, Any]) -> ToolResult:
@@ -138,9 +226,32 @@ async def _write_file(params: dict[str, Any]) -> ToolResult:
     except _SandboxError as e:
         return ToolResult(tool_name="write_file", success=False, error=str(e))
 
+    data = content.encode("utf-8")
+    pre_existed = p.exists()
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
+        # Open WITHOUT truncating, verify the opened handle is in-root, and
+        # only then truncate + write. Order matters: if a symlink was swapped
+        # in to point at an out-of-root file, we must detect it BEFORE
+        # truncating, so we never destroy an escapee's contents. A newly
+        # created escapee is removed.
+        fd = os.open(str(p), os.O_WRONLY | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o644)
+        try:
+            _verify_fd_in_roots(fd, path)
+            os.ftruncate(fd, 0)
+            os.write(fd, data)
+        except _SandboxError as e:
+            os.close(fd)
+            fd = None
+            if not pre_existed:
+                try:
+                    os.unlink(str(p))
+                except OSError:
+                    pass
+            return ToolResult(tool_name="write_file", success=False, error=str(e))
+        finally:
+            if fd is not None:
+                os.close(fd)
         return ToolResult(
             tool_name="write_file", success=True,
             output=f"Written {len(content)} bytes to {path}",
