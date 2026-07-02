@@ -61,7 +61,11 @@ from sanctuary.monitoring.communication_log import (
 from sanctuary.motor.motor import Motor
 from sanctuary.scaffold.cognitive_scaffold import CognitiveScaffold
 from sanctuary.sensorium.sensorium import Sensorium
-from sanctuary.tools.builtin import create_default_registry, register_self_knowledge_tools
+from sanctuary.tools.builtin import (
+    ToolConfig,
+    create_default_registry,
+    register_self_knowledge_tools,
+)
 from sanctuary.tools.registry import ToolPolicy
 
 logger = logging.getLogger(__name__)
@@ -99,6 +103,11 @@ class RunnerConfig:
     # launch_app) are denied by default; list the ones to grant here as the
     # entity's capability is deliberately expanded. Empty = no gated tools.
     enabled_gated_tools: tuple[str, ...] = ()
+
+    # Filesystem sandbox roots for the file tools (read_file, write_file,
+    # list_directory). FAIL CLOSED — empty means no filesystem access at all.
+    # Grant deliberately, e.g. the entity's workspace and its source tree.
+    filesystem_roots: tuple[str, ...] = ()
 
     # Context budget
     context_budget: Optional[BudgetConfig] = None
@@ -477,9 +486,12 @@ class SanctuaryRunner:
         # config lists any gated tools deliberately granted (graduated
         # capability — substrate first, motor access expanded carefully).
         self.tools = create_default_registry(
+            config=ToolConfig(
+                filesystem_roots=tuple(self._config.filesystem_roots)
+            ),
             policy=ToolPolicy(
                 enabled_gated=frozenset(self._config.enabled_gated_tools)
-            )
+            ),
         )
 
         # Register tool execution hook — runs after each cycle,

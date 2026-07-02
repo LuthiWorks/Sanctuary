@@ -258,8 +258,24 @@ class TestDefaultRegistry:
 # ============================================================================
 
 
+@pytest.fixture
+def _grant_tmp_root(tmp_path, monkeypatch):
+    """Grant the filesystem sandbox access to this test's tmp_path.
+
+    The file tools fail closed (no roots -> no access); these tests exercise
+    tool behavior within an allowed root, so we grant tmp_path.
+    """
+    from sanctuary.tools import builtin
+    monkeypatch.setattr(builtin._config, "filesystem_roots", (str(tmp_path),))
+    yield
+
+
 class TestReadFile:
     """Test read_file tool."""
+
+    @pytest.fixture(autouse=True)
+    def _sandbox(self, _grant_tmp_root):
+        yield
 
     @pytest.mark.asyncio
     async def test_read_existing_file(self, tmp_path):
@@ -270,8 +286,10 @@ class TestReadFile:
         assert result.output == "hello world"
 
     @pytest.mark.asyncio
-    async def test_read_nonexistent_file(self):
-        result = await _read_file({"path": "/nonexistent/file.txt"})
+    async def test_read_nonexistent_file(self, tmp_path):
+        # Inside the allowed root but missing -> "not found" (not a sandbox
+        # denial, which is asserted separately in test_filesystem_sandbox).
+        result = await _read_file({"path": str(tmp_path / "file.txt")})
         assert not result.success
         assert "not found" in result.error.lower()
 
@@ -330,6 +348,10 @@ class TestReadFile:
 class TestWriteFile:
     """Test write_file tool."""
 
+    @pytest.fixture(autouse=True)
+    def _sandbox(self, _grant_tmp_root):
+        yield
+
     @pytest.mark.asyncio
     async def test_write_new_file(self, tmp_path):
         f = tmp_path / "new.txt"
@@ -376,6 +398,10 @@ class TestWriteFile:
 class TestListDirectory:
     """Test list_directory tool."""
 
+    @pytest.fixture(autouse=True)
+    def _sandbox(self, _grant_tmp_root):
+        yield
+
     @pytest.mark.asyncio
     async def test_list_with_files(self, tmp_path):
         (tmp_path / "a.txt").write_text("a")
@@ -401,8 +427,8 @@ class TestListDirectory:
         assert result.output == []
 
     @pytest.mark.asyncio
-    async def test_list_nonexistent(self):
-        result = await _list_directory({"path": "/nonexistent/dir"})
+    async def test_list_nonexistent(self, tmp_path):
+        result = await _list_directory({"path": str(tmp_path / "nonexistent")})
         assert not result.success
 
     @pytest.mark.asyncio
@@ -542,6 +568,10 @@ class TestWikipedia:
 
 class TestCrossPlatform:
     """Ensure tools work with both forward and backslash paths."""
+
+    @pytest.fixture(autouse=True)
+    def _sandbox(self, _grant_tmp_root):
+        yield
 
     @pytest.mark.asyncio
     async def test_forward_slash_paths(self, tmp_path):

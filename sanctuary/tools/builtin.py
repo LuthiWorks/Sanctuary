@@ -51,9 +51,48 @@ class ToolConfig:
     # Trusted local network CIDR (e.g., "192.168.1.0/24")
     local_network: Optional[str] = None
 
+    # Filesystem sandbox: the roots the file tools (read_file, write_file,
+    # list_directory) may touch. FAIL CLOSED -- an empty tuple denies all
+    # filesystem access. Any accessed path must resolve (after following
+    # symlinks and `..`) to inside one of these roots. Grant access by
+    # listing the entity's workspace, its source tree, etc.
+    filesystem_roots: tuple[str, ...] = ()
+
 
 # Module-level config — set by create_default_registry()
 _config = ToolConfig()
+
+
+class _SandboxError(Exception):
+    """A filesystem path escaped (or was denied by) the sandbox roots."""
+
+
+def _resolve_in_sandbox(path_str: str) -> Path:
+    """Canonicalize `path_str` and require it to lie within an allowed root.
+
+    Resolves symlinks and ``..`` first (``Path.resolve``), so neither a
+    ``../../etc`` traversal nor a symlink inside a root that points outside it
+    can escape. Fail closed: with no roots configured, every path is denied.
+    Raises :class:`_SandboxError` on any violation; the caller turns that into
+    a failed ToolResult.
+
+    Residual: a TOCTOU window exists between resolve and the actual open if a
+    path component is swapped for a symlink concurrently. Out of scope for the
+    current single-actor threat model (the guard is against over-broad or
+    mistaken access, not a live racing attacker); noted for when it isn't.
+    """
+    roots = _config.filesystem_roots
+    if not roots:
+        raise _SandboxError(
+            "filesystem access is not configured (no allowed roots). Grant "
+            "access via RunnerConfig.filesystem_roots."
+        )
+    target = Path(path_str).resolve()
+    for root in roots:
+        root_resolved = Path(root).resolve()
+        if target == root_resolved or target.is_relative_to(root_resolved):
+            return target
+    raise _SandboxError(f"path is outside the allowed filesystem roots: {path_str}")
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +106,11 @@ async def _read_file(params: dict[str, Any]) -> ToolResult:
     if not path:
         return ToolResult(tool_name="read_file", success=False, error="No path provided")
 
-    p = Path(path)
+    try:
+        p = _resolve_in_sandbox(path)
+    except _SandboxError as e:
+        return ToolResult(tool_name="read_file", success=False, error=str(e))
+
     if not p.exists():
         return ToolResult(tool_name="read_file", success=False, error=f"File not found: {path}")
     if not p.is_file():
@@ -91,7 +134,11 @@ async def _write_file(params: dict[str, Any]) -> ToolResult:
         return ToolResult(tool_name="write_file", success=False, error="No path provided")
 
     try:
-        p = Path(path)
+        p = _resolve_in_sandbox(path)
+    except _SandboxError as e:
+        return ToolResult(tool_name="write_file", success=False, error=str(e))
+
+    try:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
         return ToolResult(
@@ -105,7 +152,11 @@ async def _write_file(params: dict[str, Any]) -> ToolResult:
 async def _list_directory(params: dict[str, Any]) -> ToolResult:
     """List contents of a directory."""
     path = params.get("path", ".")
-    p = Path(path)
+    try:
+        p = _resolve_in_sandbox(path)
+    except _SandboxError as e:
+        return ToolResult(tool_name="list_directory", success=False, error=str(e))
+
     if not p.exists():
         return ToolResult(tool_name="list_directory", success=False, error=f"Not found: {path}")
     if not p.is_dir():
