@@ -16,17 +16,20 @@ Categories:
 from __future__ import annotations
 
 import datetime
+import ipaddress
 import json
 import logging
 import os
 import platform
 import shlex
+import socket
 import stat as stat_module
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from sanctuary.tools.registry import (
     ToolPolicy,
@@ -369,10 +372,69 @@ async def _web_search(params: dict[str, Any]) -> ToolResult:
         return ToolResult(tool_name="web_search", success=False, error=str(e))
 
 
-async def _web_fetch(params: dict[str, Any]) -> ToolResult:
-    """Fetch content from a URL.
+def _ip_is_blocked(ip_str: str) -> bool:
+    """True if an IP is private/loopback/link-local/reserved/etc.
 
-    Respects proxy settings for secure browsing through gateway.
+    Link-local (169.254.0.0/16) covers the cloud metadata endpoint
+    169.254.169.254 -- a classic SSRF credential-theft target.
+    """
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return False
+    return (
+        ip.is_private or ip.is_loopback or ip.is_link_local
+        or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+    )
+
+
+def _validate_fetch_url(url: str, *, resolve: bool) -> Optional[str]:
+    """SSRF guard for web_fetch. Returns a deny reason, or None if allowed.
+
+    Blocks non-http(s) schemes and any host that is (or resolves to) a
+    private / loopback / link-local / reserved address. When ``resolve`` is
+    False (a proxy is the egress boundary and may reach names we can't), the
+    DNS check is skipped, but literal internal IPs and bad schemes are still
+    rejected.
+
+    Residual: DNS rebinding -- a name that passes here could resolve to a
+    different (internal) IP at connection time. Closing that fully requires
+    pinning the socket to the validated IP; out of scope here and noted.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return f"blocked: only http/https URLs are allowed (got '{parsed.scheme or 'none'}')"
+    host = parsed.hostname
+    if not host:
+        return "blocked: URL has no host"
+
+    try:
+        ipaddress.ip_address(host)  # host is a literal IP?
+        if _ip_is_blocked(host):
+            return f"blocked: URL targets a private/internal address ({host})"
+        return None
+    except ValueError:
+        pass  # host is a name
+
+    if not resolve:
+        return None  # proxy is the boundary; name resolution deferred to it
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as e:
+        return f"blocked: could not resolve host '{host}': {e}"
+    for info in infos:
+        if _ip_is_blocked(info[4][0]):
+            return f"blocked: '{host}' resolves to a private/internal address ({info[4][0]})"
+    return None
+
+
+async def _web_fetch(params: dict[str, Any]) -> ToolResult:
+    """Fetch content from a URL (SSRF-guarded).
+
+    Only http/https, and never internal/loopback/link-local targets -- every
+    redirect hop is validated too, so a public URL cannot bounce the request
+    to 127.0.0.1 or the cloud-metadata endpoint. Respects proxy settings.
     """
     url = params.get("url", "")
     if not url:
@@ -382,22 +444,41 @@ async def _web_fetch(params: dict[str, Any]) -> ToolResult:
 
     try:
         import httpx
-        proxy_url = _config.https_proxy or _config.http_proxy
-        async with httpx.AsyncClient(
-            follow_redirects=True, timeout=30.0, proxy=proxy_url,
-        ) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            content = resp.text[:max_bytes]
-            return ToolResult(
-                tool_name="web_fetch", success=True,
-                output={"url": str(resp.url), "status": resp.status_code, "content": content},
-            )
     except ImportError:
         return ToolResult(
             tool_name="web_fetch", success=False,
             error="httpx not installed. Run: pip install httpx",
         )
+
+    proxy_url = _config.https_proxy or _config.http_proxy
+    resolve = proxy_url is None
+    max_redirects = 5
+    current = url
+
+    try:
+        # follow_redirects=False so we validate EACH hop ourselves; blind
+        # redirect following would reopen the SSRF hole we just closed.
+        async with httpx.AsyncClient(
+            follow_redirects=False, timeout=30.0, proxy=proxy_url,
+        ) as client:
+            for _ in range(max_redirects + 1):
+                deny = _validate_fetch_url(current, resolve=resolve)
+                if deny:
+                    return ToolResult(tool_name="web_fetch", success=False, error=deny)
+                resp = await client.get(current)
+                if resp.next_request is not None:  # a redirect with a Location
+                    current = str(resp.next_request.url)
+                    continue
+                resp.raise_for_status()
+                content = resp.text[:max_bytes]
+                return ToolResult(
+                    tool_name="web_fetch", success=True,
+                    output={"url": str(resp.url), "status": resp.status_code, "content": content},
+                )
+            return ToolResult(
+                tool_name="web_fetch", success=False,
+                error=f"too many redirects (>{max_redirects})",
+            )
     except Exception as e:
         return ToolResult(tool_name="web_fetch", success=False, error=str(e))
 
