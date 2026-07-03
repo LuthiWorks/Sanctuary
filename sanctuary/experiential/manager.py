@@ -18,11 +18,13 @@ Knowledge cells participate in this same network with entity-specified topology.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from sanctuary.core.atomic_io import atomic_write_json
 from sanctuary.core.authority import AuthorityLevel, AuthorityManager
 from sanctuary.experiential.affect_cell import AffectCell, AffectCellConfig
 from sanctuary.experiential.attention_cell import AttentionCell, AttentionCellConfig
@@ -415,10 +417,12 @@ class ExperientialManager:
         return status
 
     def save(self, directory: Path):
-        """Save all cell states and registry to directory."""
+        """Save all cell states, registry, and authority levels to directory."""
         directory.mkdir(parents=True, exist_ok=True)
         # Save via registry (handles all cells uniformly)
         self._registry.save(directory)
+        # Authority is earned; earned levels must survive a restart
+        atomic_write_json(directory / "authority.json", self.authority.to_dict())
         logger.info(
             "Experiential layer saved to %s (%d cells)",
             directory,
@@ -457,6 +461,14 @@ class ExperientialManager:
         meta_path = directory / "registry_meta.pt"
         if meta_path.exists():
             self._load_knowledge_cells(directory, meta_path)
+
+        # Restore earned authority levels (older saves have no authority.json;
+        # the conservative init seeding then stands)
+        auth_path = directory / "authority.json"
+        if auth_path.exists():
+            with open(auth_path, "r", encoding="utf-8") as f:
+                self.authority.restore(json.load(f))
+            logger.info("Restored authority levels from %s", auth_path)
 
     def _load_knowledge_cells(self, directory: Path, meta_path: Path) -> None:
         """Load knowledge cells from registry metadata."""

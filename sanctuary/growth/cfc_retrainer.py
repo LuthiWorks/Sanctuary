@@ -34,6 +34,7 @@ Aligned with PLAN.md: CfC retraining from accumulated data (Phase 7).
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -259,6 +260,34 @@ class CfCDataTap:
             raise ValueError(f"Unknown cell: {cell_name}. Expected one of {list(drainers.keys())}")
         return drainers[cell_name]()
 
+    def requeue(self, cell_name: str, records: list) -> None:
+        """Return drained records to the front of the tap.
+
+        A failed retrain must not eat its training data (audit 2026-07-03,
+        item 15). Requeued records keep chronological order ahead of anything
+        recorded since the drain; the max_records cap still applies, dropping
+        the oldest on overflow.
+        """
+        buffers = {
+            "precision": self._precision_records,
+            "affect": self._affect_records,
+            "attention": self._attention_records,
+            "goal": self._goal_records,
+        }
+        if cell_name not in buffers:
+            raise ValueError(
+                f"Unknown cell: {cell_name}. Expected one of {list(buffers.keys())}"
+            )
+        buf = buffers[cell_name]
+        buf[:0] = records
+        overflow = len(buf) - self._max_records
+        if overflow > 0:
+            del buf[:overflow]
+            logger.warning(
+                "Requeue overflow for %s: dropped %d oldest records",
+                cell_name, overflow,
+            )
+
     # -- Persistence --
 
     def save(self, path: Path) -> None:
@@ -463,6 +492,7 @@ class CfCRetrainer:
             )
             return result
 
+        records: list = []
         try:
             # 1. Drain records
             records = self._data_tap.drain(cell_name)
@@ -472,15 +502,22 @@ class CfCRetrainer:
                 result.error = "No records after drain"
                 return result
 
-            # 2. Checkpoint current cell state
+            # 2. Checkpoint current cell state. A retrain with no restore
+            # point cannot be rolled back, so checkpoint failure aborts
             try:
                 checkpoint_path = self._checkpoint_cell(cell_name, cell)
                 result.checkpoint_path = str(checkpoint_path)
             except Exception as e:
-                logger.warning(
-                    "CfC checkpoint failed for %s (continuing): %s",
+                result.error = f"Checkpoint failed, retrain aborted: {e}"
+                result.completed_at = datetime.now().isoformat()
+                self._stats.total_retrains += 1
+                self._stats.failed_retrains += 1
+                self._data_tap.requeue(cell_name, records)
+                logger.error(
+                    "CfC checkpoint failed for %s; aborting retrain: %s",
                     cell_name, e,
                 )
+                return result
 
             # 3. Train
             effective_epochs = epochs or self._retrain_epochs
@@ -501,6 +538,17 @@ class CfCRetrainer:
                 epochs=effective_epochs,
                 record_type=record_type,
             )
+
+            if (
+                training_result.num_val_samples == 0
+                or not math.isfinite(training_result.final_val_loss)
+            ):
+                raise RuntimeError(
+                    f"Training produced no valid validation result "
+                    f"(val_samples={training_result.num_val_samples}, "
+                    f"val_loss={training_result.final_val_loss}); refusing "
+                    "to report success"
+                )
 
             result.training_result = training_result
             result.success = True
@@ -528,6 +576,20 @@ class CfCRetrainer:
             self._stats.total_retrains += 1
             self._stats.failed_retrains += 1
             logger.error("CfC %s retraining failed: %s", cell_name, e)
+            # A failed retrain must not eat the drained training data
+            if records:
+                self._data_tap.requeue(cell_name, records)
+            # Nor leave the cell half-trained when a checkpoint exists
+            if result.checkpoint_path:
+                try:
+                    self.restore_cell(
+                        cell_name, cell, Path(result.checkpoint_path)
+                    )
+                except Exception as restore_error:
+                    logger.error(
+                        "Rollback of %s after failed retrain also failed: %s",
+                        cell_name, restore_error,
+                    )
 
         self._history.append(result)
         return result

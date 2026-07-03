@@ -115,6 +115,16 @@ class CellStats:
             if abs(o.cfc_output - o.scaffold_output) > 0.5
         )
 
+    @property
+    def recent_nans(self) -> int:
+        """Count NaN outputs in the current window.
+
+        The demotion gate must use this, not the lifetime nan_count: a
+        cumulative counter turns one NaN ever into a permanent trip
+        (audit 2026-07-03, item 9).
+        """
+        return sum(1 for o in self.observations if o.is_nan)
+
 
 @dataclass
 class TuningDecision:
@@ -260,12 +270,15 @@ class AuthorityTuner:
 
         # -- Demotion checks (take priority) --
 
-        # NaN outputs → immediate demotion
-        if stats.nan_count > cfg.nan_tolerance:
+        # NaN outputs in the current window → immediate demotion
+        if stats.recent_nans > cfg.nan_tolerance:
             return TuningDecision(
                 cell_name=name,
                 action="demote",
-                reason=f"NaN outputs detected ({stats.nan_count} total)",
+                reason=(
+                    f"NaN outputs detected ({stats.recent_nans} in window, "
+                    f"{stats.nan_count} lifetime)"
+                ),
                 current_level=current,
             )
 

@@ -127,6 +127,27 @@ class AuthorityManager:
         """Return the full audit trail of authority changes."""
         return list(self._history)
 
+    def to_dict(self) -> dict:
+        """Serializable snapshot of levels and the audit history."""
+        return {
+            "levels": {fn: int(lvl) for fn, lvl in self._levels.items()},
+            "history": list(self._history),
+        }
+
+    def restore(self, data: dict) -> None:
+        """Restore levels and audit history from a to_dict() snapshot.
+
+        Earned promotions and safety demotions must survive a restart
+        (audit 2026-07-03, item 7). Saved history is prepended so the audit
+        trail spans restarts; current-session entries (e.g. init seeding)
+        stay at the end.
+        """
+        for function, level in data.get("levels", {}).items():
+            self._levels[function] = AuthorityLevel(level)
+        saved_history = data.get("history", [])
+        if saved_history:
+            self._history = list(saved_history) + self._history
+
     def model_has_authority(self, function: str, minimum: int = 1) -> bool:
         """Check if the entity has at least the given authority level."""
         return self.level(function) >= minimum

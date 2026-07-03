@@ -68,6 +68,10 @@ class BackupConfig:
     max_backups: int = 10
     auto_backup_interval: float = 3600.0  # seconds
     incremental: bool = True
+    # Force a full backup once a chain reaches this many incrementals. The
+    # entity's process is designed to run without restarts, so chains cannot
+    # rely on restart-resets to stay bounded (4.8 review note, 2026-07-03).
+    max_chain_length: int = 20
     s3_bucket: Optional[str] = None
     s3_prefix: str = "sanctuary-backups"
     s3_region: Optional[str] = None
@@ -196,6 +200,16 @@ class BackupManager:
             and parent is not None
             and self._last_file_checksums
         )
+
+        # Chain cap: every incremental lengthens the restore chain, so force
+        # a periodic full rather than letting the chain grow unbounded
+        if is_incremental and self._chain_length(parent) + 1 > self._config.max_chain_length:
+            logger.info(
+                "Backup chain reached %d incrementals; forcing a full backup.",
+                self._chain_length(parent),
+            )
+            self._last_file_checksums.clear()
+            is_incremental = False
 
         record = BackupRecord(
             backup_id=backup_id,
@@ -535,6 +549,21 @@ class BackupManager:
                     continue
                 files.append(file_path)
         return files
+
+    def _chain_length(self, record: BackupRecord) -> int:
+        """Number of incrementals from ``record`` back to its full base."""
+        by_id = {r.backup_id: r for r in self._history}
+        length = 0
+        current: Optional[BackupRecord] = record
+        # len(history) caps the walk so a cyclic chain cannot loop forever
+        while (
+            current is not None
+            and current.incremental
+            and length <= len(self._history)
+        ):
+            length += 1
+            current = by_id.get(current.parent_id) if current.parent_id else None
+        return length
 
     def _file_checksum(self, file_path: Path) -> str:
         """Compute SHA-256 checksum for a file."""

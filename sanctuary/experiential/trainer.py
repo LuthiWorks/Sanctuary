@@ -321,6 +321,14 @@ class CfCTrainer:
         Returns a TrainingResult with loss metrics.
         """
         train_ds, val_ds = self.prepare_data(records, record_type)
+        if len(train_ds) == 0 or len(val_ds) == 0:
+            # A degenerate split would silently yield loss=0.0 via the
+            # max(n, 1) denominators below and report a perfect result
+            raise ValueError(
+                f"Degenerate train/val split: {len(train_ds)} train / "
+                f"{len(val_ds)} val samples from {len(records)} records "
+                f"(train_split={self.train_split}). Refusing to train."
+            )
         train_loader = DataLoader(
             train_ds, batch_size=self.batch_size, shuffle=True
         )

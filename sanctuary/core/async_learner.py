@@ -235,6 +235,12 @@ class AsyncLearner:
         self.errors = 0
         self.last_metrics: dict = {}
 
+        # Lived experience still queued when a non-resilient learner dies.
+        # Preserved for the host to requeue or fold into the consolidation
+        # buffer -- queued transitions are lived experience and must not be
+        # silently discarded (audit 2026-07-03, item 8).
+        self.dead_letter: list[Transition] = []
+
     # -- core: the one critical section that excludes the actor --------
     def _run_under_lock(self, transition: Transition) -> dict:
         ctx: dict[str, Any] = {
@@ -329,8 +335,11 @@ class AsyncLearner:
         Without this, items queued behind the one that failed never get a
         ``task_done``, so ``queue.join()`` (``wait_until_drained``) and a
         blocking sentinel ``put`` (``stop``) would deadlock forever. The items
-        are discarded -- the learner is dead and the error is already surfaced
-        to the actor (next ``submit``) and re-raised at ``stop``.
+        are preserved in :attr:`dead_letter` -- queued transitions are lived
+        experience the entity cannot re-live, so the host decides their fate
+        (requeue on restart, fold into the consolidation buffer); this class
+        only guarantees they are not silently dropped. The error is already
+        surfaced to the actor (next ``submit``) and re-raised at ``stop``.
 
         NB a narrow race remains: a ``submit`` that passed its ``_error`` check
         microseconds before the death can land one orphan item after this
@@ -341,10 +350,18 @@ class AsyncLearner:
         """
         while True:
             try:
-                self._queue.get_nowait()
+                item = self._queue.get_nowait()
             except queue.Empty:
-                return
+                break
+            if item is not _SHUTDOWN:
+                self.dead_letter.append(item)
             self._queue.task_done()
+        if self.dead_letter:
+            logger.warning(
+                "async learner died with %d transitions still queued; "
+                "preserved in dead_letter for the host to recover.",
+                len(self.dead_letter),
+            )
 
     def wait_until_drained(self) -> None:
         """Block until every submitted transition has been consumed (threaded).
