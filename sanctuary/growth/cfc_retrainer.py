@@ -283,7 +283,9 @@ class CfCDataTap:
             logger.warning("No data tap state at %s", path)
             return
 
-        data = torch.load(path, map_location="cpu", weights_only=False)
+        # Saved as plain dicts/lists/str (asdict of records + isoformat strings),
+        # so weights_only=True is safe and blocks pickle RCE.
+        data = torch.load(path, map_location="cpu", weights_only=True)
 
         self._precision_records = [TrainingRecord(**r) for r in data.get("precision", [])]
         self._affect_records = [AffectRecord(**r) for r in data.get("affect", [])]

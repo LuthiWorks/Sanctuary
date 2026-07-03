@@ -179,7 +179,9 @@ class DataCollector:
         logger.info("Saved %d training records to %s", len(data), path)
 
     def load(self, path: Path):
-        data = torch.load(path, map_location="cpu", weights_only=False)
+        # Saved as a list of plain dicts (asdict of records), so weights_only=True
+        # is safe and blocks pickle RCE.
+        data = torch.load(path, map_location="cpu", weights_only=True)
         self._records = [TrainingRecord(**d) for d in data]
         logger.info("Loaded %d training records from %s", len(self._records), path)
 
@@ -217,7 +219,9 @@ class MultiFieldCollector:
         logger.info("Saved %d records to %s", len(data), path)
 
     def load(self, path: Path):
-        data = torch.load(path, map_location="cpu", weights_only=False)
+        # Saved as a list of plain dicts (asdict of records), so weights_only=True
+        # is safe and blocks pickle RCE.
+        data = torch.load(path, map_location="cpu", weights_only=True)
         self._records = [self._record_type(**d) for d in data]
         logger.info("Loaded %d records from %s", len(self._records), path)
 

@@ -142,7 +142,9 @@ class VoiceCustomizer:
         """Load voice profile from cache"""
         profile_path = self.cache_dir / f"{speaker_id}.pt"
         if profile_path.exists():
-            data = torch.load(profile_path)
+            # Profile is saved as a plain dict of str/tensor/dict-of-float/dict-of-tensor
+            # (VoiceProfile.__dict__), so weights_only=True is safe and blocks pickle RCE.
+            data = torch.load(profile_path, weights_only=True)
             profile = VoiceProfile(**data)
             self.voice_profiles[speaker_id] = profile
             return profile

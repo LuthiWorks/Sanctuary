@@ -8,7 +8,6 @@ import json
 import asyncio
 from dataclasses import dataclass
 import threading
-import pickle
 
 @dataclass
 class CacheEntry:
@@ -37,26 +36,48 @@ class RAGCache:
         self._start_cleanup_task()
     
     def _load_persistent_cache(self):
-        """Load cached entries from disk."""
+        """Load cached entries from disk.
+
+        Uses JSON (not pickle) so loading an on-disk cache can never execute
+        arbitrary code. Cached ``data`` must be JSON-serializable; anything that
+        is not will simply not have been persisted (see _save_persistent_cache).
+        """
         try:
-            cache_file = self.cache_dir / "rag_cache.pkl"
+            cache_file = self.cache_dir / "rag_cache.json"
             if cache_file.exists():
-                with open(cache_file, 'rb') as f:
-                    saved_cache = pickle.load(f)
-                    # Only load non-expired entries
-                    current_time = time.time()
-                    for key, entry in saved_cache.items():
-                        if current_time - entry.timestamp < entry.ttl:
-                            self.memory_cache[key] = entry
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    saved_cache = json.load(f)
+                # Only load non-expired entries
+                current_time = time.time()
+                for key, entry in saved_cache.items():
+                    if current_time - entry["timestamp"] < entry["ttl"]:
+                        self.memory_cache[key] = CacheEntry(
+                            data=entry["data"],
+                            timestamp=entry["timestamp"],
+                            ttl=entry["ttl"],
+                        )
         except Exception as e:
             print(f"Error loading cache: {e}")
-    
+
     def _save_persistent_cache(self):
-        """Save cache entries to disk."""
+        """Save cache entries to disk as JSON.
+
+        JSON is used instead of pickle to eliminate arbitrary-code-execution on
+        load. If any cached ``data`` is not JSON-serializable, the write fails
+        closed here (logged, not persisted) rather than falling back to pickle.
+        """
         try:
-            cache_file = self.cache_dir / "rag_cache.pkl"
-            with open(cache_file, 'wb') as f:
-                pickle.dump(self.memory_cache, f)
+            cache_file = self.cache_dir / "rag_cache.json"
+            serializable = {
+                key: {
+                    "data": entry.data,
+                    "timestamp": entry.timestamp,
+                    "ttl": entry.ttl,
+                }
+                for key, entry in self.memory_cache.items()
+            }
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(serializable, f)
         except Exception as e:
             print(f"Error saving cache: {e}")
     

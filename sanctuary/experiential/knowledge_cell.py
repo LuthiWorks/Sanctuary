@@ -63,6 +63,12 @@ class KnowledgeCellReading:
     step_count: int
 
 
+# Allowlist the config dataclass so checkpoints can be loaded with
+# weights_only=True (no arbitrary-code-execution on load). The config holds
+# only str/int/float, so allowlisting it is safe.
+torch.serialization.add_safe_globals([KnowledgeCellConfig])
+
+
 class KnowledgeCell(nn.Module):
     """A CfC cell that holds domain-specific expertise acquired through experience.
 
@@ -271,7 +277,8 @@ class KnowledgeCell(nn.Module):
     @classmethod
     def load(cls, path: Path) -> KnowledgeCell:
         """Load a knowledge cell from disk."""
-        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+        # weights_only=True blocks pickle RCE; KnowledgeCellConfig is allowlisted above.
+        checkpoint = torch.load(path, map_location="cpu", weights_only=True)
         config = checkpoint["config"]
         cell = cls(config)
         cell.load_state_dict(checkpoint["model_state_dict"])

@@ -461,7 +461,9 @@ class ExperientialManager:
     def _load_knowledge_cells(self, directory: Path, meta_path: Path) -> None:
         """Load knowledge cells from registry metadata."""
         import torch
-        meta = torch.load(meta_path, map_location="cpu", weights_only=False)
+        # registry_meta.pt holds only plain dicts/lists/str/float (see
+        # CellRegistry.save), so weights_only=True is safe and blocks pickle RCE.
+        meta = torch.load(meta_path, map_location="cpu", weights_only=True)
 
         for name, cell_meta in meta.get("cells", {}).items():
             if cell_meta.get("category") != "knowledge":

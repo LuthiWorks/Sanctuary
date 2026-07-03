@@ -55,6 +55,12 @@ class AffectReading:
     hidden_state_norm: float
 
 
+# Allowlist the config dataclass so checkpoints can be loaded with
+# weights_only=True (no arbitrary-code-execution on load). The config holds
+# only ints/str, so allowlisting it is safe.
+torch.serialization.add_safe_globals([AffectCellConfig])
+
+
 class AffectCell(nn.Module):
     """CfC cell that learns emotional dynamics from scaffold data.
 
@@ -204,7 +210,8 @@ class AffectCell(nn.Module):
 
     @classmethod
     def load(cls, path: Path) -> AffectCell:
-        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+        # weights_only=True blocks pickle RCE; AffectCellConfig is allowlisted above.
+        checkpoint = torch.load(path, map_location="cpu", weights_only=True)
         config = checkpoint.get("config", AffectCellConfig())
         cell = cls(config)
         cell.load_state_dict(checkpoint["model_state_dict"])
