@@ -57,23 +57,27 @@ class BackupManager:
         backup_dir: Path,
         retention_days: int = 30,
         compress: bool = True,
-        include_chroma: bool = True
+        include_chroma: bool = True,
+        min_keep: int = 3
     ):
         """
         Initialize backup manager.
-        
+
         Args:
             source_dir: Source directory to backup (memory files)
             backup_dir: Directory to store backups
             retention_days: Number of days to keep backups
             compress: Whether to compress backups
             include_chroma: Whether to include ChromaDB directory
+            min_keep: Newest backups always retained, regardless of age.
+                Floors at 1 so cleanup can never delete the last backup.
         """
         self.source_dir = Path(source_dir)
         self.backup_dir = Path(backup_dir)
         self.retention_days = retention_days
         self.compress = compress
         self.include_chroma = include_chroma
+        self.min_keep = max(1, min_keep)
         
         # Ensure backup directory exists
         self.backup_dir.mkdir(parents=True, exist_ok=True)
@@ -335,17 +339,21 @@ class BackupManager:
     async def cleanup_old_backups(self) -> int:
         """
         Remove backups older than retention period.
-        
+
+        Always retains the newest ``min_keep`` backups regardless of age:
+        a retention policy must never delete the only remaining copies.
+
         Returns:
             Number of backups removed
         """
         cutoff_date = datetime.utcnow() - timedelta(days=self.retention_days)
         removed_count = 0
-        
+
         with OperationContext(operation="backup_cleanup", retention_days=self.retention_days):
             try:
-                backups = self.list_backups()
-                
+                # list_backups() returns newest first
+                backups = self.list_backups()[self.min_keep:]
+
                 for backup in backups:
                     if backup["created"] < cutoff_date:
                         backup_path = Path(backup["path"])

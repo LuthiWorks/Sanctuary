@@ -407,26 +407,36 @@ class TestBackupManager:
     
     @pytest.mark.asyncio
     async def test_cleanup_old_backups(self, temp_dirs):
-        """Test cleaning up old backups."""
+        """Test cleaning up old backups (newest min_keep always survive)."""
+        import os
+        import time
+
         source_dir, backup_dir = temp_dirs
-        
+
         manager = BackupManager(
             source_dir=source_dir,
             backup_dir=backup_dir,
             retention_days=0,  # Immediate cleanup
-            compress=False
+            compress=False,
+            min_keep=1
         )
-        
-        # Create a backup
+
+        # Create a backup, plus an older stale one beyond the floor
         backup_path = await manager.create_backup()
-        
+        stale = backup_dir / "stale_backup"
+        stale.mkdir()
+        (stale / "payload.json").write_text("{}", encoding="utf-8")
+        old = time.time() - 400 * 86400
+        os.utime(stale, (old, old))
+
         assert backup_path.exists()
-        
-        # Cleanup
+
+        # Cleanup removes the stale backup but never the newest one
         removed = await manager.cleanup_old_backups()
-        
+
         assert removed == 1
-        assert not backup_path.exists()
+        assert not stale.exists()
+        assert backup_path.exists()
     
     @pytest.mark.asyncio
     async def test_restore_nonexistent_backup(self, temp_dirs):

@@ -46,10 +46,12 @@ class MindVectorDB:
         )
         
         # Initialize ChromaDB with settings
+        # allow_reset stays False: client.reset() deletes every collection on
+        # disk, and nothing in this class may ever be able to do that.
         if chroma_settings is None:
             chroma_settings = Settings(
                 anonymized_telemetry=False,
-                allow_reset=True,
+                allow_reset=False,
                 is_persistent=True
             )
         
@@ -196,13 +198,21 @@ class MindVectorDB:
         Close the vector database and release resources.
 
         This is important on Windows to release ChromaDB file locks.
+
+        Data-preserving by contract: releases file handles by stopping Chroma's
+        component system and evicting the shared-system cache entry. It must
+        NEVER call ``client.reset()``, which deletes every collection on disk.
         """
         try:
             if hasattr(self, 'client') and self.client is not None:
                 try:
-                    # Get the identifier before resetting
                     identifier = str(self.db_path)
-                    self.client.reset()
+
+                    # Stop Chroma's component system: releases the sqlite
+                    # handles that hold Windows file locks, leaves data intact
+                    system = getattr(self.client, "_system", None)
+                    if system is not None:
+                        system.stop()
 
                     # Clear ChromaDB's shared system cache
                     from chromadb.api.client import SharedSystemClient

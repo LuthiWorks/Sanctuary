@@ -522,12 +522,25 @@ class TestBackupManager:
 
     @pytest.mark.asyncio
     async def test_prune_old_backups(self, manager):
+        # Full backups so none is an ancestor of a kept one; chained
+        # incrementals are protected from pruning (see test_backup_chain.py)
+        manager._config.incremental = False
         # Create more backups than max
         for i in range(5):
             await manager.create_backup(label=f"b{i}")
         pruned = manager.prune_old_backups()
         assert pruned == 2  # 5 - 3 = 2 pruned
         assert len(manager.list_backups()) == 3
+
+    @pytest.mark.asyncio
+    async def test_prune_protects_incremental_chain(self, manager):
+        # Default config is incremental: backups 2..5 chain back to the
+        # first, so every one is load-bearing and none may be pruned
+        for i in range(5):
+            await manager.create_backup(label=f"b{i}")
+        pruned = manager.prune_old_backups()
+        assert pruned == 0
+        assert len(manager.list_backups()) == 5
 
     def test_should_auto_backup_initially(self, manager):
         manager._last_backup_time = 0.0

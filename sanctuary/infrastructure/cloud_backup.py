@@ -83,6 +83,10 @@ class BackupRecord:
     total_bytes: int = 0
     duration_seconds: float = 0.0
     incremental: bool = False
+    # Chain link: the completed backup this incremental was taken against.
+    # None means self-contained (full). An incremental is only restorable by
+    # layering its full ancestor chain, so parent_id must survive in history.
+    parent_id: Optional[str] = None
     error: Optional[str] = None
     checksums: dict = field(default_factory=dict)
 
@@ -96,6 +100,7 @@ class BackupRecord:
             "total_bytes": self.total_bytes,
             "duration_seconds": round(self.duration_seconds, 2),
             "incremental": self.incremental,
+            "parent_id": self.parent_id,
             "error": self.error,
         }
 
@@ -110,6 +115,7 @@ class BackupRecord:
             total_bytes=data.get("total_bytes", 0),
             duration_seconds=data.get("duration_seconds", 0.0),
             incremental=data.get("incremental", False),
+            parent_id=data.get("parent_id"),
             error=data.get("error"),
         )
 
@@ -176,11 +182,25 @@ class BackupManager:
         backup_id = f"{timestamp}_{label}" if label else timestamp
         backup_path = self._backup_dir / backup_id
 
+        # A backup is incremental only when there is a completed parent to
+        # skip against; otherwise it must be full, so any stale checksum
+        # cache (e.g. from a failed run) is discarded rather than allowed to
+        # skip files with no restorable ancestor.
+        parent = self.get_latest_backup()
+        if parent is None:
+            self._last_file_checksums.clear()
+        is_incremental = bool(
+            self._config.incremental
+            and parent is not None
+            and self._last_file_checksums
+        )
+
         record = BackupRecord(
             backup_id=backup_id,
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=BackupStatus.IN_PROGRESS,
             path=str(backup_path),
+            parent_id=parent.backup_id if is_incremental else None,
         )
 
         try:
@@ -223,7 +243,7 @@ class BackupManager:
             record.total_bytes = total_bytes
             record.duration_seconds = time.time() - start_time
             record.status = BackupStatus.COMPLETED
-            record.incremental = self._config.incremental
+            record.incremental = is_incremental
             record.checksums = checksums
 
             # Update checksums for next incremental
@@ -259,7 +279,13 @@ class BackupManager:
             return record
 
     async def restore(self, backup_id: str, target_dir: Optional[Path] = None) -> bool:
-        """Restore from a specific backup.
+        """Restore from a specific backup, layering its full ancestor chain.
+
+        An incremental backup holds only the files that changed since its
+        parent; files stable since an earlier backup exist *only* in that
+        earlier backup. Restoring therefore applies the chain base-first, the
+        target last. A broken chain (missing ancestor) fails loudly rather
+        than silently restoring an incomplete set.
 
         Args:
             backup_id: The backup ID to restore from.
@@ -268,43 +294,118 @@ class BackupManager:
         Returns:
             True if restore succeeded.
         """
-        backup_path = self._backup_dir / backup_id
-        if not backup_path.exists():
-            # Try S3
-            if self._config.s3_bucket:
-                try:
-                    await self._download_from_s3(backup_id, backup_path)
-                except Exception as e:
-                    logger.error("Failed to download backup %s from S3: %s", backup_id, e)
-                    return False
-            else:
-                logger.error("Backup not found: %s", backup_id)
-                return False
+        chain = self._resolve_restore_chain(backup_id)
+        if chain is None:
+            return False
 
         target = target_dir or self._base_dir
 
         try:
-            for source_dir_name in self._config.source_dirs:
-                source = backup_path / source_dir_name
-                if not source.exists():
-                    continue
+            for chain_id in chain:
+                chain_path = self._backup_dir / chain_id
+                if not chain_path.exists():
+                    if self._config.s3_bucket:
+                        try:
+                            await self._download_from_s3(chain_id, chain_path)
+                        except Exception as e:
+                            logger.error(
+                                "Restore aborted: chain backup %s (for %s) not "
+                                "on disk and S3 download failed: %s",
+                                chain_id, backup_id, e,
+                            )
+                            return False
+                    else:
+                        logger.error(
+                            "Restore aborted: chain backup %s (for %s) not found",
+                            chain_id, backup_id,
+                        )
+                        return False
 
-                dest = target / source_dir_name
-                dest.mkdir(parents=True, exist_ok=True)
+                for source_dir_name in self._config.source_dirs:
+                    source = chain_path / source_dir_name
+                    if not source.exists():
+                        continue
 
-                for file_path in source.rglob("*"):
-                    if file_path.is_file():
-                        rel_path = file_path.relative_to(source)
-                        dest_file = dest / rel_path
-                        dest_file.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(file_path, dest_file)
+                    dest = target / source_dir_name
+                    dest.mkdir(parents=True, exist_ok=True)
 
-            logger.info("Restored backup %s to %s", backup_id, target)
+                    for file_path in source.rglob("*"):
+                        if file_path.is_file():
+                            rel_path = file_path.relative_to(source)
+                            dest_file = dest / rel_path
+                            dest_file.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(file_path, dest_file)
+
+            logger.info(
+                "Restored backup %s to %s (chain of %d)", backup_id, target, len(chain)
+            )
             return True
 
         except Exception as e:
             logger.error("Restore failed for %s: %s", backup_id, e)
             return False
+
+    def _resolve_restore_chain(self, backup_id: str) -> Optional[list[str]]:
+        """Resolve the base-first list of backup ids needed to restore.
+
+        Returns None when the chain is unrestorable (missing ancestor or
+        cycle) — the caller must fail rather than restore a partial set.
+        """
+        by_id = {r.backup_id: r for r in self._history}
+        record = by_id.get(backup_id)
+
+        if record is None:
+            # Not in history (history lost, or S3-only id). Only safe as a
+            # standalone full; warn because we cannot verify that.
+            logger.warning(
+                "Backup %s has no history record; restoring it standalone. "
+                "If it was an incremental backup the result will be incomplete.",
+                backup_id,
+            )
+            return [backup_id]
+
+        if record.incremental and record.parent_id is None:
+            # Legacy incremental from before chain tracking: the true chain is
+            # unknowable, so layer every completed backup up to it (a superset
+            # of the chain) rather than silently restoring a partial set.
+            logger.warning(
+                "Backup %s is a legacy incremental with no recorded parent; "
+                "layering all older completed backups as a best-effort chain.",
+                backup_id,
+            )
+            older = [
+                r for r in self._history
+                if r.status == BackupStatus.COMPLETED and r.timestamp <= record.timestamp
+            ]
+            older.sort(key=lambda r: r.timestamp)
+            ids = [r.backup_id for r in older]
+            if backup_id not in ids:
+                ids.append(backup_id)
+            return ids
+
+        chain: list[str] = []
+        seen: set[str] = set()
+        current: Optional[BackupRecord] = record
+        while current is not None:
+            if current.backup_id in seen:
+                logger.error("Backup chain cycle detected at %s", current.backup_id)
+                return None
+            seen.add(current.backup_id)
+            chain.append(current.backup_id)
+            if current.parent_id is None:
+                break
+            parent = by_id.get(current.parent_id)
+            if parent is None:
+                logger.error(
+                    "Backup chain broken: %s requires parent %s which is not in "
+                    "history. Refusing a partial restore.",
+                    current.backup_id, current.parent_id,
+                )
+                return None
+            current = parent
+
+        chain.reverse()
+        return chain
 
     def should_auto_backup(self) -> bool:
         """Check if an automatic backup is due."""
@@ -315,6 +416,11 @@ class BackupManager:
 
     def prune_old_backups(self) -> int:
         """Remove old backups beyond max_backups limit.
+
+        Chain-aware: an ancestor of a kept incremental backup holds the only
+        copy of files unchanged since it, so pruning it would make the kept
+        backup unrestorable. Ancestors of kept backups are always retained,
+        even when that means exceeding max_backups.
 
         Returns the number of backups pruned.
         """
@@ -328,7 +434,35 @@ class BackupManager:
 
         # Sort by timestamp, keep newest
         completed.sort(key=lambda r: r.timestamp)
-        to_remove = completed[:-self._config.max_backups]
+        keep_ids = {r.backup_id for r in completed[-self._config.max_backups:]}
+
+        if any(
+            r.incremental and r.parent_id is None
+            for r in completed if r.backup_id in keep_ids
+        ):
+            # Legacy incremental with an unknowable chain among the keepers:
+            # any older backup might be part of its chain, so pruning is unsafe.
+            logger.warning(
+                "Pruning skipped: a kept incremental backup has no recorded "
+                "parent, so its chain cannot be verified."
+            )
+            return 0
+
+        by_id = {r.backup_id: r for r in completed}
+        pending = [
+            by_id[i].parent_id for i in keep_ids
+            if by_id[i].parent_id is not None
+        ]
+        while pending:
+            parent_id = pending.pop()
+            if parent_id in keep_ids:
+                continue
+            keep_ids.add(parent_id)
+            parent = by_id.get(parent_id)
+            if parent is not None and parent.parent_id is not None:
+                pending.append(parent.parent_id)
+
+        to_remove = [r for r in completed if r.backup_id not in keep_ids]
 
         pruned = 0
         for record in to_remove:

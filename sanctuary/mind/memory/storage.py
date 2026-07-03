@@ -56,10 +56,12 @@ class MemoryStorage:
                 json.dump({"journals": [], "concepts": [], "patterns": []}, f, indent=2)
         
         # Configure ChromaDB settings
+        # allow_reset stays False: client.reset() deletes every collection on
+        # disk, and nothing in this class may ever be able to do that.
         if chroma_settings is None:
             chroma_settings = Settings(
                 anonymized_telemetry=False,
-                allow_reset=True,
+                allow_reset=False,
                 is_persistent=True
             )
         
@@ -360,6 +362,10 @@ class MemoryStorage:
         Close the storage backend and release resources.
 
         This is especially important on Windows where ChromaDB holds file locks.
+
+        Data-preserving by contract: releases file handles by stopping Chroma's
+        component system and evicting the shared-system cache entry. It must
+        NEVER call ``client.reset()``, which deletes every collection on disk.
         """
         try:
             # Clear collection references
@@ -367,12 +373,15 @@ class MemoryStorage:
             self.semantic_memory = None
             self.procedural_memory = None
 
-            # Reset client if allowed (releases file handles)
             if self.client is not None:
                 try:
-                    # Get the identifier before resetting
                     identifier = str(self.persistence_dir)
-                    self.client.reset()
+
+                    # Stop Chroma's component system: releases the sqlite
+                    # handles that hold Windows file locks, leaves data intact
+                    system = getattr(self.client, "_system", None)
+                    if system is not None:
+                        system.stop()
 
                     # Clear ChromaDB's shared system cache
                     from chromadb.api.client import SharedSystemClient
