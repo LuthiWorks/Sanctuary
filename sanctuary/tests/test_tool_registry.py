@@ -514,14 +514,14 @@ class TestShell:
 
     @pytest.mark.asyncio
     async def test_simple_command(self):
-        cmd = "echo hello" if platform.system() != "Windows" else "echo hello"
-        result = await _shell_command({"command": cmd})
+        # echo / exit are shell builtins, so exercise the explicit shell path.
+        result = await _shell_command({"command": "echo hello", "use_shell": True})
         assert result.success
         assert "hello" in result.output["stdout"]
 
     @pytest.mark.asyncio
     async def test_failing_command(self):
-        result = await _shell_command({"command": "exit 1"})
+        result = await _shell_command({"command": "exit 1", "use_shell": True})
         assert not result.success
         assert result.output["returncode"] == 1
 

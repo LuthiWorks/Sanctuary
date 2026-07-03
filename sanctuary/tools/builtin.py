@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import platform
+import shlex
 import stat as stat_module
 import subprocess
 import sys
@@ -468,9 +469,12 @@ async def _run_code_docker(params: dict[str, Any]) -> ToolResult:
         result = subprocess.run(
             [
                 "docker", "run", "--rm",
-                "--network=none",  # No network access from sandbox
-                "--memory=256m",   # Memory limit
-                "--cpus=1",        # CPU limit
+                "--network=none",   # No network access from sandbox
+                "--memory=256m",    # Memory limit
+                "--cpus=1",         # CPU limit
+                "--pids-limit=256",  # Cap processes -- defeats fork bombs
+                "--cap-drop=ALL",   # Drop all Linux capabilities
+                "--security-opt=no-new-privileges",  # No setuid escalation
                 image,
             ] + cmd,
             capture_output=True,
@@ -500,17 +504,43 @@ async def _run_code_docker(params: dict[str, Any]) -> ToolResult:
 
 
 async def _shell_command(params: dict[str, Any]) -> ToolResult:
-    """Execute a shell command."""
+    """Run a program (safe by default) or a full shell command (opt-in).
+
+    Safe mode (default): the command is tokenized into argv and run WITHOUT a
+    shell, so shell metacharacters are inert -- ``foo; rm -rf ~``, ``a | b``,
+    ``$(...)`` and ``&& other`` do not chain, pipe, or substitute; the extra
+    tokens are passed as literal arguments. Tokenizing is POSIX-style, so on
+    Windows prefer forward slashes in paths (or set ``use_shell``).
+
+    Shell mode (``use_shell: true``): the original ``shell=True`` behavior --
+    full shell interpretation. Deliberately opt-in; combined with the tool's
+    gated status this keeps arbitrary-shell power available but never the
+    silent default.
+    """
     command = params.get("command", "")
     if not command:
         return ToolResult(tool_name="shell", success=False, error="No command provided")
 
     timeout = params.get("timeout", 30)
+    use_shell = bool(params.get("use_shell", False))
+
+    if use_shell:
+        popen_args: Any = command
+    else:
+        try:
+            popen_args = shlex.split(command)
+        except ValueError as e:
+            return ToolResult(
+                tool_name="shell", success=False,
+                error=f"could not parse command (unbalanced quotes?): {e}",
+            )
+        if not popen_args:
+            return ToolResult(tool_name="shell", success=False, error="No command provided")
 
     try:
         result = subprocess.run(
-            command,
-            shell=True,
+            popen_args,
+            shell=use_shell,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -1208,8 +1238,16 @@ def create_default_registry(
     # System (gated)
     registry.register(
         name="shell",
-        description="Execute a shell command",
-        parameters={"command": "Shell command to execute", "timeout": "Timeout in seconds (default 30)"},
+        description=(
+            "Run a program with arguments. By default the command is run "
+            "WITHOUT a shell (metacharacters like ; | && $() are not "
+            "interpreted); pass use_shell=true for full shell interpretation."
+        ),
+        parameters={
+            "command": "Program and arguments to run",
+            "timeout": "Timeout in seconds (default 30)",
+            "use_shell": "Interpret via the system shell (default false)",
+        },
         execute=_shell_command,
         safety=ToolSafety.GATED,
         category="system",
