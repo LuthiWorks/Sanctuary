@@ -11,6 +11,8 @@ import chromadb
 from chromadb.config import Settings
 import json
 import logging
+
+from sanctuary.core.atomic_io import atomic_write_json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -52,8 +54,9 @@ class MemoryStorage:
         # Initialize mind file if it doesn't exist
         if not self.mind_file.exists():
             logger.info("Creating new mind file...")
-            with open(self.mind_file, 'w', encoding='utf-8') as f:
-                json.dump({"journals": [], "concepts": [], "patterns": []}, f, indent=2)
+            atomic_write_json(
+                self.mind_file, {"journals": [], "concepts": [], "patterns": []}
+            )
         
         # Configure ChromaDB settings
         # allow_reset stays False: client.reset() deletes every collection on
@@ -209,11 +212,11 @@ class MemoryStorage:
             
             # Add the new experience
             current_mind['journals'].append(new_data)
-            
-            # Save the updated mind file
-            with open(self.mind_file, 'w', encoding='utf-8') as f:
-                json.dump(current_mind, f, indent=2)
-                
+
+            # Save the updated mind file (atomic: crash mid-write must not
+            # truncate the previous good copy)
+            atomic_write_json(self.mind_file, current_mind)
+
             logger.info("Mind file updated successfully")
         except Exception as e:
             logger.error(f"Failed to update mind file: {e}")

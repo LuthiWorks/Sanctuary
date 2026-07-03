@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from sanctuary.core.atomic_io import atomic_write_json
 from sanctuary.environment.room import Room, EnvironmentObject
 
 logger = logging.getLogger(__name__)
@@ -159,11 +160,11 @@ class DigitalSpace:
         return space
 
     def save(self, path: str | Path) -> None:
-        """Save the space to a JSON file."""
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
-            json.dump(self.to_dict(), f, indent=2, default=str)
+        """Save the space to a JSON file atomically.
+
+        Raises PersistenceError on failure.
+        """
+        atomic_write_json(path, self.to_dict(), default=str)
         logger.info("Space saved to %s", path)
 
     @classmethod

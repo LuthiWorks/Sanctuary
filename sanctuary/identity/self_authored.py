@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
+from sanctuary.core.atomic_io import append_jsonl
+
 logger = logging.getLogger(__name__)
 
 
@@ -492,12 +494,12 @@ class SelfAuthoredIdentity:
         return change
 
     def _append_to_file(self, change: IdentityChange) -> None:
-        """Append a single change record as a JSON line."""
-        try:
-            with open(self._file_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(change.to_dict(), ensure_ascii=False) + "\n")
-        except Exception as e:
-            logger.error("Failed to persist identity change %s: %s", change.id, e)
+        """Append a single change record as a JSON line, fsync'd.
+
+        Raises PersistenceError on failure — a self-authored identity change
+        that was never persisted must not report success.
+        """
+        append_jsonl(self._file_path, change.to_dict())
 
     def _load_existing(self) -> None:
         """Load existing identity change history and reconstruct current state."""

@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from sanctuary.core.atomic_io import atomic_write_json
 from sanctuary.core.authority import AuthorityLevel, AuthorityManager
 from sanctuary.core.schema import (
     CognitiveInput,
@@ -304,12 +305,12 @@ class AwakeningSequence:
         return self._record
 
     def _save_record(self) -> None:
-        """Persist the awakening record."""
-        try:
-            with open(self._marker_path, "w", encoding="utf-8") as f:
-                json.dump(self._record.to_dict(), f, indent=2)
-        except Exception as e:
-            logger.error("Failed to save awakening record: %s", e)
+        """Persist the awakening record atomically.
+
+        Raises PersistenceError on failure — the awakening record is
+        identity-critical, and a failed save must never look like success.
+        """
+        atomic_write_json(self._marker_path, self._record.to_dict())
 
     def _load_record(self) -> AwakeningRecord:
         """Load the awakening record from disk."""

@@ -26,6 +26,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
+from sanctuary.core.atomic_io import atomic_write_json
+
 logger = logging.getLogger(__name__)
 
 
@@ -249,10 +251,9 @@ class BackupManager:
             # Update checksums for next incremental
             self._last_file_checksums.update(checksums)
 
-            # Write metadata file
+            # Write metadata file (atomic; failure marks the backup FAILED)
             meta_file = backup_path / "backup_meta.json"
-            with open(meta_file, "w", encoding="utf-8") as f:
-                json.dump(record.to_dict(), f, indent=2)
+            atomic_write_json(meta_file, record.to_dict())
 
             self._history.append(record)
             self._last_backup_time = time.time()
@@ -274,7 +275,12 @@ class BackupManager:
             record.error = str(e)
             record.duration_seconds = time.time() - start_time
             self._history.append(record)
-            self._save_history()
+            try:
+                self._save_history()
+            except Exception as history_error:
+                # Don't mask the original failure; the FAILED record is at
+                # least in memory and the next successful save persists it
+                logger.error("Could not persist FAILED record: %s", history_error)
             logger.error("Backup failed: %s", e)
             return record
 
@@ -557,12 +563,14 @@ class BackupManager:
             logger.warning("Failed to load backup history: %s", e)
 
     def _save_history(self) -> None:
-        """Persist backup history to disk."""
-        try:
-            with open(self._history_file, "w", encoding="utf-8") as f:
-                json.dump([r.to_dict() for r in self._history], f, indent=2)
-        except Exception as e:
-            logger.warning("Failed to save backup history: %s", e)
+        """Persist backup history to disk atomically.
+
+        Raises PersistenceError on failure: history holds the chain links
+        (parent_id), and losing it silently makes incrementals unrestorable.
+        """
+        atomic_write_json(
+            self._history_file, [r.to_dict() for r in self._history]
+        )
 
     async def _upload_to_s3(self, backup_path: Path, backup_id: str) -> None:
         """Upload a backup directory to S3."""

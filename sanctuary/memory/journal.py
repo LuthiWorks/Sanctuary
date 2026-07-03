@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
+from sanctuary.core.atomic_io import append_jsonl
+
 logger = logging.getLogger(__name__)
 
 
@@ -178,12 +180,12 @@ class Journal:
         return list(self._entries)
 
     def _append_to_file(self, entry: JournalEntry) -> None:
-        """Append a single entry as a JSON line."""
-        try:
-            with open(self._file_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry.to_dict(), ensure_ascii=False) + "\n")
-        except Exception as e:
-            logger.error("Failed to persist journal entry %s: %s", entry.id, e)
+        """Append a single entry as a JSON line, fsync'd.
+
+        Raises PersistenceError on failure — a journal entry that was never
+        persisted must not report success.
+        """
+        append_jsonl(self._file_path, entry.to_dict())
 
     def _load_existing(self) -> None:
         """Load existing entries from the JSONL file."""

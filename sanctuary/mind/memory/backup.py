@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 import json
 
+from sanctuary.core.atomic_io import atomic_write_json
+
 from ..exceptions import MemoryError
 from ..logging_config import get_logger, OperationContext
 
@@ -149,14 +151,13 @@ class BackupManager:
                 if metadata:
                     metadata_file = self.backup_dir / "metadata.json"
                     try:
-                        with open(metadata_file, 'w') as f:
-                            json.dump({
-                                **metadata,
-                                "backup_name": backup_name,
-                                "timestamp": datetime.utcnow().isoformat(),
-                                "source_dir": str(self.source_dir)
-                            }, f, indent=2)
-                        
+                        atomic_write_json(metadata_file, {
+                            **metadata,
+                            "backup_name": backup_name,
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "source_dir": str(self.source_dir)
+                        })
+
                         tar.add(metadata_file, arcname=f"{backup_name}/metadata.json")
                     finally:
                         if metadata_file.exists():
@@ -181,13 +182,12 @@ class BackupManager:
             # Add metadata
             if metadata:
                 metadata_file = backup_path / "metadata.json"
-                with open(metadata_file, 'w') as f:
-                    json.dump({
-                        **metadata,
-                        "backup_name": backup_path.name,
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "source_dir": str(self.source_dir)
-                    }, f, indent=2)
+                atomic_write_json(metadata_file, {
+                    **metadata,
+                    "backup_name": backup_path.name,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "source_dir": str(self.source_dir)
+                })
         
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, _copy_dir)

@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from sanctuary.core.atomic_io import atomic_write_json
 from sanctuary.environment.room import EnvironmentObject
 from sanctuary.environment.space import DigitalSpace
 
@@ -91,8 +92,7 @@ class SpacePersistence:
                         "object": obj.model_dump(mode="json"),
                     }
 
-        with open(self._creations_path, "w") as f:
-            json.dump(creations, f, indent=2, default=str)
+        atomic_write_json(self._creations_path, creations, default=str)
 
     # ------------------------------------------------------------------
     # Load
