@@ -24,10 +24,22 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import time
 from typing import Any, Optional
+
+
+def _peer_is_loopback(writer: asyncio.StreamWriter) -> bool:
+    """True if the connecting client is on a loopback address."""
+    peer = writer.get_extra_info("peername")
+    if not peer:
+        return False
+    try:
+        return ipaddress.ip_address(peer[0]).is_loopback
+    except (ValueError, IndexError):
+        return False
 
 logger = logging.getLogger(__name__)
 
@@ -111,13 +123,20 @@ class HealthServer:
                 if line in (b"\r\n", b"\n", b""):
                     break
 
-            # Route
+            # Route. /health is open (liveness); /status and /metrics expose
+            # detailed internal state, so they are served only to loopback
+            # peers -- detailed internals never leave the host, even on a
+            # 0.0.0.0 bind. (This server has no token system; authorized
+            # remote monitoring goes through the WS server's /status.)
             if method == "GET" and path == "/health":
                 await self._handle_health(writer)
-            elif method == "GET" and path == "/status":
-                await self._handle_status(writer)
-            elif method == "GET" and path == "/metrics":
-                await self._handle_metrics(writer)
+            elif method == "GET" and path in ("/status", "/metrics"):
+                if not _peer_is_loopback(writer):
+                    await self._send_response(writer, 403, {"error": "forbidden"})
+                elif path == "/status":
+                    await self._handle_status(writer)
+                else:
+                    await self._handle_metrics(writer)
             else:
                 await self._send_response(writer, 404, {"error": "Not found"})
 

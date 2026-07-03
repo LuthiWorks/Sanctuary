@@ -141,6 +141,15 @@ def _is_loopback_host(host: str) -> bool:
 DEFAULT_TOKENS_PATH = Path("sanctuary/data/ws_tokens.json")
 AUTH_TIMEOUT_SECONDS = 10.0
 WS_CLOSE_CODE_UNAUTHORIZED = 4401
+WS_CLOSE_CODE_TRY_LATER = 1013  # RFC 6455 "try again later"
+
+# Resource caps (DoS defense). Without these an attacker in legacy/unauth mode
+# could open unbounded connections (each broadcast iterates all of them) or
+# inject arbitrarily large percept content (the percept QUEUE is capped, but
+# per-item size was not).
+MAX_WS_CLIENTS = 64        # concurrent GUI (/ws) clients
+MAX_WORLD_CLIENTS = 16     # concurrent world (/ws/world) clients
+MAX_MESSAGE_CHARS = 100_000  # per injected message / visitor-chat percept
 
 
 class SanctuaryWebServer:
@@ -387,6 +396,16 @@ class SanctuaryWebServer:
         if profile is None:
             return ws
 
+        if len(self._clients) >= MAX_WS_CLIENTS:
+            logger.warning(
+                "Refusing /ws connection: at capacity (%d)", MAX_WS_CLIENTS
+            )
+            await self._send_ws(ws, {
+                "type": "error", "content": "server at connection capacity",
+            })
+            await ws.close(code=WS_CLOSE_CODE_TRY_LATER)
+            return ws
+
         self._clients.add(ws)
         logger.info(
             "WebSocket client connected (total: %d, profile: %s)",
@@ -478,6 +497,12 @@ class SanctuaryWebServer:
             # Coerce defensively: a non-string content must not crash the
             # connection via .strip() (unvalidated client input).
             content = str(data.get("content", "")).strip()
+            if len(content) > MAX_MESSAGE_CHARS:
+                await self._send_ws(ws, {
+                    "type": "error",
+                    "content": f"message too long (max {MAX_MESSAGE_CHARS} chars)",
+                })
+                return
             if content and self._runner:
                 self._runner.inject_text(content, source="user:desktop")
                 logger.debug("User input injected: %s", content[:100])
@@ -531,6 +556,17 @@ class SanctuaryWebServer:
         # still receive the (privacy-gated) state broadcasts.
         profile = await self._authenticate_ws(ws, channel="/ws/world")
         if profile is None:
+            return ws
+
+        if len(self._world_clients) >= MAX_WORLD_CLIENTS:
+            logger.warning(
+                "Refusing /ws/world connection: at capacity (%d)",
+                MAX_WORLD_CLIENTS,
+            )
+            await self._send_ws(ws, {
+                "type": "error", "content": "server at connection capacity",
+            })
+            await ws.close(code=WS_CLOSE_CODE_TRY_LATER)
             return ws
 
         self._world_clients.add(ws)
@@ -695,6 +731,8 @@ class SanctuaryWebServer:
         content = str(data.get("content", "")).strip()
         if not content:
             return
+        if len(content) > MAX_MESSAGE_CHARS:
+            content = content[:MAX_MESSAGE_CHARS]  # bound percept content size
         from sanctuary.core.schema import Percept
         try:
             self._runner.sensorium.inject_percept(
@@ -1055,8 +1093,34 @@ class SanctuaryWebServer:
 
         return web.json_response(body, status=200 if healthy else 503)
 
+    def _status_request_authorized(self, request: web.Request) -> bool:
+        """Gate the detailed /status and /metrics endpoints.
+
+        Allowed for a loopback peer (local monitoring / the in-container Docker
+        healthcheck) OR a Bearer/query token with the view_status capability
+        (authorized remote monitoring). /health stays open. This closes the
+        unauthenticated internal-state leak on a network-facing bind.
+        """
+        remote = request.remote
+        try:
+            if remote and ipaddress.ip_address(remote).is_loopback:
+                return True
+        except ValueError:
+            pass
+        if not self._tokens:
+            return False  # no token system: only loopback may read details
+        auth = request.headers.get("Authorization", "")
+        if auth[:7].lower() == "bearer ":
+            token = auth[7:].strip()
+        else:
+            token = request.query.get("token")
+        profile = self._tokens.get(token) if token else None
+        return _profile_has_cap(profile, CAP_VIEW_STATUS)
+
     async def _handle_status(self, request: web.Request) -> web.Response:
-        """GET /status — detailed system status."""
+        """GET /status — detailed system status (authorized only)."""
+        if not self._status_request_authorized(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
         status: dict[str, Any] = {
             "uptime_seconds": round(time.monotonic() - self._start_time, 1),
             "ws_clients": len(self._clients),
@@ -1078,7 +1142,9 @@ class SanctuaryWebServer:
         return web.json_response(status)
 
     async def _handle_metrics(self, request: web.Request) -> web.Response:
-        """GET /metrics — resource usage metrics."""
+        """GET /metrics — resource usage metrics (authorized only)."""
+        if not self._status_request_authorized(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
         metrics: dict[str, Any] = {"ws_clients": len(self._clients)}
         if self._runner:
             metrics["cycle_count"] = self._runner.cycle_count

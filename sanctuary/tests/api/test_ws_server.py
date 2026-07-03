@@ -475,3 +475,37 @@ class TestWorldWebSocket:
                     await world.close()
         finally:
             await server.stop()
+
+
+# ---------------------------------------------------------------------------
+# Tests: DoS connection cap
+# ---------------------------------------------------------------------------
+
+
+class _Dummy:
+    """Weak-referenceable stand-in for a connected client."""
+
+
+class TestConnectionCap:
+    """The server refuses new connections past its capacity."""
+
+    @pytest.mark.asyncio
+    async def test_gui_connection_cap_refuses_over_limit(self, booted_runner, monkeypatch):
+        from sanctuary.api import ws_server as W
+        monkeypatch.setattr(W, "MAX_WS_CLIENTS", 1)
+        port = next_port()
+        server = SanctuaryWebServer(runner=booted_runner, port=port)
+        await server.start()
+        # Fill to capacity with a dummy client (kept referenced so the
+        # WeakSet retains it).
+        dummy = _Dummy()
+        server._clients.add(dummy)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(f"http://localhost:{port}/ws") as ws:
+                    msg = await asyncio.wait_for(ws.receive(), timeout=5.0)
+                    data = json.loads(msg.data)
+                    assert data["type"] == "error"
+                    assert "capacity" in data["content"]
+        finally:
+            await server.stop()

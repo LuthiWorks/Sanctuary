@@ -302,3 +302,72 @@ def test_loopback_bind_without_tokens_allowed(monkeypatch):
     monkeypatch.delenv("SANCTUARY_WS_AUTH_REQUIRED", raising=False)
     s = SanctuaryWebServer(runner=None, host="127.0.0.1")
     assert s._auth_required is False
+
+
+# ---------------------------------------------------------------------------
+# HTTP /status + /metrics authorization (loopback peer OR view_status token)
+# ---------------------------------------------------------------------------
+
+
+class _FakeReq:
+    def __init__(self, remote, headers=None, query=None):
+        self.remote = remote
+        self.headers = headers or {}
+        self.query = query or {}
+
+
+def test_status_auth_loopback_allowed(monkeypatch):
+    s = _server(monkeypatch)
+    assert s._status_request_authorized(_FakeReq("127.0.0.1")) is True
+    assert s._status_request_authorized(_FakeReq("::1")) is True
+
+
+def test_status_auth_nonloopback_without_token_denied(monkeypatch):
+    s = _server(monkeypatch)  # no tokens configured
+    assert s._status_request_authorized(_FakeReq("8.8.8.8")) is False
+
+
+def test_status_auth_nonloopback_token(monkeypatch):
+    s = _server(monkeypatch)
+    s._tokens = {
+        "good": {"name": "monitor", "permissions": "view_chat"},  # has view_status
+        "bad": {"name": "guest", "permissions": "chat_only"},     # lacks it
+    }
+    ok_hdr = _FakeReq("8.8.8.8", headers={"Authorization": "Bearer good"})
+    ok_qry = _FakeReq("8.8.8.8", query={"token": "good"})
+    bad_tier = _FakeReq("8.8.8.8", headers={"Authorization": "Bearer bad"})
+    no_creds = _FakeReq("8.8.8.8")
+    assert s._status_request_authorized(ok_hdr) is True
+    assert s._status_request_authorized(ok_qry) is True
+    assert s._status_request_authorized(bad_tier) is False
+    assert s._status_request_authorized(no_creds) is False
+
+
+# ---------------------------------------------------------------------------
+# Per-message content cap (DoS defense)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_oversized_message_rejected(monkeypatch):
+    from sanctuary.api import ws_server as W
+    runner = _FakeRunner()
+    s = _server(monkeypatch, runner)
+    ws = _FakeWS()
+    huge = "x" * (W.MAX_MESSAGE_CHARS + 1)
+    await s._handle_client_message(
+        ws, json.dumps({"type": "message", "content": huge}), _profile("full")
+    )
+    assert runner.injected == []  # not injected
+    assert any("too long" in m.get("content", "") for m in ws.sent)
+
+
+@pytest.mark.asyncio
+async def test_normal_message_still_injected(monkeypatch):
+    runner = _FakeRunner()
+    s = _server(monkeypatch, runner)
+    ws = _FakeWS()
+    await s._handle_client_message(
+        ws, json.dumps({"type": "message", "content": "hello"}), _profile("full")
+    )
+    assert runner.injected == [("hello", "user:desktop")]
