@@ -147,9 +147,10 @@ WS_CLOSE_CODE_TRY_LATER = 1013  # RFC 6455 "try again later"
 # could open unbounded connections (each broadcast iterates all of them) or
 # inject arbitrarily large percept content (the percept QUEUE is capped, but
 # per-item size was not).
-MAX_WS_CLIENTS = 64        # concurrent GUI (/ws) clients
-MAX_WORLD_CLIENTS = 16     # concurrent world (/ws/world) clients
+MAX_WS_CLIENTS = 64        # concurrent GUI (/ws) connections (incl. handshaking)
+MAX_WORLD_CLIENTS = 16     # concurrent world (/ws/world) connections
 MAX_MESSAGE_CHARS = 100_000  # per injected message / visitor-chat percept
+MAX_WS_FRAME_BYTES = 1_048_576  # cap a single inbound WS frame (parse-cost bound)
 
 
 class SanctuaryWebServer:
@@ -208,11 +209,24 @@ class SanctuaryWebServer:
             logger.info(
                 "WebSocket auth enabled — %d token(s) loaded", len(self._tokens)
             )
+        # Trust a loopback PEER as authorized for /status & /metrics. True by
+        # default (local dev / in-container healthcheck). Set
+        # SANCTUARY_TRUST_LOOPBACK=false when a LOCAL reverse proxy fronts this
+        # server -- otherwise every proxied request appears to come from
+        # 127.0.0.1 and the loopback shortcut would open /status to everyone.
+        self._trust_loopback = (
+            os.environ.get("SANCTUARY_TRUST_LOOPBACK", "true").lower() != "false"
+        )
         self._runner_obj: Optional[web.AppRunner] = None
         self._site: Optional[web.TCPSite] = None
         self._start_time = time.monotonic()
         self._clients: weakref.WeakSet = weakref.WeakSet()
         self._world_clients: weakref.WeakSet = weakref.WeakSet()
+        # Live connection counts INCLUDING those still in the auth handshake,
+        # so a slow/never-completing handshake cannot exhaust us (the client
+        # WeakSets only hold post-auth connections).
+        self._gui_conns = 0
+        self._world_conns = 0
         # command_id -> Future that resolves when Godot replies with a
         # matching command_result. Populated only for tools that need
         # the result data (e.g. get_scene_state); other tools fire-and-
@@ -387,16 +401,14 @@ class SanctuaryWebServer:
 
     async def _handle_websocket(self, request: web.Request) -> web.WebSocketResponse:
         """Handle a WebSocket connection from the desktop app."""
-        ws = web.WebSocketResponse()
+        ws = web.WebSocketResponse(max_msg_size=MAX_WS_FRAME_BYTES)
         await ws.prepare(request)
 
-        # Authenticate before accepting any input or sending state.
-        # Returns None on failure (connection already closed).
-        profile = await self._authenticate_ws(ws, channel="/ws")
-        if profile is None:
-            return ws
-
-        if len(self._clients) >= MAX_WS_CLIENTS:
+        # Capacity check BEFORE auth, against the live connection count (which
+        # includes connections still in the handshake) -- otherwise a slow
+        # handshake that never completes would never be counted and the cap
+        # could be bypassed.
+        if self._gui_conns >= MAX_WS_CLIENTS:
             logger.warning(
                 "Refusing /ws connection: at capacity (%d)", MAX_WS_CLIENTS
             )
@@ -406,30 +418,37 @@ class SanctuaryWebServer:
             await ws.close(code=WS_CLOSE_CODE_TRY_LATER)
             return ws
 
-        self._clients.add(ws)
-        logger.info(
-            "WebSocket client connected (total: %d, profile: %s)",
-            len(self._clients), profile.get("name", "<anonymous>"),
-        )
+        self._gui_conns += 1
+        try:
+            # Authenticate before accepting any input or sending state.
+            # Returns None on failure (connection already closed).
+            profile = await self._authenticate_ws(ws, channel="/ws")
+            if profile is None:
+                return ws
 
-        # Send initial status
-        await self._send_ws(ws, {
-            "type": "status",
-            "status": "connected",
-            "message": "Connected to Sanctuary",
-        })
+            self._clients.add(ws)
+            logger.info(
+                "WebSocket client connected (total: %d, profile: %s)",
+                len(self._clients), profile.get("name", "<anonymous>"),
+            )
 
-        # Send boot status if runner is available
-        if self._runner:
-            booted = getattr(self._runner, "_booted", False)
-            status = "booted" if booted else "booting"
+            # Send initial status
             await self._send_ws(ws, {
                 "type": "status",
-                "status": status,
-                "message": f"Sanctuary is {status} (cycles: {self._runner.cycle_count})",
+                "status": "connected",
+                "message": "Connected to Sanctuary",
             })
 
-        try:
+            # Send boot status if runner is available
+            if self._runner:
+                booted = getattr(self._runner, "_booted", False)
+                status = "booted" if booted else "booting"
+                await self._send_ws(ws, {
+                    "type": "status",
+                    "status": status,
+                    "message": f"Sanctuary is {status} (cycles: {self._runner.cycle_count})",
+                })
+
             async for msg in ws:
                 if msg.type == WSMsgType.TEXT:
                     await self._handle_client_message(ws, msg.data, profile)
@@ -438,6 +457,7 @@ class SanctuaryWebServer:
                         "WebSocket error: %s", ws.exception()
                     )
         finally:
+            self._gui_conns -= 1
             self._clients.discard(ws)
             logger.info(
                 "WebSocket client disconnected (remaining: %d)",
@@ -543,22 +563,12 @@ class SanctuaryWebServer:
         Separate from the GUI ``/ws`` endpoint so the world's high-frequency
         state stream and the GUI's user-facing messages don't share a queue.
         """
-        ws = web.WebSocketResponse()
+        ws = web.WebSocketResponse(max_msg_size=MAX_WS_FRAME_BYTES)
         await ws.prepare(request)
 
-        # Authenticate before accepting any inbound scene-state or
-        # command_result messages — the world client's input is just as
-        # security-sensitive as the GUI's, even though it's machine-to-
-        # machine. The profile is enforced per-message in
-        # _handle_world_message: writing the entity's perceived world
-        # requires the world_authority capability (full tier). Connecting is
-        # allowed for any authenticated client so a view-only observer can
-        # still receive the (privacy-gated) state broadcasts.
-        profile = await self._authenticate_ws(ws, channel="/ws/world")
-        if profile is None:
-            return ws
-
-        if len(self._world_clients) >= MAX_WORLD_CLIENTS:
+        # Capacity check BEFORE auth, against the live count (incl. handshaking
+        # connections) so a slow handshake cannot bypass the cap.
+        if self._world_conns >= MAX_WORLD_CLIENTS:
             logger.warning(
                 "Refusing /ws/world connection: at capacity (%d)",
                 MAX_WORLD_CLIENTS,
@@ -569,21 +579,34 @@ class SanctuaryWebServer:
             await ws.close(code=WS_CLOSE_CODE_TRY_LATER)
             return ws
 
-        self._world_clients.add(ws)
-        logger.info(
-            "World client connected (total: %d, profile: %s)",
-            len(self._world_clients), profile.get("name", "<anonymous>"),
-        )
-
-        # Send a hello so the client knows the channel is live before the
-        # next cycle's state broadcast arrives.
-        await self._send_ws(ws, {
-            "type": "status",
-            "status": "connected",
-            "message": "Connected to Sanctuary world channel",
-        })
-
+        self._world_conns += 1
         try:
+            # Authenticate before accepting any inbound scene-state or
+            # command_result messages — the world client's input is just as
+            # security-sensitive as the GUI's, even though it's machine-to-
+            # machine. The profile is enforced per-message in
+            # _handle_world_message: writing the entity's perceived world
+            # requires the world_authority capability (full tier). Connecting is
+            # allowed for any authenticated client so a view-only observer can
+            # still receive the (privacy-gated) state broadcasts.
+            profile = await self._authenticate_ws(ws, channel="/ws/world")
+            if profile is None:
+                return ws
+
+            self._world_clients.add(ws)
+            logger.info(
+                "World client connected (total: %d, profile: %s)",
+                len(self._world_clients), profile.get("name", "<anonymous>"),
+            )
+
+            # Send a hello so the client knows the channel is live before the
+            # next cycle's state broadcast arrives.
+            await self._send_ws(ws, {
+                "type": "status",
+                "status": "connected",
+                "message": "Connected to Sanctuary world channel",
+            })
+
             async for msg in ws:
                 if msg.type == WSMsgType.TEXT:
                     await self._handle_world_message(ws, msg.data, profile)
@@ -592,6 +615,7 @@ class SanctuaryWebServer:
                         "World WebSocket error: %s", ws.exception()
                     )
         finally:
+            self._world_conns -= 1
             self._world_clients.discard(ws)
             logger.info(
                 "World client disconnected (remaining: %d)",
@@ -1102,11 +1126,12 @@ class SanctuaryWebServer:
         unauthenticated internal-state leak on a network-facing bind.
         """
         remote = request.remote
-        try:
-            if remote and ipaddress.ip_address(remote).is_loopback:
-                return True
-        except ValueError:
-            pass
+        if self._trust_loopback:
+            try:
+                if remote and ipaddress.ip_address(remote).is_loopback:
+                    return True
+            except ValueError:
+                pass
         if not self._tokens:
             return False  # no token system: only loopback may read details
         auth = request.headers.get("Authorization", "")

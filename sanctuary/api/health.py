@@ -27,6 +27,7 @@ import asyncio
 import ipaddress
 import json
 import logging
+import os
 import time
 from typing import Any, Optional
 
@@ -75,6 +76,14 @@ class HealthServer:
         self._port = port
         self._server: Optional[asyncio.Server] = None
         self._start_time = time.monotonic()
+        # Trust a loopback peer for /status & /metrics. Set
+        # SANCTUARY_TRUST_LOOPBACK=false behind a LOCAL reverse proxy (which
+        # would make every request appear loopback). This server has no token
+        # fallback, so with loopback untrusted the detailed endpoints fail
+        # closed (403) -- authorized remote monitoring goes via the WS server.
+        self._trust_loopback = (
+            os.environ.get("SANCTUARY_TRUST_LOOPBACK", "true").lower() != "false"
+        )
 
     async def start(self) -> None:
         """Start the health check server."""
@@ -131,7 +140,7 @@ class HealthServer:
             if method == "GET" and path == "/health":
                 await self._handle_health(writer)
             elif method == "GET" and path in ("/status", "/metrics"):
-                if not _peer_is_loopback(writer):
+                if not (self._trust_loopback and _peer_is_loopback(writer)):
                     await self._send_response(writer, 403, {"error": "forbidden"})
                 elif path == "/status":
                     await self._handle_status(writer)

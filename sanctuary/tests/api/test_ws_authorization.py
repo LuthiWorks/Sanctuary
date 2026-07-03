@@ -343,6 +343,22 @@ def test_status_auth_nonloopback_token(monkeypatch):
     assert s._status_request_authorized(no_creds) is False
 
 
+def test_status_auth_loopback_not_trusted_when_disabled(monkeypatch):
+    # Behind a local reverse proxy every request looks loopback, so the
+    # loopback shortcut must be disableable -- then a token is required.
+    monkeypatch.setenv("SANCTUARY_WS_TOKENS_FILE", "/nonexistent/ws_tokens.json")
+    monkeypatch.delenv("SANCTUARY_WS_AUTH_REQUIRED", raising=False)
+    monkeypatch.setenv("SANCTUARY_TRUST_LOOPBACK", "false")
+    s = SanctuaryWebServer(runner=None, host="127.0.0.1")
+    # No token: a loopback peer is now denied (loopback no longer trusted).
+    assert s._status_request_authorized(_FakeReq("127.0.0.1")) is False
+    # A view_status token still authorizes, from any peer.
+    s._tokens = {"good": {"name": "m", "permissions": "view_chat"}}
+    assert s._status_request_authorized(
+        _FakeReq("127.0.0.1", headers={"Authorization": "Bearer good"})
+    ) is True
+
+
 # ---------------------------------------------------------------------------
 # Per-message content cap (DoS defense)
 # ---------------------------------------------------------------------------

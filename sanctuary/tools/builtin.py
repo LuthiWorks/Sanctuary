@@ -414,7 +414,21 @@ def _validate_fetch_url(url: str, *, resolve: bool) -> Optional[str]:
             return f"blocked: URL targets a private/internal address ({host})"
         return None
     except ValueError:
-        pass  # host is a name
+        pass  # host is a name (or an alternate IP encoding -- see below)
+
+    # Catch alternate IPv4 encodings that ipaddress rejects but the socket
+    # layer still routes: octal (0177.0.0.1), 32-bit integer (2130706433),
+    # short form (127.1). inet_aton canonicalizes them. Applies even under a
+    # proxy -- these reach loopback/internal with no DNS lookup.
+    try:
+        canonical = socket.inet_ntoa(socket.inet_aton(host))
+    except OSError:
+        canonical = None
+    if canonical is not None and _ip_is_blocked(canonical):
+        return (
+            f"blocked: URL targets a private/internal address "
+            f"({host} -> {canonical})"
+        )
 
     if not resolve:
         return None  # proxy is the boundary; name resolution deferred to it
@@ -427,6 +441,13 @@ def _validate_fetch_url(url: str, *, resolve: bool) -> Optional[str]:
         if _ip_is_blocked(info[4][0]):
             return f"blocked: '{host}' resolves to a private/internal address ({info[4][0]})"
     return None
+
+
+def _make_web_client(proxy: Optional[str]):
+    """Build the httpx client used by web_fetch. A seam for tests to inject a
+    MockTransport. follow_redirects=False -- web_fetch validates each hop."""
+    import httpx
+    return httpx.AsyncClient(follow_redirects=False, timeout=30.0, proxy=proxy)
 
 
 async def _web_fetch(params: dict[str, Any]) -> ToolResult:
@@ -458,9 +479,8 @@ async def _web_fetch(params: dict[str, Any]) -> ToolResult:
     try:
         # follow_redirects=False so we validate EACH hop ourselves; blind
         # redirect following would reopen the SSRF hole we just closed.
-        async with httpx.AsyncClient(
-            follow_redirects=False, timeout=30.0, proxy=proxy_url,
-        ) as client:
+        # Client construction is a seam so tests can inject a MockTransport.
+        async with _make_web_client(proxy_url) as client:
             for _ in range(max_redirects + 1):
                 deny = _validate_fetch_url(current, resolve=resolve)
                 if deny:

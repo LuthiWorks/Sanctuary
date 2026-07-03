@@ -13,9 +13,11 @@ Authored by Fable 5 (adversarial seat), 2026-07-02.
 """
 from __future__ import annotations
 
+import httpx
 import pytest
 
-from sanctuary.tools.builtin import _ip_is_blocked, _validate_fetch_url
+from sanctuary.tools import builtin
+from sanctuary.tools.builtin import _ip_is_blocked, _validate_fetch_url, _web_fetch
 
 
 # ---------------------------------------------------------------------------
@@ -94,3 +96,69 @@ def test_ip_is_blocked_classification():
     # A non-IP string is not an IP -> not "blocked" by this helper (the caller
     # handles names via resolution).
     assert _ip_is_blocked("example.com") is False
+
+
+# ---------------------------------------------------------------------------
+# Alternate IPv4 encodings (octal / integer / short form) -> loopback
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("host", ["0177.0.0.1", "2130706433", "127.1"])
+def test_alternate_ipv4_encodings_blocked(host):
+    # These bypass ipaddress.ip_address but inet_aton canonicalizes them to
+    # 127.0.0.1. Blocked even under a proxy (resolve=False) with no DNS.
+    reason = _validate_fetch_url(f"http://{host}/", resolve=False)
+    assert reason is not None
+    assert "blocked" in reason
+
+
+def test_genuinely_public_octal_allowed():
+    # 010.0.0.1 is octal 8.0.0.1 -- a real public address, must NOT be blocked.
+    assert _validate_fetch_url("http://010.0.0.1/", resolve=False) is None
+
+
+# ---------------------------------------------------------------------------
+# Integration: the actual _web_fetch redirect loop (offline via MockTransport)
+# ---------------------------------------------------------------------------
+
+
+def _inject_client(monkeypatch, handler):
+    def factory(proxy):
+        return httpx.AsyncClient(
+            follow_redirects=False, transport=httpx.MockTransport(handler)
+        )
+    monkeypatch.setattr(builtin, "_make_web_client", factory)
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_denies_redirect_to_internal(monkeypatch):
+    reached = {"internal": False}
+
+    def handler(request):
+        host = request.url.host
+        if host == "8.8.8.8":
+            return httpx.Response(302, headers={"location": "http://127.0.0.1/secret"})
+        if host == "127.0.0.1":
+            reached["internal"] = True  # must never happen
+            return httpx.Response(200, text="SECRET")
+        return httpx.Response(200, text="?")
+
+    _inject_client(monkeypatch, handler)
+    r = await _web_fetch({"url": "http://8.8.8.8/"})
+    assert r.success is False
+    assert "blocked" in r.error
+    assert reached["internal"] is False  # the internal hop was never fetched
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_follows_safe_redirect(monkeypatch):
+    def handler(request):
+        if request.url.host == "8.8.8.8":
+            return httpx.Response(301, headers={"location": "http://1.1.1.1/final"})
+        return httpx.Response(200, text="FINAL CONTENT")
+
+    _inject_client(monkeypatch, handler)
+    r = await _web_fetch({"url": "http://8.8.8.8/"})
+    assert r.success is True, r.error
+    assert r.output["status"] == 200
+    assert "FINAL CONTENT" in r.output["content"]
