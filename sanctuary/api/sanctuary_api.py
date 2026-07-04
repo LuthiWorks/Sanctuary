@@ -27,6 +27,7 @@ from typing import Optional
 
 from sanctuary.api.runner import RunnerConfig, SanctuaryRunner
 from sanctuary.core.cognitive_cycle import ModelProtocol
+from sanctuary.core.supervision import supervise
 from sanctuary.core.schema import CognitiveOutput
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,18 @@ class SanctuaryAPI:
             return
 
         await self._runner.boot()
-        self._cycle_task = asyncio.create_task(self._runner.run())
+
+        def _on_runner_death(exc: BaseException) -> None:
+            # The cognitive loop is dead; reflect that so a restart is possible
+            # and health checks stop reporting a running mind.
+            self._started = False
+
+        self._cycle_task = supervise(
+            asyncio.create_task(self._runner.run()),
+            name="cognitive_runner",
+            fatal=True,
+            on_death=_on_runner_death,
+        )
         self._started = True
         logger.info("SanctuaryAPI started")
 

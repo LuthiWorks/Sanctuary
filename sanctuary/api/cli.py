@@ -29,6 +29,7 @@ from typing import Optional
 from sanctuary.api.runner import RunnerConfig, SanctuaryRunner
 from sanctuary.api.ws_server import SanctuaryWebServer
 from sanctuary.core.schema import CognitiveOutput
+from sanctuary.core.supervision import supervise
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +172,11 @@ class SanctuaryCLI:
         print()
 
         # Start the cognitive cycle in the background
-        self._cycle_task = asyncio.create_task(self._runner.run())
+        self._cycle_task = supervise(
+            asyncio.create_task(self._runner.run()),
+            name="cognitive_runner",
+            fatal=True,
+        )
 
     async def run_repl(self) -> None:
         """Run the interactive read-eval-print loop."""

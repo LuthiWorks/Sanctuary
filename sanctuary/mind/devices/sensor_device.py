@@ -23,6 +23,8 @@ from datetime import datetime
 from enum import Enum, auto
 from typing import Any, Dict, List, Optional, Union
 
+from sanctuary.core.supervision import supervise
+
 from .protocol import (
     DeviceCapabilities,
     DeviceInfo,
@@ -182,7 +184,9 @@ class SensorDevice(DeviceProtocol):
 
         self._set_state(DeviceState.STARTING)
         self._stop_event.clear()
-        self._streaming_task = asyncio.create_task(self._poll_loop())
+        self._streaming_task = supervise(
+            asyncio.create_task(self._poll_loop()), name="sensor_device_stream"
+        )
         self._set_state(DeviceState.STREAMING)
         return True
 

@@ -20,6 +20,8 @@ import logging
 import platform
 from typing import Any, Dict, List, Optional
 
+from sanctuary.core.supervision import supervise
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -270,7 +272,10 @@ class CameraDevice(DeviceProtocol):
             self._stop_event.clear()
 
             # Start capture task
-            self._streaming_task = asyncio.create_task(self._capture_loop())
+            self._streaming_task = supervise(
+                asyncio.create_task(self._capture_loop()),
+                name="camera_device_stream",
+            )
 
             self._set_state(DeviceState.STREAMING)
             logger.info(f"Started streaming from {self._device_info.name}")

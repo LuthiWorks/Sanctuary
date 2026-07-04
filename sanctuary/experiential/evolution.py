@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from sanctuary.core.authority import AuthorityLevel
+from sanctuary.core.supervision import supervise
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +130,9 @@ class ContinuousEvolutionLoop:
         if self._running:
             return
         self._running = True
-        self._task = asyncio.create_task(self._run_loop())
+        self._task = supervise(
+            asyncio.create_task(self._run_loop()), name="evolution_loop"
+        )
         logger.info("Evolution loop started")
 
     async def stop(self):

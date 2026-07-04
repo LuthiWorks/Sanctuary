@@ -12,6 +12,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 from dataclasses import dataclass
 
+from sanctuary.core.supervision import supervise
+
 logger = logging.getLogger(__name__)
 
 # Consolidation budget thresholds
@@ -112,7 +114,10 @@ class ConsolidationScheduler:
             return
         
         self.is_running = True
-        self._task = asyncio.create_task(self._run_consolidation_loop())
+        self._task = supervise(
+            asyncio.create_task(self._run_consolidation_loop()),
+            name="consolidation_scheduler",
+        )
         logger.info("Consolidation scheduler started")
     
     async def stop(self) -> None:

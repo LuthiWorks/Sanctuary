@@ -17,6 +17,8 @@ from enum import IntEnum
 from pathlib import Path
 from typing import Dict, Optional, Any, AsyncGenerator, Deque
 
+from sanctuary.core.supervision import supervise
+
 import discord
 
 logger = logging.getLogger(__name__)
@@ -347,7 +349,10 @@ class SanctuaryClient(discord.Client):
         )
         # Start the outbound message queue worker
         if self._queue_worker_task is None or self._queue_worker_task.done():
-            self._queue_worker_task = asyncio.create_task(self._queue_worker())
+            self._queue_worker_task = supervise(
+                asyncio.create_task(self._queue_worker()),
+                name="discord_queue_worker",
+            )
 
     async def on_disconnect(self):
         """Called when the client disconnects from Discord."""

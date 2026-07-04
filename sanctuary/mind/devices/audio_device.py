@@ -18,6 +18,8 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
+from sanctuary.core.supervision import supervise
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -246,7 +248,10 @@ class MicrophoneDevice(DeviceProtocol):
             self._set_state(DeviceState.STREAMING)
 
             # Start async task to process audio queue
-            self._streaming_task = asyncio.create_task(self._process_audio_queue())
+            self._streaming_task = supervise(
+                asyncio.create_task(self._process_audio_queue()),
+                name="audio_device_stream",
+            )
 
             logger.info(f"Started streaming from {self._device_info.name}")
             return True

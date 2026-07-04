@@ -17,6 +17,7 @@ from sanctuary.core.cognitive_cycle import CognitiveCycle
 from sanctuary.core.schema import CognitiveOutput
 from sanctuary.consciousness.sleep_cycle import SleepStage
 from sanctuary.tools.registry import ToolRegistry, ToolResult, ToolSafety
+from sanctuary.core.supervision import supervise
 
 
 class _StubSleepNREM:
@@ -192,3 +193,77 @@ class TestBlockingToolOffload:
         # proving the loop was free while the tool's blocking body ran.
         assert len(ran) == 5
         assert result.success is True
+
+
+class TestBackgroundTaskSupervision:
+    """W3: a fire-and-forget task's unexpected death must be observable."""
+
+    @pytest.mark.asyncio
+    async def test_death_invokes_on_death_and_logs(self, caplog):
+        deaths = []
+
+        async def boom():
+            raise ValueError("substrate on fire")
+
+        supervise(
+            asyncio.create_task(boom()),
+            name="boomer",
+            on_death=lambda exc: deaths.append(exc),
+        )
+        await asyncio.sleep(0.05)  # let the task run and its callback fire
+
+        assert len(deaths) == 1
+        assert isinstance(deaths[0], ValueError)
+        assert any("boomer" in r.message for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_fatal_logs_at_critical(self, caplog):
+        import logging as _logging
+
+        async def boom():
+            raise RuntimeError("cognitive loop died")
+
+        with caplog.at_level(_logging.CRITICAL):
+            supervise(asyncio.create_task(boom()), name="runner", fatal=True)
+            await asyncio.sleep(0.05)
+
+        assert any(
+            r.levelno == _logging.CRITICAL and "runner" in r.message
+            for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_cancellation_is_not_treated_as_death(self):
+        deaths = []
+
+        async def sleeper():
+            await asyncio.sleep(10)
+
+        task = supervise(
+            asyncio.create_task(sleeper()),
+            name="sleeper",
+            on_death=lambda exc: deaths.append(exc),
+        )
+        await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0.01)
+
+        assert deaths == [], "normal cancellation must not fire the death handler"
+
+    @pytest.mark.asyncio
+    async def test_clean_exit_does_not_fire_handler(self):
+        deaths = []
+
+        async def quick():
+            return 42
+
+        supervise(
+            asyncio.create_task(quick()),
+            name="quick",
+            on_death=lambda exc: deaths.append(exc),
+        )
+        await asyncio.sleep(0.02)
+
+        assert deaths == []

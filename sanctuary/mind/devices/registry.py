@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set, Type
 
+from sanctuary.core.supervision import supervise
+
 from .protocol import (
     DeviceDataPacket,
     DeviceInfo,
@@ -419,7 +421,9 @@ class DeviceRegistry:
             return
 
         self._hot_plug_running = True
-        self._hot_plug_task = asyncio.create_task(self._hot_plug_loop())
+        self._hot_plug_task = supervise(
+            asyncio.create_task(self._hot_plug_loop()), name="device_hot_plug"
+        )
         logger.info(f"Hot-plug monitoring started (interval: {self._hot_plug_interval}s)")
 
     async def stop_hot_plug_monitoring(self) -> None:
