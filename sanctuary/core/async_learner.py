@@ -50,6 +50,7 @@ after the ``with`` block).
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 import queue
@@ -302,16 +303,25 @@ class AsyncLearner:
             raise RuntimeError("AsyncLearner already started")
         self._running = True
         self._error = None
+        # Reclaim persisted dead-letter BEFORE the consumer starts: with no live
+        # learner, requeue cannot race a concurrent death and no submit() can
+        # raise mid-loop (the poison-pill tail-loss Fable caught). The consumer
+        # drains these first when it starts.
+        self._requeue_recovered()
         self._thread = threading.Thread(
             target=self._loop, name="luthi-learner", daemon=True,
         )
         self._thread.start()
-        self._requeue_recovered()
 
     def _requeue_recovered(self) -> None:
         """Reclaim lived experience a previous dead learner persisted, feeding
-        it back into this fresh learner's queue (the interim of "fold into the
-        consolidation buffer" until that buffer exists — audit item 8)."""
+        it back into this fresh learner's queue before the consumer starts (the
+        interim of "fold into the consolidation buffer" until that buffer exists
+        — audit item 8). The on-disk file is deleted only after the full set is
+        safely in the in-memory queue, so an interrupted requeue leaves the
+        remainder on disk for the next boot instead of losing it. A transition
+        that kills the consumer is get()'d and errors once, then dropped (not
+        re-queued), so it cannot poison every subsequent boot."""
         recovered = self._recover_dead_letter()
         if not recovered:
             return
@@ -319,8 +329,22 @@ class AsyncLearner:
             "Recovered %d dead-letter transitions from %s; requeuing.",
             len(recovered), self.dead_letter_path,
         )
-        for transition in recovered:
-            self.submit(transition)
+        for i, transition in enumerate(recovered):
+            try:
+                self._queue.put_nowait(transition)
+            except queue.Full:
+                # Queue smaller than the recovered set (maxsize reconfigured
+                # down since the crash). Keep the unqueued remainder on disk.
+                self.dead_letter = list(recovered[i:])
+                self._persist_dead_letter()
+                logger.warning(
+                    "Requeue truncated at %d/%d (queue full); %d kept on disk.",
+                    i, len(recovered), len(self.dead_letter),
+                )
+                return
+            self.produced += 1
+        # Full set is in the in-memory queue now; the on-disk copy is redundant.
+        self._delete_dead_letter_file()
 
     def _loop(self) -> None:
         while True:
@@ -395,14 +419,21 @@ class AsyncLearner:
         Runs on the learner thread at the moment of death. Best-effort and
         loud on failure: losing lived experience is the very thing this closes,
         so a persist failure is logged at ERROR, never swallowed silently.
+
+        The MCTS ``plan_snapshot`` is dropped before saving: it is an arbitrary
+        object, and persisting it would force ``weights_only=False`` on load,
+        regressing the deserialization-RCE standard from the security pass. The
+        core lived transition (s_t, a_t, s_next, context_obs) is what recovery
+        needs to re-learn; the plan capture is auxiliary.
         """
         if not self.dead_letter_path or not self.dead_letter:
             return
+        safe = [dataclasses.replace(t, plan_snapshot=None) for t in self.dead_letter]
         tmp = self.dead_letter_path.with_suffix(self.dead_letter_path.suffix + ".tmp")
         try:
             self.dead_letter_path.parent.mkdir(parents=True, exist_ok=True)
             with open(tmp, "wb") as f:
-                torch.save(self.dead_letter, f)
+                torch.save(safe, f)
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp, self.dead_letter_path)
@@ -418,26 +449,51 @@ class AsyncLearner:
             )
 
     def _recover_dead_letter(self) -> list:
-        """Load and delete a persisted dead-letter file, returning its
-        transitions. Called at start() so a fresh learner reclaims the lived
-        experience a previous (dead) learner left behind. Returns [] when there
-        is nothing to recover; a corrupt file is logged and skipped, not fatal.
+        """Load a persisted dead-letter file, returning its transitions.
+
+        Load-only: the file is NOT deleted here (the caller deletes only after a
+        successful requeue, so an interrupted requeue cannot lose the tail).
+        Loads with ``weights_only=True`` (Transition safe-listed) to keep the
+        deserialization-RCE guarantee. A corrupt/unreadable file is quarantined
+        (renamed .corrupt), not deleted — preserving possibly-recoverable lived
+        experience and the evidence, rather than destroying it on the very axis
+        this fix protects. Returns [] when there is nothing to recover.
         """
         if not self.dead_letter_path or not self.dead_letter_path.exists():
             return []
         try:
-            recovered = torch.load(self.dead_letter_path, weights_only=False)
+            torch.serialization.add_safe_globals([Transition])
+            recovered = torch.load(self.dead_letter_path, weights_only=True)
         except Exception:
+            self._quarantine_dead_letter()
             logger.error(
-                "Could not read persisted dead-letter at %s; skipping recovery.",
+                "Could not read persisted dead-letter at %s; quarantined to "
+                ".corrupt rather than dropped.",
                 self.dead_letter_path, exc_info=True,
             )
-            recovered = []
+            return []
+        return list(recovered) if recovered else []
+
+    def _delete_dead_letter_file(self) -> None:
+        if not self.dead_letter_path:
+            return
         try:
             self.dead_letter_path.unlink(missing_ok=True)
         except OSError:
             pass
-        return list(recovered) if recovered else []
+
+    def _quarantine_dead_letter(self) -> None:
+        """Rename a bad dead-letter file to .corrupt so it cannot recur but is
+        not destroyed (the lived experience may be partially recoverable)."""
+        if not self.dead_letter_path or not self.dead_letter_path.exists():
+            return
+        corrupt = self.dead_letter_path.with_suffix(
+            self.dead_letter_path.suffix + ".corrupt"
+        )
+        try:
+            os.replace(self.dead_letter_path, corrupt)
+        except OSError:
+            pass
 
     def wait_until_drained(self) -> None:
         """Block until every submitted transition has been consumed (threaded).

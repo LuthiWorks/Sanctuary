@@ -20,6 +20,7 @@ import asyncio
 import logging
 import math
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Dict, Optional, Protocol
 
@@ -329,6 +330,13 @@ class CognitiveCycle:
         self._last_cognitive_input: Optional[CognitiveInput] = None
         self._last_communication_decision: Optional[Dict[str, Any]] = None
 
+        # Dedicated single-thread executor for NREM consolidate() (Phase 3 W1/W2):
+        # keeps living-weight consolidation off the loop thread AND off the shared
+        # default to_thread pool, so a leaked/hung tool thread can never starve it.
+        self._consolidate_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="consolidate"
+        )
+
     # -- Public API --
 
     def inject_percept(self, percept: Percept):
@@ -426,12 +434,16 @@ class CognitiveCycle:
             and hasattr(self.model, "consolidate")
         ):
             try:
-                # Offload to a worker thread so living-weight consolidation
-                # cannot stall the 10 Hz loop (audit 2026-07-03, item 12).
-                # consolidate() holds the shared model_lock internally, so the
-                # offload is safe in both sync and async_mode; think() has
-                # already released that lock earlier in this sequential cycle.
-                await asyncio.to_thread(self.model.consolidate)
+                # Offload to a dedicated worker thread so living-weight
+                # consolidation cannot stall the 10 Hz loop (audit 2026-07-03,
+                # item 12), and cannot be starved by a leaked tool thread in the
+                # shared default pool. consolidate() takes the real model_lock
+                # (now always taken, incl. sync mode) so a worker-thread write
+                # cannot tear a concurrent loop-thread read of the living
+                # weights; think() released that lock earlier this cycle.
+                await asyncio.get_running_loop().run_in_executor(
+                    self._consolidate_executor, self.model.consolidate
+                )
             except Exception as e:
                 logger.error("Luthi consolidation error (non-fatal): %s", e)
 

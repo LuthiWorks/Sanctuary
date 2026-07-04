@@ -157,9 +157,10 @@ class LuthiModel:
         # Coarse single model_lock: the actor (this cycle thread) holds it
         # across its whole model-touching critical section; the learner holds
         # it across observe_transition. Created once, shared with the
-        # AsyncLearner. Only contended when an async learner is attached --
-        # _model_critical_section() returns a nullcontext otherwise, so the
-        # synchronous (async_mode="off") path is byte-for-byte unchanged.
+        # AsyncLearner. _model_critical_section() always takes it now (Phase-3
+        # W1 offloads consolidate() to a worker thread even in sync mode, so the
+        # section can no longer be a nullcontext); uncontended when no async
+        # learner is attached.
         self._model_lock = threading.Lock()
         # Set by attach_seam(async_mode=...). None -> the legacy synchronous
         # seam (observe_transition runs inline in _run_training_seam_sync).
@@ -290,16 +291,19 @@ class LuthiModel:
             self._async_learner = None
 
     def _model_critical_section(self):
-        """The shared model_lock when an async learner is attached, else a
-        nullcontext. Held across any span that reads/writes the living model
-        concurrently with the learner thread: the actor's full _think_sync span
-        (modulate -> generate -> select(budget=0) -> restore) AND consolidate()'s
-        living-weight writes (which race the learner during NREM). When no async
-        learner is attached the synchronous path is byte-for-byte unchanged
-        (nullcontext)."""
-        if self._async_learner is not None:
-            return self._model_lock
-        return contextlib.nullcontext()
+        """The shared model_lock. Held across any span that reads/writes the
+        living model off the cycle's serialized path: the actor's full
+        _think_sync span (modulate -> generate -> select(budget=0) -> restore)
+        AND consolidate()'s living-weight writes.
+
+        Always returns the real lock -- uncontended when no async learner is
+        attached, but no longer a nullcontext. Item #6 Phase-3 W1 offloads
+        consolidate() to a worker thread even in async_mode="off", so the old
+        "nullcontext in sync mode" rationale (the sync path is single-threaded,
+        byte-for-byte unchanged) is stale: a worker-thread consolidate() can now
+        overlap a loop-thread reader of the living weights. An uncontended lock
+        is the correct price for making that safe."""
+        return self._model_lock
 
     # ------------------------------------------------------------------
     # Model loading

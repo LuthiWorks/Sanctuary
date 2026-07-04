@@ -368,7 +368,7 @@ class TestDeadLetterDurability:
         assert learner.dead_letter_path is None
         assert len(learner.dead_letter) == 3  # in memory, not persisted
 
-    def test_corrupt_dead_letter_file_is_skipped(self, tmp_path):
+    def test_corrupt_dead_letter_file_is_quarantined(self, tmp_path):
         path = tmp_path / "dead_letter.pt"
         path.write_bytes(b"not a torch checkpoint")
 
@@ -380,4 +380,42 @@ class TestDeadLetterDurability:
         learner.stop()
 
         assert sink.seen == []
-        assert not path.exists(), "corrupt file should be cleared, not left to recur"
+        # Quarantined, not deleted: the original is gone but the evidence and
+        # possibly-recoverable bytes are preserved as .corrupt.
+        assert not path.exists(), "corrupt file must not recur on the next boot"
+        assert path.with_suffix(path.suffix + ".corrupt").exists()
+
+    def test_poison_pill_is_dropped_and_tail_is_preserved(self, tmp_path):
+        """A transition that kills the consumer must error once and be dropped,
+        never lose the transitions queued behind it, and never re-poison."""
+        path = tmp_path / "dead_letter.pt"
+        ready = threading.Event()
+        _kill_with_queued(_BoomOnAllQueued(ready), path)  # persists [1..5]
+
+        class _DieOnThree:
+            def observe_transition(self, s_t, a_t, s_next, ctx):
+                if int(s_t[0].item()) == 3:
+                    raise ValueError("poison pill")
+                return {}
+
+        survivor = AsyncLearner(
+            _DieOnThree(), threading.Lock(), mode="threaded",
+            maxsize=16, dead_letter_path=path,
+        )
+        survivor.start()  # recovers 1..5; consumes 1,2; 3 poisons; 4,5 drained
+        survivor.wait_until_drained()
+        with pytest.raises(ValueError, match="poison pill"):
+            survivor.stop()
+
+        # 3 was consumed-and-errored (dropped, not re-queued); 4,5 must survive.
+        assert path.exists()
+        sink = _RecordingSink()
+        healed = AsyncLearner(
+            sink, threading.Lock(), mode="threaded", maxsize=16, dead_letter_path=path
+        )
+        healed.start()
+        healed.wait_until_drained()
+        healed.stop()
+
+        assert sorted(sink.seen) == [4, 5], "tail behind the poison pill was lost"
+        assert not path.exists()

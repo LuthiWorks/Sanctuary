@@ -53,6 +53,11 @@ def supervise(
             return
         exc = t.exception()
         if exc is None:
+            # Clean return is treated as healthy. For a fatal task this assumes
+            # the only exit is an intended one (the cognitive runner exits only
+            # via stop() today — max_cycles is test-only). If a fatal task ever
+            # gains a non-stop() clean-exit path, its death would pass silently
+            # here at DEBUG with the owner still marked started; revisit then.
             logger.debug("Supervised task %r exited cleanly", name)
             return
         logger.log(

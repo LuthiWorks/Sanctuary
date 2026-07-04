@@ -245,19 +245,29 @@ class ContinuousEvolutionLoop:
             while self._running:
                 tick_start = time.monotonic()
 
-                # Drain any pending percepts
-                event = self._drain_percepts()
+                try:
+                    # Drain any pending percepts
+                    event = self._drain_percepts()
 
-                # Step all cells with current context + percept data
-                async with self._lock:
-                    self._step_cells(event)
-                    self._ticks_since_cycle += 1
+                    # Step all cells with current context + percept data
+                    async with self._lock:
+                        self._step_cells(event)
+                        self._ticks_since_cycle += 1
 
-                # Adapt tick rate based on prediction error
-                if self.config.adaptive:
-                    self._adapt_tick_rate()
+                    # Adapt tick rate based on prediction error
+                    if self.config.adaptive:
+                        self._adapt_tick_rate()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # A step failure must NOT permanently freeze CfC/affect
+                    # evolution. This loop had no inner guard, so a single raise
+                    # in _step_cells stopped the experiential layer for good
+                    # (Phase 3 review, Fable 5). Log loudly and continue.
+                    logger.exception("Evolution step failed; continuing")
 
-                # Sleep for remainder of tick
+                # Sleep for remainder of tick (outside the guard so a failed
+                # step still paces the loop instead of spinning hot)
                 elapsed_ms = (time.monotonic() - tick_start) * 1000
                 sleep_ms = max(0, self._current_tick_ms - elapsed_ms)
                 await asyncio.sleep(sleep_ms / 1000)

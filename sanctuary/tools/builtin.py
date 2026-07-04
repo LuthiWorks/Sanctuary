@@ -521,6 +521,35 @@ async def _web_fetch(params: dict[str, Any]) -> ToolResult:
         return ToolResult(tool_name="web_fetch", success=False, error=str(e))
 
 
+_WIKIPEDIA_TIMEOUT_S = 15
+
+
+def _ensure_wikipedia_socket_timeout(wikipedia_pkg) -> None:
+    """Give the wikipedia lib the socket-level timeout it otherwise lacks.
+
+    wikipedia 1.4.0 calls ``requests.get`` with no ``timeout``, so a hung fetch
+    would block its worker thread forever — the registry watchdog frees the
+    loop but never the thread, and enough leaked threads starve the shared
+    pool. We wrap the lib's module-global ``requests`` so every ``.get`` carries
+    a timeout; the real ``requests`` module is left untouched. Idempotent.
+    """
+    wp = wikipedia_pkg.wikipedia
+    if getattr(wp, "_sanctuary_timeout_shim", False):
+        return
+    real_requests = wp.requests
+
+    class _TimeoutRequests:
+        def get(self, *args, **kwargs):
+            kwargs.setdefault("timeout", _WIKIPEDIA_TIMEOUT_S)
+            return real_requests.get(*args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(real_requests, name)
+
+    wp.requests = _TimeoutRequests()
+    wp._sanctuary_timeout_shim = True
+
+
 async def _wikipedia(params: dict[str, Any]) -> ToolResult:
     """Look up a topic on Wikipedia."""
     topic = params.get("topic", "")
@@ -529,9 +558,10 @@ async def _wikipedia(params: dict[str, Any]) -> ToolResult:
 
     try:
         import wikipedia
-        # Offload the synchronous network calls so they cannot stall the 10 Hz
-        # loop (audit 2026-07-03, item 13). wikipedia has no timeout of its
-        # own; the registry watchdog is the ceiling that bounds a hang.
+        # A socket timeout so a hung fetch cannot pin a worker thread; then
+        # offload the sync network calls so they cannot stall the 10 Hz loop
+        # (audit 2026-07-03, item 13). The registry watchdog is the outer ceiling.
+        _ensure_wikipedia_socket_timeout(wikipedia)
         summary = await asyncio.to_thread(
             wikipedia.summary, topic, sentences=params.get("sentences", 5)
         )
