@@ -426,7 +426,12 @@ class CognitiveCycle:
             and hasattr(self.model, "consolidate")
         ):
             try:
-                self.model.consolidate()
+                # Offload to a worker thread so living-weight consolidation
+                # cannot stall the 10 Hz loop (audit 2026-07-03, item 12).
+                # consolidate() holds the shared model_lock internally, so the
+                # offload is safe in both sync and async_mode; think() has
+                # already released that lock earlier in this sequential cycle.
+                await asyncio.to_thread(self.model.consolidate)
             except Exception as e:
                 logger.error("Luthi consolidation error (non-fatal): %s", e)
 
