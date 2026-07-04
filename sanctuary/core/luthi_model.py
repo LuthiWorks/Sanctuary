@@ -203,6 +203,7 @@ class LuthiModel:
     def attach_seam(
         self, *, actor=None, sink=None, resilient: bool = False,
         async_mode: str = "off", queue_maxsize: int = 64,
+        dead_letter_path=None,
     ) -> None:
         """Wire in the M9 actor / transition sink for this cognitive cycle.
 
@@ -273,6 +274,7 @@ class LuthiModel:
             self._async_learner = AsyncLearner(
                 sink, self._model_lock,
                 mode=async_mode, maxsize=queue_maxsize, resilient=resilient,
+                dead_letter_path=dead_letter_path,
             )
             self._async_learner.start()  # no-op for drain mode
 

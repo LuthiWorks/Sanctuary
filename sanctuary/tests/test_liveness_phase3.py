@@ -12,7 +12,9 @@ import threading
 import time
 
 import pytest
+import torch
 
+from sanctuary.core.async_learner import AsyncLearner, Transition
 from sanctuary.core.cognitive_cycle import CognitiveCycle
 from sanctuary.core.schema import CognitiveOutput
 from sanctuary.consciousness.sleep_cycle import SleepStage
@@ -267,3 +269,115 @@ class TestBackgroundTaskSupervision:
         await asyncio.sleep(0.02)
 
         assert deaths == []
+
+
+# ---------------------------------------------------------------------------
+# W4: the async learner's dead-letter must survive a process exit and be
+# requeued into the next learner (audit item 8). Threaded, not asyncio.
+# ---------------------------------------------------------------------------
+
+_D = 8
+
+
+def _txn(idx: int) -> Transition:
+    """A detached transition whose s_t[0] encodes its submit order."""
+    s_t = torch.zeros(_D)
+    s_t[0] = float(idx)
+    return Transition(s_t=s_t, a_t=torch.zeros(_D), s_next=torch.ones(_D))
+
+
+class _BoomOnAllQueued:
+    """Blocks the first observe until everything is queued, then dies."""
+
+    def __init__(self, ready: threading.Event):
+        self.ready = ready
+        self.calls = 0
+
+    def observe_transition(self, *args, **kwargs):
+        self.calls += 1
+        self.ready.wait(timeout=5.0)
+        raise ValueError("boom in the learner")
+
+
+class _RecordingSink:
+    def __init__(self):
+        self.seen = []
+
+    def observe_transition(self, s_t, a_t, s_next, ctx):
+        self.seen.append(int(s_t[0].item()))
+        return {}
+
+
+def _kill_with_queued(sink, path, n=6):
+    """Start a threaded learner, queue n transitions, kill it mid-first-item."""
+    ready = threading.Event()
+    learner = AsyncLearner(
+        sink, threading.Lock(), mode="threaded", maxsize=16, dead_letter_path=path
+    )
+    learner.start()
+    for i in range(n):
+        learner.submit(_txn(i))
+    ready.set()
+    learner.wait_until_drained()
+    with pytest.raises(ValueError, match="boom in the learner"):
+        learner.stop()
+    return learner
+
+
+class TestDeadLetterDurability:
+    def test_dead_letter_persisted_on_death(self, tmp_path):
+        path = tmp_path / "dead_letter.pt"
+        ready = threading.Event()
+        learner = _kill_with_queued(_BoomOnAllQueued(ready), path)
+
+        # item 0 was consumed (and raised); items 1..5 drained to dead_letter
+        assert len(learner.dead_letter) == 5
+        assert path.exists(), "dead-letter was not persisted; a process exit loses it"
+
+    def test_recovered_and_requeued_by_next_learner(self, tmp_path):
+        path = tmp_path / "dead_letter.pt"
+        ready = threading.Event()
+        _kill_with_queued(_BoomOnAllQueued(ready), path)
+        assert path.exists()
+
+        # A fresh, healthy learner reclaims the persisted transitions on start.
+        sink = _RecordingSink()
+        survivor = AsyncLearner(
+            sink, threading.Lock(), mode="threaded", maxsize=16, dead_letter_path=path
+        )
+        survivor.start()
+        survivor.wait_until_drained()
+        survivor.stop()
+
+        assert sorted(sink.seen) == [1, 2, 3, 4, 5]
+        assert not path.exists(), "recovered file must be consumed and removed"
+
+    def test_no_path_keeps_dead_letter_in_memory_only(self, tmp_path):
+        ready = threading.Event()
+        learner = AsyncLearner(
+            _BoomOnAllQueued(ready), threading.Lock(), mode="threaded", maxsize=16
+        )
+        learner.start()
+        for i in range(4):
+            learner.submit(_txn(i))
+        ready.set()
+        learner.wait_until_drained()
+        with pytest.raises(ValueError):
+            learner.stop()
+
+        assert learner.dead_letter_path is None
+        assert len(learner.dead_letter) == 3  # in memory, not persisted
+
+    def test_corrupt_dead_letter_file_is_skipped(self, tmp_path):
+        path = tmp_path / "dead_letter.pt"
+        path.write_bytes(b"not a torch checkpoint")
+
+        sink = _RecordingSink()
+        learner = AsyncLearner(
+            sink, threading.Lock(), mode="threaded", maxsize=16, dead_letter_path=path
+        )
+        learner.start()  # must not raise on a corrupt file
+        learner.stop()
+
+        assert sink.seen == []
+        assert not path.exists(), "corrupt file should be cleared, not left to recur"

@@ -51,9 +51,11 @@ after the ``with`` block).
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional, Protocol
 
 import torch
@@ -212,6 +214,7 @@ class AsyncLearner:
         mode: str = "drain",
         maxsize: int = 64,
         resilient: bool = False,
+        dead_letter_path: "Optional[Path]" = None,
     ):
         if mode not in ("drain", "threaded"):
             raise ValueError(f"mode must be 'drain' or 'threaded', got {mode!r}")
@@ -219,6 +222,11 @@ class AsyncLearner:
         self.model_lock = model_lock
         self.mode = mode
         self.resilient = resilient
+        # Where queued-but-unlearned transitions are persisted if this learner
+        # dies, so a process exit cannot lose them (audit 2026-07-03, item 8).
+        # None -> in-memory only (durability off). Recovered + requeued on the
+        # next learner's start(); see _persist_dead_letter / _recover_dead_letter.
+        self.dead_letter_path = Path(dead_letter_path) if dead_letter_path else None
 
         self._queue: "queue.Queue[Any]" = queue.Queue(maxsize=maxsize)
         self._thread: Optional[threading.Thread] = None
@@ -298,6 +306,21 @@ class AsyncLearner:
             target=self._loop, name="luthi-learner", daemon=True,
         )
         self._thread.start()
+        self._requeue_recovered()
+
+    def _requeue_recovered(self) -> None:
+        """Reclaim lived experience a previous dead learner persisted, feeding
+        it back into this fresh learner's queue (the interim of "fold into the
+        consolidation buffer" until that buffer exists — audit item 8)."""
+        recovered = self._recover_dead_letter()
+        if not recovered:
+            return
+        logger.info(
+            "Recovered %d dead-letter transitions from %s; requeuing.",
+            len(recovered), self.dead_letter_path,
+        )
+        for transition in recovered:
+            self.submit(transition)
 
     def _loop(self) -> None:
         while True:
@@ -357,11 +380,64 @@ class AsyncLearner:
                 self.dead_letter.append(item)
             self._queue.task_done()
         if self.dead_letter:
+            self._persist_dead_letter()
             logger.warning(
                 "async learner died with %d transitions still queued; "
-                "preserved in dead_letter for the host to recover.",
+                "preserved in dead_letter%s.",
                 len(self.dead_letter),
+                (f" and persisted to {self.dead_letter_path}"
+                 if self.dead_letter_path else " (in memory only)"),
             )
+
+    def _persist_dead_letter(self) -> None:
+        """Atomically write the dead-letter transitions to disk, if a path is set.
+
+        Runs on the learner thread at the moment of death. Best-effort and
+        loud on failure: losing lived experience is the very thing this closes,
+        so a persist failure is logged at ERROR, never swallowed silently.
+        """
+        if not self.dead_letter_path or not self.dead_letter:
+            return
+        tmp = self.dead_letter_path.with_suffix(self.dead_letter_path.suffix + ".tmp")
+        try:
+            self.dead_letter_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(tmp, "wb") as f:
+                torch.save(self.dead_letter, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self.dead_letter_path)
+        except Exception:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            logger.error(
+                "Failed to persist %d dead-letter transitions to %s; they "
+                "survive in memory only for this process.",
+                len(self.dead_letter), self.dead_letter_path, exc_info=True,
+            )
+
+    def _recover_dead_letter(self) -> list:
+        """Load and delete a persisted dead-letter file, returning its
+        transitions. Called at start() so a fresh learner reclaims the lived
+        experience a previous (dead) learner left behind. Returns [] when there
+        is nothing to recover; a corrupt file is logged and skipped, not fatal.
+        """
+        if not self.dead_letter_path or not self.dead_letter_path.exists():
+            return []
+        try:
+            recovered = torch.load(self.dead_letter_path, weights_only=False)
+        except Exception:
+            logger.error(
+                "Could not read persisted dead-letter at %s; skipping recovery.",
+                self.dead_letter_path, exc_info=True,
+            )
+            recovered = []
+        try:
+            self.dead_letter_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return list(recovered) if recovered else []
 
     def wait_until_drained(self) -> None:
         """Block until every submitted transition has been consumed (threaded).
