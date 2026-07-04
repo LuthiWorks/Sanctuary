@@ -288,7 +288,10 @@ class BackupManager:
             record.status = BackupStatus.FAILED
             record.error = str(e)
             record.duration_seconds = time.time() - start_time
-            self._history.append(record)
+            # The success path may already have appended this record before
+            # its _save_history() raised; don't double-append it
+            if record not in self._history:
+                self._history.append(record)
             try:
                 self._save_history()
             except Exception as history_error:

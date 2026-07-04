@@ -513,6 +513,7 @@ class CfCRetrainer:
                 self._stats.total_retrains += 1
                 self._stats.failed_retrains += 1
                 self._data_tap.requeue(cell_name, records)
+                self._history.append(result)
                 logger.error(
                     "CfC checkpoint failed for %s; aborting retrain: %s",
                     cell_name, e,
