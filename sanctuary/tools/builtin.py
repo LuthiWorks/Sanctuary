@@ -15,6 +15,7 @@ Categories:
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import ipaddress
 import json
@@ -177,7 +178,13 @@ def _verify_fd_in_roots(fd: int, path_str: str) -> None:
 
 
 async def _read_file(params: dict[str, Any]) -> ToolResult:
-    """Read a file's contents."""
+    """Read a file's contents (offloaded so blocking I/O leaves the loop free)."""
+    return await asyncio.to_thread(_read_file_sync, params)
+
+
+def _read_file_sync(params: dict[str, Any]) -> ToolResult:
+    """Read a file's contents. Runs on a worker thread (audit item 13); the
+    TOCTOU-hardened open/verify/read block runs as one unit here, unchanged."""
     path = params.get("path", "")
     if not path:
         return ToolResult(tool_name="read_file", success=False, error="No path provided")
@@ -219,7 +226,13 @@ async def _read_file(params: dict[str, Any]) -> ToolResult:
 
 
 async def _write_file(params: dict[str, Any]) -> ToolResult:
-    """Write content to a file."""
+    """Write content to a file (offloaded so blocking I/O leaves the loop free)."""
+    return await asyncio.to_thread(_write_file_sync, params)
+
+
+def _write_file_sync(params: dict[str, Any]) -> ToolResult:
+    """Write content to a file. Runs on a worker thread (audit item 13); the
+    TOCTOU-hardened open/verify/truncate/write block runs as one unit here."""
     path = params.get("path", "")
     content = params.get("content", "")
     if not path:
@@ -265,7 +278,12 @@ async def _write_file(params: dict[str, Any]) -> ToolResult:
 
 
 async def _list_directory(params: dict[str, Any]) -> ToolResult:
-    """List contents of a directory."""
+    """List a directory (offloaded so blocking I/O leaves the loop free)."""
+    return await asyncio.to_thread(_list_directory_sync, params)
+
+
+def _list_directory_sync(params: dict[str, Any]) -> ToolResult:
+    """List contents of a directory. Runs on a worker thread (audit item 13)."""
     path = params.get("path", ".")
     try:
         p = _resolve_in_sandbox(path)
@@ -511,8 +529,13 @@ async def _wikipedia(params: dict[str, Any]) -> ToolResult:
 
     try:
         import wikipedia
-        summary = wikipedia.summary(topic, sentences=params.get("sentences", 5))
-        page = wikipedia.page(topic)
+        # Offload the synchronous network calls so they cannot stall the 10 Hz
+        # loop (audit 2026-07-03, item 13). wikipedia has no timeout of its
+        # own; the registry watchdog is the ceiling that bounds a hang.
+        summary = await asyncio.to_thread(
+            wikipedia.summary, topic, sentences=params.get("sentences", 5)
+        )
+        page = await asyncio.to_thread(wikipedia.page, topic)
         return ToolResult(
             tool_name="wikipedia", success=True,
             output={"title": page.title, "summary": summary, "url": page.url},
@@ -567,7 +590,11 @@ async def _run_code_docker(params: dict[str, Any]) -> ToolResult:
         )
 
     try:
-        result = subprocess.run(
+        # Offload the blocking subprocess to a worker thread so a long-running
+        # container cannot stall the 10 Hz loop (audit 2026-07-03, item 13).
+        # subprocess.run's own timeout still kills the child on expiry.
+        result = await asyncio.to_thread(
+            subprocess.run,
             [
                 "docker", "run", "--rm",
                 "--network=none",   # No network access from sandbox
@@ -639,7 +666,11 @@ async def _shell_command(params: dict[str, Any]) -> ToolResult:
             return ToolResult(tool_name="shell", success=False, error="No command provided")
 
     try:
-        result = subprocess.run(
+        # Offload the blocking subprocess so a slow command cannot stall the
+        # 10 Hz loop (audit 2026-07-03, item 13); subprocess.run's own timeout
+        # still kills the child on expiry.
+        result = await asyncio.to_thread(
+            subprocess.run,
             popen_args,
             shell=use_shell,
             capture_output=True,

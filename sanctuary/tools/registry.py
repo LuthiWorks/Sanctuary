@@ -104,13 +104,24 @@ class ToolRegistry:
         result = await registry.execute("read_file", {"path": "/some/file.txt"})
     """
 
-    def __init__(self, policy: Optional[ToolPolicy] = None):
+    def __init__(
+        self,
+        policy: Optional[ToolPolicy] = None,
+        tool_timeout_seconds: float = 60.0,
+    ):
         self._tools: dict[str, ToolSpec] = {}
         self._executors: dict[str, Callable[..., Awaitable[ToolResult]]] = {}
         self._history: list[ToolResult] = []
         self._max_history: int = 500
         # The graduated-capability gate. Defaults to deny-all-gated.
         self._policy: ToolPolicy = policy or ToolPolicy()
+        # Watchdog ceiling: no single tool call may stall its caller (a
+        # cognitive-cycle step) beyond this. A backstop above each tool's own
+        # internal timeout — it catches tools with no timeout (e.g. wikipedia)
+        # or a hung one. Only effective because blocking tool bodies are
+        # offloaded to threads (audit 2026-07-03, item 13); a tool that blocked
+        # the loop thread would prevent this timeout from ever firing.
+        self._tool_timeout_seconds: float = tool_timeout_seconds
 
     @property
     def policy(self) -> ToolPolicy:
@@ -208,8 +219,21 @@ class ToolRegistry:
 
         start = time.perf_counter()
         try:
-            result = await executor(params)
+            result = await asyncio.wait_for(
+                executor(params), timeout=self._tool_timeout_seconds
+            )
             result.duration_ms = (time.perf_counter() - start) * 1000.0
+        except asyncio.TimeoutError:
+            # The tool body is offloaded to a thread, so it keeps running to
+            # completion in the background (a subprocess is killed by its own
+            # timeout); the loop is freed now and the caller gets a failure.
+            result = ToolResult(
+                tool_name=name,
+                success=False,
+                error=f"tool timed out after {self._tool_timeout_seconds:.0f}s",
+                duration_ms=(time.perf_counter() - start) * 1000.0,
+            )
+            logger.error("Tool %s timed out after %.0fs", name, self._tool_timeout_seconds)
         except Exception as e:
             result = ToolResult(
                 tool_name=name,
