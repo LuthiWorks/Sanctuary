@@ -476,6 +476,93 @@ class TestWorldWebSocket:
         finally:
             await server.stop()
 
+    @pytest.mark.asyncio
+    async def test_cycle_driven_tool_request_actuates_world(self, booted_runner):
+        """The full closed loop: a CognitiveOutput carrying a tool_request,
+        routed through the runner's output handler, actuates the world over
+        the wire and surfaces a result percept.
+
+        The other world tests call ``tools.execute`` directly. This one
+        exercises the seam that only fires in the live cycle:
+        ``runner._execute_tool_requests(output)`` → world_command on the
+        socket → ``tool:`` result percept back into the sensorium.
+        """
+        from sanctuary.core.schema import ToolRequest
+
+        port = next_port()
+        server = SanctuaryWebServer(runner=booted_runner, port=port)
+        await server.start()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(
+                    f"http://localhost:{port}/ws/world"
+                ) as ws:
+                    await asyncio.wait_for(ws.receive_json(), timeout=2.0)  # hello
+
+                    output = _fake_cognitive_output(inner="I'll make a cube")
+                    output.tool_requests = [
+                        ToolRequest(
+                            tool_name="spawn_object",
+                            parameters={
+                                "type": "cube",
+                                "position": [1.0, 0.5, 2.0],
+                                "name": "Cycle Cube",
+                            },
+                        )
+                    ]
+
+                    # Drive the runner's real output→tool-execution wiring,
+                    # not tools.execute() directly.
+                    await booted_runner._execute_tool_requests(output)
+
+                    msg = await asyncio.wait_for(ws.receive_json(), timeout=2.0)
+                    assert msg["type"] == "world_command"
+                    assert msg["action"] == "spawn"
+                    assert msg["params"]["object_type"] == "cube"
+                    assert msg["params"]["name"] == "Cycle Cube"
+
+                    # The spawn acknowledgement comes back as a tool: percept
+                    # so the entity perceives the result of its own intention.
+                    percepts = await booted_runner.sensorium.drain_percepts()
+                    tool_percepts = [
+                        p for p in percepts if p.source == "tool:spawn_object"
+                    ]
+                    assert tool_percepts, "No tool result percept was injected"
+        finally:
+            await server.stop()
+
+    @pytest.mark.asyncio
+    async def test_world_collision_injects_environment_percept(
+        self, booted_runner
+    ):
+        """A collision_event from Godot becomes an environment percept so the
+        entity feels impacts between objects in its world."""
+        port = next_port()
+        server = SanctuaryWebServer(runner=booted_runner, port=port)
+        await server.start()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(
+                    f"http://localhost:{port}/ws/world"
+                ) as ws:
+                    await asyncio.wait_for(ws.receive_json(), timeout=2.0)  # hello
+                    await ws.send_json({
+                        "type": "collision_event",
+                        "object_a": "Red Cube",
+                        "object_b": "Blue Sphere",
+                        "collision_point": [1.5, 0.0, 2.0],
+                        "impact_velocity": 3.2,
+                    })
+                    await asyncio.sleep(0.1)
+                    percepts = await booted_runner.sensorium.drain_percepts()
+                    env = [p for p in percepts if p.modality == "environment"]
+                    assert env, "No environment percept was injected"
+                    content = env[0].content
+                    assert "Red Cube collided with Blue Sphere" in content
+                    assert "impact: 3.2" in content
+        finally:
+            await server.stop()
+
 
 # ---------------------------------------------------------------------------
 # Tests: DoS connection cap
