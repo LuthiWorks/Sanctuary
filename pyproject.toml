@@ -11,7 +11,7 @@ dependencies = [
     # Core ML dependencies
     "numpy>=2.3.4",
     "torch>=2.12.1",
-    "transformers>=5.3.0",
+    "transformers>=5.5.0",
     "sentence-transformers>=5.1.2",
     "langchain>=1.3.9,<2.0",
     "langchain-community>=0.4.1",
