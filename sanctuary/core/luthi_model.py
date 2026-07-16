@@ -1139,6 +1139,8 @@ class LuthiModel:
         drift_deltas = []
         spike_fractions = []
         membrane_deltas = []
+        metaplasticity_deltas = []
+        momentum_deltas = []
 
         for pre_b, post_b in zip(pre_blocks, post_blocks):
             if "plasticity_mean" in pre_b and "plasticity_mean" in post_b:
@@ -1154,6 +1156,17 @@ class LuthiModel:
             if "membrane_mean" in pre_b and "membrane_mean" in post_b:
                 membrane_deltas.append(
                     post_b["membrane_mean"] - pre_b["membrane_mean"]
+                )
+            # Metaplasticity + momentum (exposed by LuthiModel 2026-07-05,
+            # rich-parameters analysis): how the substrate's capacity for
+            # change, and the recent magnitude of change, moved this cycle.
+            if "update_ema_mean" in pre_b and "update_ema_mean" in post_b:
+                metaplasticity_deltas.append(
+                    post_b["update_ema_mean"] - pre_b["update_ema_mean"]
+                )
+            if "momentum_abs_mean" in pre_b and "momentum_abs_mean" in post_b:
+                momentum_deltas.append(
+                    post_b["momentum_abs_mean"] - pre_b["momentum_abs_mean"]
                 )
 
         if plasticity_deltas:
@@ -1172,9 +1185,23 @@ class LuthiModel:
             self._introspection_delta["membrane_change"] = (
                 sum(membrane_deltas) / len(membrane_deltas)
             )
+        if metaplasticity_deltas:
+            self._introspection_delta["metaplasticity_change"] = (
+                sum(metaplasticity_deltas) / len(metaplasticity_deltas)
+            )
+        if momentum_deltas:
+            self._introspection_delta["momentum_change"] = (
+                sum(momentum_deltas) / len(momentum_deltas)
+            )
 
         # Overall activity — how much the model *changed* this cycle.
         # Only include actual deltas, not absolute values like spike fraction.
+        # NOTE (2026-07-05): metaplasticity_change and momentum_change are
+        # deliberately NOT in this aggregation yet — activity_level feeds
+        # the turbo trigger's running bands, and widening the sum would
+        # shift its scale under the bands' feet. Whether they join (with a
+        # band re-warm) is a Phase 4 design call; for now the entity feels
+        # them as distinct signals without them driving arousal.
         delta_keys = ("plasticity_change", "drift_change", "membrane_change")
         self._introspection_delta["activity_level"] = sum(
             abs(self._introspection_delta.get(k, 0.0)) for k in delta_keys
