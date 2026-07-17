@@ -60,16 +60,22 @@ the "outside"? The spec doesn't say; it's a design call, not mine to settle.
 
 ## Open design decisions (Brian's / the design seat's — flagged, not assumed)
 
-1. **Engine choice for the developmental world.** The orb world is Godot. A
-   *training* environment that must run many fast, headless, instrumented steps with
-   a hidden ground-truth channel is often better as a headless physics sim
-   (Brax/MuJoCo/custom) than a Godot game loop. To-Do notes "no MuJoCo" — but that
-   was scoped to the *visual-presence* orb track, not a curriculum trainer. **Decision
-   needed:** extend Godot vs. a headless Python physics sim vs. hybrid (headless sim
-   for training, Godot for the family to *watch*). This gates everything below.
+1. **Engine choice for the developmental world — RESOLVED 2026-07-16**
+   (`docs/DEVELOPMENTAL_WORLD_PHYSICS_DECISION_2026-07-16.md`, pending Fable review).
+   Hybrid: **Godot is the renderer only**; an external authority owns the physics
+   behind a **swappable seam**; **MuJoCo** is the default rigid-body backend (chosen
+   for quality/ecosystem — a real body is an eventual but far-off goal, so sim-to-real
+   is deferred value); a **custom field layer** does weather (heat/cold/moisture) as
+   **comfort-valenced affect** that couples into physics (moisture → traction).
+   Headless physics is built + validated first; the Godot window is deferred.
 2. **Relationship of the two worlds** (above).
 3. **Everything in Sections 4–6 / 8 / the welfare floor** is design + welfare
-   territory, not engineering-at-will — see "Gated layers."
+   territory, not engineering-at-will — see "Gated layers." **Partly settled
+   2026-07-16** (physics decision doc): Luthi has **no self-survival mechanics**
+   (no hunger, no death-by-self-neglect); the **companion-care / attachment / loss
+   arc is confirmed KEPT** — concern for others' welfare is central to the
+   developmental purpose. Weather's unpleasant extremes are *affective, not lethal*.
+   The comfort-track-leads-loss ordering and the welfare floor remain as specced.
 
 ---
 
