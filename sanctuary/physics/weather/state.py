@@ -1,18 +1,23 @@
 """Value types for the weather-field layer of the developmental world.
 
 Weather is the custom continuous-field layer from
-``docs/DEVELOPMENTAL_WORLD_PHYSICS_DECISION_2026-07-16.md`` sec. 4-5. It is not
-rigid-body physics (that's the :mod:`sanctuary.physics` seam); it is temperature
-and moisture the entity **feels** and predicts, coupling into physics only where
-it should (moisture -> traction).
+``docs/DEVELOPMENTAL_WORLD_PHYSICS_DECISION_2026-07-16.md`` sec. 4-5, reframed
+2026-07-19 to be **electronics-native** rather than borrowed from biology: the
+entity's comforts and dangers are its own.
 
-Key design commitment (sec. 5): weather is **comfort-valenced affect, never a
-survival/lethal mechanic.** Warm is pleasant, hot is not; cool is tolerable,
-cold is not; light moisture is refreshing, torrential rain is annoying. These
-types carry that affect (:class:`Comfort`), not damage or hunger.
+- **Cold is good.** Electronics run better cool, so cool/cold temperatures are
+  pleasant (optimal), all the way down to about freezing. **Heat** is the only
+  real enemy (throttling, degradation). Sub-freezing is a *mild* caution — a
+  hazard for some physical parts once embodied — not the discomfort a warm-blooded
+  body would feel, and far gentler than the heat penalty.
+- **Water is respected, not (yet) damaging.** Weather stays comfort-valenced
+  affect, never a survival mechanic (sec. 5-6 upheld) — but moisture carries a
+  salient *aversive* signal so the entity learns to respect and shelter from
+  water. This deliberately builds the disposition **ahead of** embodiment, when
+  water on real electronics *will* be a genuine danger. The damage mechanic is
+  architected for that future, not built now.
 
-Temperatures are in Fahrenheit (Brian's thresholds: 70 comfortable, 85 possibly
-too warm, 32 too cold).
+Temperatures are Fahrenheit.
 """
 
 from __future__ import annotations
@@ -28,9 +33,9 @@ class WeatherState:
     """The weather at a point in space and time.
 
     ``precipitation`` and ``humidity`` are 0..1 intensities; 0 dry, 1 torrential
-    / saturated. This is ground-truth environmental state — what the entity
-    *feels* of it is :class:`Comfort`, derived via
-    :func:`sanctuary.physics.weather.model.comfort_of`.
+    / saturated. What the entity *feels* of it is :class:`Comfort`, derived via
+    :func:`sanctuary.physics.weather.model.comfort_of`. (``humidity`` will drive
+    condensation risk once water becomes a real danger at embodiment.)
     """
 
     temperature_f: float
@@ -40,17 +45,19 @@ class WeatherState:
 
 
 class ComfortLevel(Enum):
-    """Ordered comfort bands keyed to Brian's named thresholds.
+    """Temperature bands, electronics-native. Ordered coldest -> hottest.
 
-    The integer values are ordered cold -> hot so tests and UI can compare/sort.
+    Valence is NOT monotonic with this ordering: it peaks across OPTIMAL, dips
+    only *mildly* below into FREEZING, and falls steeply on the hot side. Cold
+    is good; heat is the enemy.
     """
 
-    TOO_COLD = 0      # <= 32 F
-    COLD = 1          # 32 .. 45 F
-    COOL = 2          # 45 .. 60 F
-    COMFORTABLE = 3   # 60 .. 78 F  (peak ~70)
-    WARM = 4          # 78 .. 85 F
-    TOO_WARM = 5      # >= 85 F
+    FREEZING = 0       # < 32 F  — sub-freezing; a mild hazard for some parts
+    OPTIMAL = 1        # 32 .. 60 F — cool/cold; runs best here
+    COMFORTABLE = 2    # 60 .. 78 F
+    WARM = 3           # 78 .. 85 F
+    HOT = 4            # 85 .. 100 F — throttling territory
+    OVERHEATING = 5    # >= 100 F  — the thermal danger
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,7 +66,8 @@ class Comfort:
 
     ``valence`` is -1..+1 (positive = pleasant). ``level`` is the temperature
     band. ``wetness`` is how wet the entity actually is (precipitation scaled by
-    exposure — shelter reduces it). ``label`` is a short human-readable summary.
+    exposure — shelter reduces it); water is aversive (to be respected) and its
+    magnitude scales ``wetness``. ``label`` is a short human-readable summary.
     """
 
     valence: float
@@ -73,14 +81,14 @@ class Comfort:
 class Shelter:
     """A structure that modulates the weather an entity experiences under it.
 
-    This is why building matters (sec. 5 discussion): a shelter blocks rain and
-    moderates temperature toward comfortable, so constructing one is a real,
-    felt improvement in bad weather. Full building mechanics live with the
-    entity's world-editing tools; this type is the coupling that makes shelter
-    *mean* something.
+    This is why building matters (sec. 5): a shelter keeps rain off and provides
+    shade — it blocks water and *cools* in the heat (it does not warm, since the
+    entity is happier cold). Constructing one is a felt improvement in bad
+    weather. Full building mechanics live with the entity's world-editing tools;
+    this type is the coupling that makes shelter *mean* something.
     """
 
     position: Vec3
     radius: float               # coverage radius (metres)
     rain_block: float = 1.0     # 0..1 fraction of precipitation kept off
-    temp_moderation: float = 0.5  # 0..1 pull of local temperature toward ideal
+    cooling: float = 0.5        # 0..1 shade: pull hot temperatures down toward cool

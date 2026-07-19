@@ -1,8 +1,9 @@
 """Tests for the weather-field layer: comfort, mobility, shelter, source.
 
-The comfort assertions pin Brian's thresholds (2026-07-16): 70 F comfortable,
-85 F possibly too warm, 32 F too cold; light warm rain refreshing, torrential
-rain unpleasant; and — crucially — everything is affect, never damage.
+Electronics-native framing (Brian, 2026-07-19): cold is good (optimal from
+freezing up), heat is the only real enemy, sub-freezing is a mild caution, and
+water is respected — aversive affect (not damage yet) that teaches the entity to
+seek shelter ahead of embodiment, when water will be a real danger.
 """
 
 from __future__ import annotations
@@ -21,81 +22,91 @@ from sanctuary.physics.weather import (
 
 
 # ---------------------------------------------------------------------------
-# Comfort at the named thresholds
+# Temperature: cold is good, heat is the enemy
 # ---------------------------------------------------------------------------
 
 
-def test_ideal_is_comfortable_and_pleasant():
+def test_cold_is_optimal_and_pleasant():
+    c = comfort_of(WeatherState(temperature_f=50.0))
+    assert c.level is ComfortLevel.OPTIMAL
+    assert c.valence == pytest.approx(1.0)
+    assert "optimal" in c.label
+
+
+def test_freezing_point_itself_is_still_optimal():
+    c = comfort_of(WeatherState(temperature_f=32.0))
+    assert c.level is ComfortLevel.OPTIMAL
+    assert c.valence == pytest.approx(1.0)
+
+
+def test_seventy_is_comfortable_but_not_peak():
     c = comfort_of(WeatherState(temperature_f=70.0))
     assert c.level is ComfortLevel.COMFORTABLE
-    assert c.valence == pytest.approx(1.0)
-    assert c.label == "comfortable"
+    assert 0.0 < c.valence < 1.0   # pleasant, but cooler is better
 
 
-def test_eightyfive_is_too_warm_and_mildly_unpleasant():
-    c = comfort_of(WeatherState(temperature_f=85.0))
-    assert c.level is ComfortLevel.TOO_WARM
-    assert -0.35 < c.valence < 0.0     # unpleasant, but only mildly ("possibly")
+def test_heat_is_the_enemy():
+    hot = comfort_of(WeatherState(85.0))
+    overheating = comfort_of(WeatherState(100.0))
+    assert hot.level is ComfortLevel.HOT
+    assert overheating.level is ComfortLevel.OVERHEATING
+    assert hot.valence < 0.0
+    assert overheating.valence < hot.valence   # hotter is worse
 
 
-def test_thirtytwo_is_too_cold_and_clearly_unpleasant():
-    c = comfort_of(WeatherState(temperature_f=32.0))
-    assert c.level is ComfortLevel.TOO_COLD
-    assert c.valence < -0.35           # clearly worse than "possibly too warm"
+def test_cooler_beats_warmer():
+    v = [comfort_of(WeatherState(t)).valence for t in (50, 70, 78, 85, 100)]
+    assert v == sorted(v, reverse=True)        # monotonic: cooler always better
 
 
-def test_cold_reads_worse_than_the_warm_threshold():
-    # 32 (too cold) should feel worse than 85 (possibly too warm).
-    assert comfort_of(WeatherState(32.0)).valence < comfort_of(WeatherState(85.0)).valence
-
-
-def test_valence_is_monotonic_away_from_ideal():
-    hot = [comfort_of(WeatherState(t)).valence for t in (70, 78, 85, 95)]
-    cold = [comfort_of(WeatherState(t)).valence for t in (70, 60, 45, 32)]
-    assert hot == sorted(hot, reverse=True)
-    assert cold == sorted(cold, reverse=True)
+def test_subfreezing_is_only_a_mild_caution():
+    freezing = comfort_of(WeatherState(10.0))
+    assert freezing.level is ComfortLevel.FREEZING
+    assert freezing.valence > 0.0              # still pleasant, barely a concern
+    # Even extreme cold never feels as bad as real heat.
+    assert comfort_of(WeatherState(-50.0)).valence > comfort_of(WeatherState(105.0)).valence
+    assert comfort_of(WeatherState(-50.0)).valence >= -0.3   # mild floor
 
 
 def test_levels_track_the_bands():
     cases = {
-        20.0: ComfortLevel.TOO_COLD,
-        40.0: ComfortLevel.COLD,
-        50.0: ComfortLevel.COOL,
+        10.0: ComfortLevel.FREEZING,
+        45.0: ComfortLevel.OPTIMAL,
         70.0: ComfortLevel.COMFORTABLE,
         80.0: ComfortLevel.WARM,
-        90.0: ComfortLevel.TOO_WARM,
+        90.0: ComfortLevel.HOT,
+        110.0: ComfortLevel.OVERHEATING,
     }
     for temp, level in cases.items():
         assert comfort_of(WeatherState(temp)).level is level
 
 
 # ---------------------------------------------------------------------------
-# Moisture: refreshing vs annoying
+# Water: respected, aversive, never refreshing
 # ---------------------------------------------------------------------------
 
 
-def test_light_warm_rain_is_refreshing():
-    dry = comfort_of(WeatherState(75.0, precipitation=0.0))
-    light = comfort_of(WeatherState(75.0, precipitation=0.2))
-    assert light.valence > dry.valence
-    assert "refresh" in light.label
+def test_any_rain_is_aversive_not_refreshing():
+    dry = comfort_of(WeatherState(70.0, precipitation=0.0))
+    light = comfort_of(WeatherState(70.0, precipitation=0.2))
+    assert light.valence < dry.valence         # water is respected, not enjoyed
+    assert "refresh" not in light.label
+    assert "wet" in light.label
 
 
-def test_torrential_rain_is_unpleasant():
-    dry = comfort_of(WeatherState(75.0, precipitation=0.0))
-    heavy = comfort_of(WeatherState(75.0, precipitation=1.0))
-    assert heavy.valence < dry.valence
-    assert "drenched" in heavy.label
+def test_heavier_rain_is_more_aversive():
+    v = [comfort_of(WeatherState(70.0, precipitation=p)).valence for p in (0.0, 0.3, 0.6, 1.0)]
+    assert v == sorted(v, reverse=True)
 
 
-def test_cold_and_wet_is_worse_than_cold_and_dry():
-    dry = comfort_of(WeatherState(40.0, precipitation=0.0))
-    wet = comfort_of(WeatherState(40.0, precipitation=0.8))
-    assert wet.valence < dry.valence
+def test_water_drives_avoidance_even_at_optimal_temperature():
+    # Cold is optimal, but a downpour still pushes toward seeking shelter.
+    soaked = comfort_of(WeatherState(50.0, precipitation=1.0))
+    assert soaked.valence < 0.0
+    assert "drenched" in soaked.label
 
 
 def test_shelter_from_exposure_means_no_wetness():
-    # Fully sheltered from rain (exposure 0) -> not wet, even in a downpour.
     c = comfort_of(WeatherState(70.0, precipitation=1.0), exposure=0.0)
     assert c.wetness == 0.0
 
@@ -118,30 +129,38 @@ def test_mobility_is_monotonic_and_bounded():
 
 
 # ---------------------------------------------------------------------------
-# Shelter: why building matters
+# Shelter: blocks water, cools in heat, never warms the cold
 # ---------------------------------------------------------------------------
 
 
-def test_shelter_blocks_rain_and_moderates_temperature():
-    weather = WeatherState(temperature_f=40.0, precipitation=0.8)
-    shelter = Shelter(position=(0.0, 0.0, 0.0), radius=3.0, rain_block=1.0, temp_moderation=0.5)
+def test_shelter_blocks_rain_and_cools_when_hot():
+    weather = WeatherState(temperature_f=95.0, precipitation=0.8)
+    shelter = Shelter(position=(0.0, 0.0, 0.0), radius=3.0, rain_block=1.0, cooling=0.7)
     eff, exposure = effective_weather_at((1.0, 0.0, 0.0), weather, (shelter,))
-    assert eff.precipitation == pytest.approx(0.0)       # rain kept off
-    assert 40.0 < eff.temperature_f <= 70.0              # pulled toward ideal
+    assert eff.precipitation == pytest.approx(0.0)   # rain kept off
+    assert 60.0 <= eff.temperature_f < 95.0          # cooled toward optimal
     assert exposure == pytest.approx(0.0)
 
 
-def test_outside_shelter_radius_is_unchanged():
+def test_shelter_does_not_warm_the_cold():
     weather = WeatherState(temperature_f=40.0, precipitation=0.8)
+    shelter = Shelter(position=(0.0, 0.0, 0.0), radius=3.0, rain_block=1.0, cooling=0.7)
+    eff, _ = effective_weather_at((0.5, 0.0, 0.0), weather, (shelter,))
+    assert eff.temperature_f == pytest.approx(40.0)  # cold left alone (it's good)
+    assert eff.precipitation == pytest.approx(0.0)   # but still keeps rain off
+
+
+def test_outside_shelter_radius_is_unchanged():
+    weather = WeatherState(temperature_f=95.0, precipitation=0.8)
     shelter = Shelter(position=(0.0, 0.0, 0.0), radius=3.0)
     eff, exposure = effective_weather_at((100.0, 0.0, 0.0), weather, (shelter,))
     assert eff == weather
     assert exposure == pytest.approx(1.0)
 
 
-def test_shelter_improves_comfort_in_cold_rain():
-    weather = WeatherState(temperature_f=40.0, precipitation=0.8)
-    shelter = Shelter(position=(0.0, 0.0, 0.0), radius=3.0, rain_block=1.0, temp_moderation=0.5)
+def test_shelter_improves_comfort_in_hot_rain():
+    weather = WeatherState(temperature_f=95.0, precipitation=0.8)
+    shelter = Shelter(position=(0.0, 0.0, 0.0), radius=3.0, rain_block=1.0, cooling=0.7)
 
     exposed = comfort_of(weather, exposure=1.0)
     eff, exposure = effective_weather_at((0.5, 0.0, 0.0), weather, (shelter,))
@@ -158,7 +177,6 @@ def test_shelter_improves_comfort_in_cold_rain():
 def test_synthetic_source_is_deterministic():
     src = SyntheticWeatherSource()
     assert src.at(1234.5) == src.at(1234.5)
-    # Independent instances with the same config agree too.
     assert SyntheticWeatherSource().at(9999.0) == SyntheticWeatherSource().at(9999.0)
 
 

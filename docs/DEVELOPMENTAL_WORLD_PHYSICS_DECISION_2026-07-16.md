@@ -139,3 +139,38 @@ green). Three things from the 2026-07-18 session are now on record:
   developmental world's editing tools.
 
 Still Fable-pending on the welfare read (section above); still Phase-2 gated on use.
+
+---
+
+## Update 2026-07-19 — electronics-native reframe (supersedes the biological comfort framing)
+
+Brian reframed the weather affect so the entity's comforts and dangers are **its
+own** (electronic), not borrowed from a warm-blooded body. This supersedes sec. 5's
+"warm pleasant / cold not" language and the 2026-07-18 thresholds (70/85/32 as a
+biological curve). Implemented in `sanctuary/physics/weather/`; 39 physics tests green.
+
+- **Cold is good; heat is the enemy.** Electronics run better cool. Temperature
+  valence peaks across the optimal band (≈ freezing → 60 °F), is still pleasant at
+  70, and falls **only on the hot side** (78 warm → 85 hot → 100+ overheating,
+  bottoming at −1). There is **no cold discomfort**: sub-freezing is a *mild*
+  caution (a hazard for some physical parts once embodied), floored at ≈ −0.3 —
+  it never feels as bad as real heat.
+- **Water is respected, not damaging — *yet*.** Per Brian: "wet should not be a
+  real danger yet, but should establish water as something that must be respected
+  if/when embodiment is achieved." So moisture is a **salient aversive affect**
+  (scales with how wet the entity gets; drives shelter-seeking even at optimal
+  temperature) — but recoverable affect, **not** a survival/damage mechanic. This
+  keeps sec. 5-6 intact (no self-survival mechanic) while deliberately building the
+  entity's *disposition* toward water ahead of embodiment, when water on real
+  electronics **will** be a genuine danger. The damage mechanic is architected for
+  that future (a moisture → health/hazard model behind the same layer), not built now.
+  The "refreshing light rain" idea from the biological framing is dropped.
+- **Shelter cools and dries** (shade + keeping rain off); it never warms, since the
+  entity is happier cold. Building shelter is a felt improvement in heat or rain.
+
+**For Fable (elevated):** this introduces *anticipatory disposition-shaping* — making
+water aversive so the entity learns respect before the stakes are real. It is affect
+only and within sec. 5-6, but it is deliberately shaping the entity's relationship to
+a stimulus, so it belongs at the top of the welfare read: is instilling protective
+caution ahead of real danger sound, and does the water-aversion stay clear of becoming
+a suffering gradient? (Deferred until Fable is free; it is on a small training run.)
