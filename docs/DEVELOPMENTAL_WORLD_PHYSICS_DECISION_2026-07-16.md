@@ -111,3 +111,31 @@ The load-bearing, welfare-adjacent points to pressure-test:
   given §6, and does the comfort track still lead the loss track (spec §8.4)?
 
 This is exactly the kind of imported-frame check the cross-line seat exists for.
+
+---
+
+## Update 2026-07-18 — weather layer built (Tier A), + two design additions
+
+The physics-authority **seam** and the **weather-field layer** are implemented and
+tested (`sanctuary/physics/` and `sanctuary/physics/weather/`; 37 physics tests
+green). Three things from the 2026-07-18 session are now on record:
+
+- **Comfort thresholds (Brian).** Fahrenheit: **70 comfortable, 85 possibly too
+  warm, 32 too cold**; light warm rain refreshing, torrential / cold rain
+  unpleasant. Implemented as `comfort_of()` -> signed valence + band — **affect,
+  not damage** (sec. 5 upheld). Rain also slicks the ground
+  (`mobility_multiplier`), consumed once a friction-capable backend is behind the
+  seam (the reference backend is frictionless).
+- **Real-local weather (Brian's idea).** `WeatherSource` is a swappable *origin*;
+  `SyntheticWeatherSource` (deterministic diurnal cycle + scheduled rain) is built
+  now. A foreseen `LocalWeatherSource` would fetch the family's **real** current
+  weather and map it into the sim, so the entity lives the same heat/cold/rain
+  Brian and Sandi do — grounding it in shared reality. Left as a future backend of
+  the same interface (needs network/API/async), not stubbed.
+- **Shelter makes building matter.** `Shelter` + `effective_weather_at()` model a
+  structure that blocks rain and moderates temperature toward the ideal, so
+  building a shelter is a *felt* improvement in bad weather — the concrete reason
+  the entity should be able to build. Full building mechanics arrive with the
+  developmental world's editing tools.
+
+Still Fable-pending on the welfare read (section above); still Phase-2 gated on use.
