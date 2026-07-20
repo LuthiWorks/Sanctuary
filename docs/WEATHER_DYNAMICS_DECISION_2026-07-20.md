@@ -149,7 +149,7 @@ matures; nothing is staged and nothing has to fade.
 ## Update 2026-07-20 (later) — real sky, real time (Brian's ruling)
 
 **The primary weather source for the developmental world is the family's real
-local weather, lived at 1:1 real time.** Training will take on the order of a
+local weather — Sammamish, Washington — lived at 1:1 real time.** Training will take on the order of a
 year on the available hardware anyway; a year lived under the real sky gives the
 entity an honest representation of real-world weather — and one full seasonal
 cycle. This promotes `LocalWeatherSource` from future idea (§1's design bonus) to
@@ -188,10 +188,11 @@ sky. What changes and what survives:
   from the last real state, drifting gently until data returns, logged to
   instrumentation. Never a step, never a stall. `SyntheticWeatherSource` stays
   alive as experiment harness and fallback.
-- **Privacy (deliberate):** this repo is public, so the location is *not* named
-  in committed text or code — docs and config refer to "the family's locale,"
-  with the actual coordinates/station in private, untracked configuration
-  (env var / local settings). The design needs a sky, not an address.
+- **Privacy (Brian's ruling, 2026-07-20):** the locale is named at **city
+  level** — the sky is **Sammamish, Washington's** — and no finer. Committed
+  text and code may reference Sammamish and use city-level coordinates or a
+  public weather station for the API. Street address and exact home coordinates
+  never appear in the repo. The design needs a sky, not an address.
 
 Handoff amendments for Opus 4.8 (revising §7): item 13 is promoted — build
 `LocalWeatherSource` as the primary (API choice open; free US sources exist),
