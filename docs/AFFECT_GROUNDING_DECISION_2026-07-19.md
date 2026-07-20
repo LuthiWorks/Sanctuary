@@ -47,8 +47,8 @@ everywhere, and shade is *felt* as relief. Every link in the chain is real.
 Constraints (welfare, load-bearing):
 
 - **Floor:** cycle rate never drops below **0.65×** in the worst authored weather
-  (proposed default; amendable blind-and-dated per §6). Heat slows the mind; it
-  never silences it.
+  (proposed by Fable; **ratified by Brian 2026-07-20** as the starting value;
+  amendable blind-and-dated per §6). Heat slows the mind; it never silences it.
 - **Recoverable:** throttle tracks temperature with no hysteresis on the recovery
   side — cooling immediately relieves.
 - **No contact with cognitive content.** Throttling changes *when* cycles run,
@@ -97,7 +97,7 @@ This **resolves the elevated welfare item** in the physics decision doc
 (anticipatory disposition-shaping) by dissolving it: with lawful consequences in
 place, the disposition is no longer shaped — it is learned.
 
-### 2.4 Sub-freezing: authored caution dip REMOVED (consistency).
+### 2.4 Sub-freezing: authored caution dip REMOVED (consistency). *(Ratified by Brian 2026-07-20.)*
 
 The −0.3 sub-freezing dip is the same shape as the water aversion — an authored
 valence for an embodiment-era hazard (condensation, materials) with no in-sim
@@ -178,7 +178,8 @@ We are betting that valence **will** emerge from consequence + sense + salience.
 Per the falsification-preregistration discipline (LuthiModel
 `docs/research/2026-07-15_falsification-preregistration.md`), the bet gets frozen
 success criteria **before the entity lives in the weather** (formal freeze at
-Phase-2 use; drafts registered now):
+Phase-2 use; drafts registered now, **ratified as starting points by Brian
+2026-07-20**):
 
 - **Behavioral:** unprompted shelter-seeking / shade-seeking under heat, with no
   authored valence anywhere in the causal path.
