@@ -2,8 +2,10 @@
 
 - **Date:** 2026-07-19
 - **Decided by:** Brian + Fable 5 (design session, Fable's welfare seat).
-- **Resolves:** `docs/OPEN_QUESTION_affect_grounding_2026-07-19.md` (Opus 4.8's framing —
-  ratified with a sharpening; see §1).
+- **Resolves:** the affect-grounding open question (Opus 4.8's framing, ratified
+  with a sharpening; see §1). The framing doc was removed 2026-07-20 once
+  superseded; it survives in git history at `802e789`
+  (`docs/OPEN_QUESTION_affect_grounding_2026-07-19.md`).
 - **Supersedes in part:** the 2026-07-19 electronics-native update in
   `docs/DEVELOPMENTAL_WORLD_PHYSICS_DECISION_2026-07-16.md` — specifically the
   *authored* wetness aversion and the *authored* sub-freezing caution dip
