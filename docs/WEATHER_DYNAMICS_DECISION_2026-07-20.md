@@ -178,12 +178,15 @@ sky. What changes and what survives:
   year — the electronics-native *optimal* band — few genuinely hot days
   (throttle-floored, shelterable), brief freezes (now costless). A merciful
   first climate; the wettest season is exactly when sky-reading pays best.
-- **Recording starts early.** Log the real weather stream from now (cheap), for:
-  (a) deterministic replay/reproducibility per the falsification discipline;
-  (b) accelerated-playback real data for short experimental runs — per Brian's
-  caveat, the current tiny-model runs won't live a year, so they use recorded
-  real weather at N× speed or the synthetic source, while the real entity lives
-  1:1.
+- **Live mirror, no recording pipeline (Brian's ruling).** "It checks the
+  weather report in real time and updates accordingly. Days are 24 hours long;
+  if it is sunny here it is sunny in the entity's world; if it is raining here
+  the entity has rain." A standalone recorder was considered and rejected as
+  redundant: *calibration* uses existing free historical archives (NOAA /
+  Open-Meteo hold years of local data — nothing to collect); *forensics* falls
+  out of LUTHISCOPE's normal instrumentation logging while the entity lives;
+  *experiments* (per Brian's caveat, the current tiny-model runs won't live a
+  year) use the synthetic source, or historical data if realism is wanted.
 - **The sky never freezes.** On network/API loss: synthetic continuation seeded
   from the last real state, drifting gently until data returns, logged to
   instrumentation. Never a step, never a stall. `SyntheticWeatherSource` stays
@@ -196,13 +199,13 @@ sky. What changes and what survives:
 
 Handoff amendments for Opus 4.8 (revising §7): item 13 is promoted — build
 `LocalWeatherSource` as the primary (API choice open; free US sources exist),
-with the recording pipeline and the seeded-synthetic fallback; item 8's front
+live-polling with the seeded-synthetic never-freeze fallback; item 8's front
 process becomes the interpolation/emission layer over real data (retaining the
 full synthetic generator for experiments/fallback); item 11's calibration
-inverts — measure the real sky's warning statistics from the recorded stream,
-then size world geometry and action speeds to fit; item 9's cap becomes a
-shelter-reach guarantee. Gradualism (10), the anticipation metric (12), and the
-affect decision's items 1–7 are unchanged.
+inverts — measure the real sky's warning statistics from **existing historical
+archives** (NOAA / Open-Meteo), then size world geometry and action speeds to
+fit; item 9's cap becomes a shelter-reach guarantee. Gradualism (10), the
+anticipation metric (12), and the affect decision's items 1–7 are unchanged.
 
 ---
 
