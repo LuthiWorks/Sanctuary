@@ -220,6 +220,11 @@ Hand-me-the-shape list (per the open question's handoff):
    `SyntheticWeatherSource` scheduling (and document it as a contract for any
    future weather source).
 
+Items 8–13 (front-process weather source, wind coupling, gradualism, warning
+tiers, anticipation metric, API-mappable emissions) are added by
+`docs/WEATHER_DYNAMICS_DECISION_2026-07-20.md` §7 — the two lists are one
+handoff.
+
 Doc updates included in this decision's commit: the open question marked DECIDED;
 the physics decision doc's pending Fable welfare read closed (see its 2026-07-19
 Fable section).
