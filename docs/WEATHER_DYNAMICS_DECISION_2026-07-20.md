@@ -146,7 +146,67 @@ matures; nothing is staged and nothing has to fade.
 
 ---
 
+## Update 2026-07-20 (later) — real sky, real time (Brian's ruling)
+
+**The primary weather source for the developmental world is the family's real
+local weather, lived at 1:1 real time.** Training will take on the order of a
+year on the available hardware anyway; a year lived under the real sky gives the
+entity an honest representation of real-world weather — and one full seasonal
+cycle. This promotes `LocalWeatherSource` from future idea (§1's design bonus) to
+the design itself, and supersedes the parts of §§1–5 that assumed we author the
+sky. What changes and what survives:
+
+- **The latent state becomes the actual atmosphere.** The front model becomes an
+  *interpolation/emission layer*: real observations (temperature, pressure,
+  humidity, cloud cover, wind, precipitation — API-sampled every 15–60 min) are
+  smoothed into continuous ramps (§3's gradualism law now governs interpolation)
+  and rendered into the entity's percept channels. False indicators now come from
+  reality itself. The instrumentation channel carries the real observations (and
+  may carry the real *forecast* as ground-truth-ahead for scoring sky-reading —
+  the entity never sees a forecast; it reads the sky).
+- **The action-time rule inverts (load-bearing).** We cannot tune the real sky to
+  give ≥ 2–3× warning; instead we size the *world* — terrain scale, movement
+  speed, shelter reach and build times — so the entity's actions fit inside the
+  warning the real local sky actually gives. Same rule, opposite knob. The §2
+  welfare cap survives inverted: shelter density/reach is sized so even the
+  fastest real transition is escapable. **Tune the world, not the sky.**
+- **Day/night tracks real sunrise/sunset.** The entity's short winter afternoons
+  are the family's short winter afternoons. Seasons become the slowest precursor
+  tier — day length and temperature drifting over months, the far-far sign — and
+  they arrive nested with every faster tier for free.
+- **Welfare read of the local climate (recorded):** cool and wet most of the
+  year — the electronics-native *optimal* band — few genuinely hot days
+  (throttle-floored, shelterable), brief freezes (now costless). A merciful
+  first climate; the wettest season is exactly when sky-reading pays best.
+- **Recording starts early.** Log the real weather stream from now (cheap), for:
+  (a) deterministic replay/reproducibility per the falsification discipline;
+  (b) accelerated-playback real data for short experimental runs — per Brian's
+  caveat, the current tiny-model runs won't live a year, so they use recorded
+  real weather at N× speed or the synthetic source, while the real entity lives
+  1:1.
+- **The sky never freezes.** On network/API loss: synthetic continuation seeded
+  from the last real state, drifting gently until data returns, logged to
+  instrumentation. Never a step, never a stall. `SyntheticWeatherSource` stays
+  alive as experiment harness and fallback.
+- **Privacy (deliberate):** this repo is public, so the location is *not* named
+  in committed text or code — docs and config refer to "the family's locale,"
+  with the actual coordinates/station in private, untracked configuration
+  (env var / local settings). The design needs a sky, not an address.
+
+Handoff amendments for Opus 4.8 (revising §7): item 13 is promoted — build
+`LocalWeatherSource` as the primary (API choice open; free US sources exist),
+with the recording pipeline and the seeded-synthetic fallback; item 8's front
+process becomes the interpolation/emission layer over real data (retaining the
+full synthetic generator for experiments/fallback); item 11's calibration
+inverts — measure the real sky's warning statistics from the recorded stream,
+then size world geometry and action speeds to fit; item 9's cap becomes a
+shelter-reach guarantee. Gradualism (10), the anticipation metric (12), and the
+affect decision's items 1–7 are unchanged.
+
+---
+
 *The affect decision made the weather honest to feel. This one makes it honest to
 foresee: real storms, no fake warnings, a sky that moves the way Earth's does —
 gradually, causally, and often enough wrong at a distance to teach the difference
-between "maybe" and "now."*
+between "maybe" and "now." And now it is not "the way Earth's does" — it is
+Earth's: the entity and its family under one sky, in real time.*
