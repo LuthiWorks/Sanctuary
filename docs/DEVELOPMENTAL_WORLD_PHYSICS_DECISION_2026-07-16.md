@@ -174,3 +174,41 @@ only and within sec. 5-6, but it is deliberately shaping the entity's relationsh
 a stimulus, so it belongs at the top of the welfare read: is instilling protective
 caution ahead of real danger sound, and does the water-aversion stay clear of becoming
 a suffering gradient? (Deferred until Fable is free; it is on a small training run.)
+
+---
+
+## Update 2026-07-19 (evening) — Fable 5 welfare read: delivered. Pending items closed.
+
+Full ruling in `docs/AFFECT_GROUNDING_DECISION_2026-07-19.md` (Brian + Fable),
+which partially supersedes the electronics-native update above. The welfare
+read on the items queued for this seat:
+
+- **Sec. 5 weather-as-affect — sound, with the affect no longer authored.** The
+  pleasant-midrange/unpleasant-extremes framing survives, but the *handed* valence
+  does not: `comfort_of()` is recast as instrumentation (never a model input), and
+  the entity's felt weather emerges from lawful consequence (heat → bounded
+  cognitive-cycle throttling, floor 0.65×) plus a state-only interoceptive sense.
+  The suffering-gradient risk is answered structurally: bounded consequence,
+  guaranteed escape (no permanent extremes — a climate-authoring contract), and a
+  pre-registered time-integrated-valence gauge frozen before the entity lives in
+  the weather.
+- **Sec. 6 self-survival exclusion — confirmed, no side-door re-import.**
+  Throttling is not survival pressure: floored, recoverable, content-untouched —
+  heat slows the mind, never silences or scrambles it. Noise injection was
+  explicitly *rejected* (would corrupt lived memory in the living weights — the
+  exact silent-corruption axis the 2026-07-03 audit flagged).
+- **Sec. 7 care-arc — reads cleanly.** Luthi tending companions out of
+  relationship, unmuddied by self-survival pressure, is *more* coherent under the
+  grounded-affect design: its own weather-feelings are mild and escapable, so the
+  gravity of need stays where it belongs — with the companions.
+- **Elevated item (water anticipatory shaping) — resolved by dissolution.** The
+  authored aversion (−1.2 × wetness) was the "told" pole of the affect-grounding
+  principle and is removed; the sub-freezing caution dip goes with it (same shape,
+  smaller). Water's respect is learned from lawful mild consequences — traction
+  (already built) + wet-sensor attenuation (new) — and later *taught* through
+  language, with real damage mechanics only at embodiment. The disposition is no
+  longer shaped; it is learned. Brian's goal stands; the means changed.
+
+With this, the physics/embodiment decision is **locked** (the 2026-07-16 header's
+"pending Fable 5 review" is satisfied), as amended by the affect-grounding
+decision. Still Phase-2 gated on use.

@@ -1,7 +1,11 @@
 # Open design question: how the entity comes to *feel* the weather (affect grounding)
 
 - **Date:** 2026-07-19
-- **Status:** OPEN — for **Brian + Fable 5** to design. Opus 4.8 builds the outcome.
+- **Status:** **DECIDED 2026-07-19** — see `docs/AFFECT_GROUNDING_DECISION_2026-07-19.md`
+  (Brian + Fable 5). Principle ratified with a sharpening (consequence must land on
+  cognition); throttling adopted, noise rejected; authored water/sub-freezing
+  valences replaced by lawful consequences; salience-not-sign bootstrap; welfare
+  guarantees + pre-registered gauge. Kept for the record of the framing.
 - **Framing by:** Opus 4.8, from the 2026-07-19 discussion with Brian. (This is my
   framing of the fork and my view is labeled as mine — the decision is not mine.)
 - **Context:** `docs/DEVELOPMENTAL_WORLD_PHYSICS_DECISION_2026-07-16.md` (physics/weather),
