@@ -68,6 +68,11 @@ dependencies = [
     "cryptography>=48.0.0",
 ]
 
+[project.optional-dependencies]
+mujoco = [
+    "mujoco>=3.0",
+]
+
 [tool.setuptools.packages.find]
 include = ["sanctuary*"]
 exclude = ["tests*"]

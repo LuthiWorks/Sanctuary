@@ -5,8 +5,19 @@ Architecture decision: ``docs/DEVELOPMENTAL_WORLD_PHYSICS_DECISION_2026-07-16.md
 The developmental (rover) world is a hybrid: **Godot renders, an external
 authority owns the physics.** This package is that authority's boundary — the
 *seam*. The seam is the load-bearing commitment; the engine behind it is
-swappable (a dependency-free ``ReferencePhysicsAuthority`` now; MuJoCo as the
-default rigid-body backend later).
+swappable, and both engines now exist:
+
+* :class:`~sanctuary.physics.backends.reference.ReferencePhysicsAuthority` —
+  dependency-free point-mass dynamics. Deterministic, instant, and what CI runs.
+* :class:`~sanctuary.physics.backends.mujoco_backend.MuJoCoPhysicsAuthority` —
+  real rigid-body dynamics with solved contact, for the developmental world.
+  Requires the optional ``mujoco`` extra (``uv sync --extra mujoco``) and is
+  imported lazily, so this package stays importable without it.
+
+They differ only where physics genuinely differs — a MuJoCo body has volume and
+compliant contacts, so it rests at its radius rather than at exactly zero.
+``tests/physics/test_mujoco_backend.py`` holds both to the same contract and
+diffs their behaviour against each other.
 
 One producer (a :class:`PhysicsAuthority`), three consumers, each with its own
 view of the world so the wrong data can never reach the wrong place:
