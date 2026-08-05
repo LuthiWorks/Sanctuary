@@ -47,6 +47,22 @@ convention is Z-up. The generated model therefore sets
 ``zaxis="0 1 0"`` so its normal points along +Y. Every quantity crossing the
 seam is in the seam's frame; no transposition happens above this file.
 
+Cameras
+-------
+
+This backend adds a capability the seam does not define: **rendered vision**.
+:meth:`MuJoCoPhysicsAuthority.attach_camera` and
+:meth:`MuJoCoPhysicsAuthority.render_camera` are deliberately *not* on
+:class:`~sanctuary.physics.authority.PhysicsAuthority`, because the reference
+backend has no geometry to draw and cannot honestly implement them. Rendering is
+a property of an engine, not of the seam.
+
+A camera attached to a body is an **eye** -- the visual counterpart of the
+egocentric framing ``sanctuary.sensorium.physics_percepts`` applies to spatial
+perception. Rendering is offscreen; no window opens.
+``sanctuary.sensorium.physics_vision`` turns the resulting frame into a
+:class:`~sanctuary.core.schema.Percept` carrying an encoder-ready tensor.
+
 Integration
 -----------
 
@@ -60,7 +76,11 @@ exactly ``dt``. The seam's clock advances by ``dt`` once per call regardless, so
 
 from __future__ import annotations
 
+import colorsys
+import hashlib
 import math
+from dataclasses import dataclass
+from typing import Any
 from xml.sax.saxutils import quoteattr
 
 from sanctuary.physics.authority import PhysicsAuthority
@@ -75,7 +95,14 @@ from sanctuary.physics.state import (
     Vec3,
 )
 
-__all__ = ["MuJoCoPhysicsAuthority", "DEFAULT_BODY_RADIUS", "DEFAULT_MAX_SUBSTEP"]
+__all__ = [
+    "MuJoCoPhysicsAuthority",
+    "CameraSpec",
+    "CameraFrame",
+    "DEFAULT_BODY_RADIUS",
+    "DEFAULT_MAX_SUBSTEP",
+    "DEFAULT_CAMERA_SIZE",
+]
 
 GRAVITY: float = -9.81
 GROUND_Y: float = 0.0
@@ -93,6 +120,78 @@ DEFAULT_MAX_SUBSTEP: float = 0.005
 #: reference's 1e-9 because compliant contact converges to a tolerance.
 _REST_VELOCITY_EPS: float = 1e-3
 
+#: Pixels. Square, and 224 by default because that is what Luthi's VisionEncoder
+#: is built for (``image_size=224``, ``patch_size=16`` -> 196 tokens).
+DEFAULT_CAMERA_SIZE: int = 224
+
+#: Metres. Nothing nearer than this to a camera is rendered.
+#:
+#: MuJoCo expresses the near plane as a *fraction of the model's extent*, and
+#: extent is inferred from world size -- so a large ground plane silently pushes
+#: the near plane outward. At the default 100 m ground that put it at 0.20 m,
+#: which made anything within 20 cm of the eye invisible while every frame still
+#: rendered cleanly. A body cannot see what it is about to touch, and nothing
+#: raises. The extent is therefore pinned below and the near plane set from it,
+#: so this number means metres regardless of how big the world is.
+DEFAULT_NEAR_PLANE: float = 0.02
+
+#: Metres. Beyond this, nothing is drawn.
+DEFAULT_FAR_PLANE: float = 500.0
+
+#: Pinned so near/far planes are absolute distances rather than a function of
+#: world size. See :data:`DEFAULT_NEAR_PLANE`.
+_MODEL_EXTENT: float = 10.0
+
+
+@dataclass(frozen=True, slots=True)
+class CameraSpec:
+    """A camera in the world.
+
+    Cameras are part of the compiled model, like bodies, so attaching one marks
+    the model dirty and it is rebuilt on next use.
+
+    ``body_id`` is what makes a camera an *eye* rather than a security camera:
+    when set, the camera rides that body and sees the world from it, which is
+    the visual counterpart of the egocentric framing
+    ``sanctuary.sensorium.physics_percepts`` applies to spatial perception.
+    When ``None`` the camera is fixed in the world -- useful for instrumentation
+    and for watching a run, but it is not what the entity sees.
+
+    The camera looks along **+X** with **+Y** up, matching the seam's Y-up
+    frame. ``offset`` is relative to the body's origin (or the world origin for
+    a fixed camera).
+    """
+
+    name: str
+    body_id: str | None = None
+    offset: Vec3 = (0.0, 0.0, 0.0)
+    fovy: float = 60.0
+
+
+@dataclass(frozen=True, slots=True)
+class CameraFrame:
+    """One rendered view.
+
+    ``rgb`` is an ``[H, W, 3]`` uint8 numpy array -- raw pixels, deliberately
+    not normalized. Turning it into an encoder-ready tensor is
+    ``sanctuary.sensorium.physics_vision``'s job, so the normalization the model
+    expects lives next to the rest of the perception code rather than being
+    baked into the renderer.
+    """
+
+    camera: str
+    time: float
+    step: int
+    rgb: Any  # numpy.ndarray [H, W, 3] uint8
+
+    @property
+    def height(self) -> int:
+        return int(self.rgb.shape[0])
+
+    @property
+    def width(self) -> int:
+        return int(self.rgb.shape[1])
+
 
 class MuJoCoPhysicsAuthority(PhysicsAuthority):
     """Rigid-body backend. See the module docstring for the divergences."""
@@ -103,6 +202,8 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
         body_radius: float = DEFAULT_BODY_RADIUS,
         max_substep: float = DEFAULT_MAX_SUBSTEP,
         ground_size: float = 100.0,
+        near_plane: float = DEFAULT_NEAR_PLANE,
+        far_plane: float = DEFAULT_FAR_PLANE,
     ) -> None:
         try:
             import mujoco  # noqa: F401
@@ -118,15 +219,32 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
             raise ValueError(f"body_radius must be positive, got {body_radius}")
         if max_substep <= 0.0:
             raise ValueError(f"max_substep must be positive, got {max_substep}")
+        if near_plane <= 0.0:
+            raise ValueError(f"near_plane must be positive, got {near_plane}")
+        if far_plane <= near_plane:
+            raise ValueError(
+                f"far_plane ({far_plane}) must exceed near_plane ({near_plane})"
+            )
+        if near_plane >= body_radius:
+            raise ValueError(
+                f"near_plane ({near_plane}) is at or beyond body_radius "
+                f"({body_radius}): a body-mounted camera would clip its own "
+                f"surroundings before seeing anything adjacent. Lower it."
+            )
 
         self._mujoco = mujoco
         self.body_radius = body_radius
         self.max_substep = max_substep
         self.ground_size = ground_size
+        self.near_plane = near_plane
+        self.far_plane = far_plane
 
         self._specs: dict[str, BodySpec] = {}
+        self._cameras: dict[str, CameraSpec] = {}
         self._model = None
         self._data = None
+        self._renderer = None
+        self._renderer_size: tuple[int, int] | None = None
         self._dirty = True
 
         self._time: float = 0.0
@@ -146,12 +264,14 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
         # so seed is accepted for contract uniformity and unused -- same as the
         # reference backend.
         self._specs.clear()
+        self._cameras.clear()
         self._pending_force.clear()
         self._net_force.clear()
         self._resting.clear()
         self._carried.clear()
         self._model = None
         self._data = None
+        self._release_renderer()
         self._dirty = True
         self._time = 0.0
         self._step = 0
@@ -182,6 +302,108 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
         self._net_force.pop(body_id, None)
         self._resting.pop(body_id, None)
         self._dirty = True
+
+    # -- cameras ------------------------------------------------------------
+
+    def attach_camera(self, spec: CameraSpec) -> str:
+        """Add a camera. Raises on a duplicate name or an unknown body."""
+        if spec.name in self._cameras:
+            raise ValueError(f"Camera name already exists: {spec.name!r}")
+        if spec.body_id is not None and spec.body_id not in self._specs:
+            raise KeyError(
+                f"Cannot attach camera {spec.name!r} to unknown body "
+                f"{spec.body_id!r}. Add the body first."
+            )
+
+        # A camera inside its own body's geom renders a valid frame that shows
+        # the inside of the sphere -- near-black, every step, forever. Nothing
+        # downstream would raise: the shape is right, the dtype is right, and a
+        # world model would train happily on darkness. Refuse it here.
+        if spec.body_id is not None:
+            reach = math.sqrt(sum(component * component for component in spec.offset))
+            if reach <= self.body_radius:
+                raise ValueError(
+                    f"Camera {spec.name!r} sits {reach:.3f} m from the origin of "
+                    f"body {spec.body_id!r}, which is inside that body's own geom "
+                    f"(radius {self.body_radius}). Every frame would render the "
+                    f"inside of the body -- a valid, near-black image that no "
+                    f"downstream check would flag. Move the camera clear of the "
+                    f"body radius, e.g. offset=({self.body_radius * 1.5:.3f}, 0, 0) "
+                    f"to look forward along +X."
+                )
+
+        self._capture_state()
+        self._cameras[spec.name] = spec
+        self._dirty = True
+        return spec.name
+
+    @property
+    def camera_names(self) -> tuple[str, ...]:
+        return tuple(self._cameras)
+
+    def render_camera(
+        self,
+        name: str,
+        *,
+        width: int = DEFAULT_CAMERA_SIZE,
+        height: int = DEFAULT_CAMERA_SIZE,
+    ) -> CameraFrame:
+        """Render what a camera currently sees.
+
+        Offscreen; no window is opened. Returns raw uint8 pixels -- see
+        :class:`CameraFrame` for why normalization is not done here.
+
+        Raises:
+            KeyError: if no such camera is attached.
+            RuntimeError: if the world has no bodies, and therefore no compiled
+                model to render. An empty render would be a black image, which
+                is indistinguishable from a broken renderer.
+        """
+        if name not in self._cameras:
+            known = ", ".join(repr(n) for n in self._cameras) or "<none>"
+            raise KeyError(f"Unknown camera: {name!r}. Attached: {known}.")
+
+        self._ensure_built()
+        if self._model is None:
+            raise RuntimeError(
+                "Cannot render an empty world: there is no compiled model. Add "
+                "at least one body first. (A black frame would look identical "
+                "to a broken renderer, so this raises instead.)"
+            )
+
+        renderer = self._get_renderer(width, height)
+        renderer.update_scene(self._data, camera=name)
+        rgb = renderer.render().copy()
+
+        return CameraFrame(camera=name, time=self._time, step=self._step, rgb=rgb)
+
+    def _get_renderer(self, width: int, height: int):
+        if width <= 0 or height <= 0:
+            raise ValueError(
+                f"Camera size must be positive, got {width}x{height}"
+            )
+        if self._renderer is None or self._renderer_size != (width, height):
+            self._release_renderer()
+            self._renderer = self._mujoco.Renderer(
+                self._model, height=height, width=width
+            )
+            self._renderer_size = (width, height)
+        return self._renderer
+
+    def _release_renderer(self) -> None:
+        """Drop the renderer and its GL resources.
+
+        Called whenever the model is rebuilt: a Renderer is bound to the
+        ``mjModel`` it was constructed with, so keeping one across a rebuild
+        would render the *old* world while every other view reported the new
+        one -- a divergence nothing would raise on.
+        """
+        if self._renderer is not None:
+            close = getattr(self._renderer, "close", None)
+            if close is not None:
+                close()
+        self._renderer = None
+        self._renderer_size = None
 
     # -- actuation + time ---------------------------------------------------
 
@@ -294,6 +516,9 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
     def _build(self) -> None:
         mujoco = self._mujoco
 
+        # The renderer is bound to the model it was built against.
+        self._release_renderer()
+
         if not self._specs:
             self._model = None
             self._data = None
@@ -323,10 +548,24 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
             "<mujoco model='sanctuary'>",
             # Seam frame: gravity on -Y, ground plane normal +Y.
             f"<option gravity='0 {GRAVITY} 0' timestep='{self.max_substep}'/>",
+            # Pin the extent so the near/far planes below are absolute metres
+            # rather than a fraction of however large the ground happens to be.
+            f"<statistic extent='{_MODEL_EXTENT}'/>",
+            f"<visual><map znear='{self.near_plane / _MODEL_EXTENT}' "
+            f"zfar='{self.far_plane / _MODEL_EXTENT}'/></visual>",
             "<worldbody>",
+            # Lighting affects rendering only, never dynamics. Without it every
+            # camera frame is near-black, which would look like a broken
+            # renderer rather than an unlit scene.
+            "<light pos='0 20 0' dir='0 -1 0' diffuse='0.9 0.9 0.9'/>",
             f"<geom name='floor' type='plane' size='{self.ground_size} "
-            f"{self.ground_size} 0.1' zaxis='0 1 0' pos='0 {GROUND_Y} 0'/>",
+            f"{self.ground_size} 0.1' zaxis='0 1 0' pos='0 {GROUND_Y} 0' "
+            f"rgba='0.4 0.4 0.45 1'/>",
         ]
+
+        for spec in self._cameras.values():
+            if spec.body_id is None:
+                parts.append(self._camera_xml(spec))
 
         for body_id, spec in self._specs.items():
             name = quoteattr(body_id)
@@ -336,13 +575,27 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
                 parts.append("<freejoint/>")
             parts.append(
                 f"<geom type='sphere' size='{self.body_radius}' "
-                f"mass='{spec.mass}'/>"
+                f"mass='{spec.mass}' rgba='{_body_rgba(body_id)}'/>"
             )
+            for camera in self._cameras.values():
+                if camera.body_id == body_id:
+                    parts.append(self._camera_xml(camera))
             parts.append("</body>")
 
         parts.append("</worldbody>")
         parts.append("</mujoco>")
         return "".join(parts)
+
+    @staticmethod
+    def _camera_xml(spec: CameraSpec) -> str:
+        ox, oy, oz = spec.offset
+        # xyaxes gives the camera's own x and y axes in the frame it sits in.
+        # MuJoCo cameras look along -Z of their frame, so x=(0,0,1), y=(0,1,0)
+        # puts -Z along world +X: looking along +X with +Y up.
+        return (
+            f"<camera name={quoteattr(spec.name)} pos='{ox} {oy} {oz}' "
+            f"xyaxes='0 0 1 0 1 0' fovy='{spec.fovy}'/>"
+        )
 
     # -- state access -------------------------------------------------------
 
@@ -426,3 +679,23 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
     def _clear_pending(self) -> None:
         for force in self._pending_force.values():
             force[0] = force[1] = force[2] = 0.0
+
+
+def _body_rgba(body_id: str) -> str:
+    """A stable, distinct colour per body id.
+
+    Appearance is a **placeholder**: ``BodySpec`` carries no material, so a
+    colour is derived from the id instead. It is deterministic (SHA-256, not
+    ``hash()``, which is salted per process) so that two runs of the same world
+    render identically -- a world model trained on recoloured objects would be
+    learning noise.
+
+    This is the same deferred decision as ``body_radius``: per-body appearance
+    and geometry belong on ``BodySpec``, which is a seam change and deserves its
+    own ruling. Until then, objects at least have to be visually distinguishable
+    or vision has nothing to learn from.
+    """
+    digest = hashlib.sha256(body_id.encode("utf-8")).digest()
+    hue = digest[0] / 255.0
+    red, green, blue = colorsys.hsv_to_rgb(hue, 0.65, 0.9)
+    return f"{red:.3f} {green:.3f} {blue:.3f} 1"
