@@ -245,6 +245,7 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
         self._data = None
         self._renderer = None
         self._renderer_size: tuple[int, int] | None = None
+        self._viewer = None
         self._dirty = True
 
         self._time: float = 0.0
@@ -271,6 +272,7 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
         self._carried.clear()
         self._model = None
         self._data = None
+        self.close_viewer()
         self._release_renderer()
         self._dirty = True
         self._time = 0.0
@@ -376,6 +378,69 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
         rgb = renderer.render().copy()
 
         return CameraFrame(camera=name, time=self._time, step=self._step, rgb=rgb)
+
+    # -- interactive viewer -------------------------------------------------
+
+    def launch_viewer(self, *, key_callback=None, show_ui: bool = True):
+        """Open an interactive window onto this world and return its handle.
+
+        Passive: MuJoCo does not drive the simulation: you keep stepping, and
+        call :meth:`sync_viewer` to push each new state to the window. That is
+        what makes it a *view of the running loop* rather than a separate
+        replay -- what you watch is the same ``mjData`` the entity is acting on.
+
+        Interaction comes for free from the viewer itself (orbit/pan/zoom, and
+        ctrl-drag to shove a body around mid-run), plus ``key_callback`` for
+        anything the caller wants to bind.
+
+        Requires a display. Raises if a viewer is already open, or if the world
+        has no compiled model yet.
+        """
+        if self._viewer is not None:
+            raise RuntimeError(
+                "A viewer is already open for this world. Close it before "
+                "launching another."
+            )
+
+        self._ensure_built()
+        if self._model is None:
+            raise RuntimeError(
+                "Cannot view an empty world: there is no compiled model. Add "
+                "at least one body first."
+            )
+
+        from mujoco import viewer as _viewer
+
+        self._viewer = _viewer.launch_passive(
+            self._model,
+            self._data,
+            key_callback=key_callback,
+            show_left_ui=show_ui,
+            show_right_ui=show_ui,
+        )
+        return self._viewer
+
+    def sync_viewer(self) -> None:
+        """Push the current state to the open viewer. No-op if none is open."""
+        if self._viewer is not None:
+            self._viewer.sync()
+
+    def close_viewer(self) -> None:
+        if self._viewer is not None:
+            self._viewer.close()
+            self._viewer = None
+
+    @property
+    def viewer_is_open(self) -> bool:
+        """True while the window is open -- False once the user closes it.
+
+        The run loop should watch this: a closed window means the person
+        watching has left, and continuing to spin is not what they asked for.
+        """
+        if self._viewer is None:
+            return False
+        running = getattr(self._viewer, "is_running", None)
+        return bool(running()) if running is not None else True
 
     def _get_renderer(self, width: int, height: int):
         if width <= 0 or height <= 0:
@@ -515,6 +580,19 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
 
     def _build(self) -> None:
         mujoco = self._mujoco
+
+        # A viewer holds the mjModel/mjData it was opened against. Rebuilding
+        # underneath it would leave the window showing a world that no longer
+        # exists while every other view reported the new one -- the same
+        # divergence the renderer had, except a person is watching this one and
+        # would believe what they saw. Refuse rather than silently diverge.
+        if self._viewer is not None:
+            raise RuntimeError(
+                "Cannot rebuild the model while a viewer is open: the window is "
+                "bound to the current model, and would keep showing the old "
+                "world. Call close_viewer() before adding or removing bodies "
+                "or cameras, then relaunch."
+            )
 
         # The renderer is bound to the model it was built against.
         self._release_renderer()
