@@ -229,3 +229,56 @@ class TestCheckpointMetadata:
     def test_has_timestamp(self):
         meta = CheckpointMetadata()
         assert meta.created_at is not None
+
+
+# ---------------------------------------------------------------------------
+# Regression: checkpoint ids must be unique (2026-08-16)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckpointIdUniqueness:
+    """Two checkpoints made in the same clock tick must not become one.
+
+    The id used to be a bare `datetime.now()` timestamp, and the directory was
+    created with `exist_ok=True`. Windows' clock granularity (~15.6 ms) meant
+    rapid successive checkpoints -- a rollback followed by a re-checkpoint, for
+    instance -- collided on the id, and the second silently overwrote the
+    first's weights and metadata while returning success. That is identity
+    state destroyed by a persistence layer reporting that it worked, which is
+    the failure class this project's CLAUDE.md exists to forbid.
+
+    These tests flushed out as intermittent failures in TestListCheckpoints and
+    TestCompareCheckpoints, which is how a collision presents: two checkpoints
+    behaving as one.
+    """
+
+    def test_rapid_successive_checkpoints_have_distinct_ids(
+        self, checkpoint_mgr, model_file
+    ):
+        ids = [checkpoint_mgr.create_checkpoint(model_file) for _ in range(25)]
+        assert len(set(ids)) == len(ids), "checkpoint ids collided"
+
+    def test_rapid_successive_checkpoints_all_survive(
+        self, checkpoint_mgr, model_file
+    ):
+        ids = [checkpoint_mgr.create_checkpoint(model_file) for _ in range(25)]
+        listed = {c.checkpoint_id for c in checkpoint_mgr.list_checkpoints()}
+        assert listed == set(ids), "a checkpoint was overwritten or lost"
+
+    def test_each_checkpoint_keeps_its_own_metadata(
+        self, checkpoint_mgr, model_file
+    ):
+        first = checkpoint_mgr.create_checkpoint(
+            model_file, metadata={"description": "before"}
+        )
+        second = checkpoint_mgr.create_checkpoint(
+            model_file, metadata={"description": "after"}
+        )
+        assert first != second
+        assert checkpoint_mgr.get_checkpoint(first).description == "before"
+        assert checkpoint_mgr.get_checkpoint(second).description == "after"
+
+    def test_ids_remain_chronologically_sortable(self, checkpoint_mgr, model_file):
+        """The timestamp prefix must stay first -- list_checkpoints sorts on it."""
+        ids = [checkpoint_mgr.create_checkpoint(model_file) for _ in range(10)]
+        assert ids == sorted(ids)

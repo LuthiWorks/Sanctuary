@@ -81,8 +81,13 @@ class ChromaCompatibleEmbeddings(EmbeddingFunction):
             raise TypeError(f"Input must be list or tuple, got {type(input).__name__}")
 
         if len(input) == 0:
-            logger.warning("Empty input provided to embedding function")
-            return []  # Return empty list for empty input
+            # Fail loudly. This used to warn and return [], which the
+            # docstring above already contradicted -- an embedding call that
+            # silently produces nothing is indistinguishable downstream from
+            # one that produced nothing because the model was broken. A caller
+            # asking to embed an empty batch has a bug; say so here rather
+            # than let it surface as an empty ChromaDB write later.
+            raise ValueError("Cannot embed an empty document list")
         
         # Validate all inputs are strings
         for i, doc in enumerate(input):

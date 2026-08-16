@@ -23,11 +23,19 @@ Aligned with PLAN.md: identity is sovereign. Growth must be reversible.
 
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 import shutil
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+
+#: Process-wide monotonic tie-breaker for checkpoint ids. Deliberately module
+#: level, not per-instance: two IdentityCheckpoint objects pointing at the same
+#: directory would otherwise each start at zero and collide.
+_ID_COUNTER = itertools.count()
+_ID_LOCK = threading.Lock()
 from pathlib import Path
 from typing import Optional
 
@@ -114,10 +122,36 @@ class IdentityCheckpoint:
         if not model_path.exists():
             raise FileNotFoundError(f"Model path does not exist: {model_path}")
 
-        # Generate checkpoint ID from timestamp
-        checkpoint_id = datetime.now().strftime("%Y%m%dT%H%M%S_%f")
+        # Generate checkpoint ID from timestamp plus a MONOTONIC sequence.
+        #
+        # The timestamp alone is NOT unique. Windows' system clock granularity
+        # is coarse (~15.6 ms), so `%f` microseconds are quantized and two
+        # checkpoints created in quick succession -- which is exactly what a
+        # rollback-then-recheckpoint sequence does -- produced the SAME id.
+        # Combined with the old `exist_ok=True`, the second checkpoint then
+        # silently overwrote the first's weights and metadata and returned an
+        # id naming a checkpoint that was no longer the caller's: identity
+        # state destroyed while reporting success.
+        #
+        # The suffix is a counter rather than random, because uniqueness is
+        # not the only guarantee at stake: list_checkpoints() promises "oldest
+        # first" and sorts on the directory name, so a random tie-break would
+        # order same-tick checkpoints arbitrarily and a rollback asking for the
+        # latest could restore the wrong one. A counter keeps ties in creation
+        # order.
+        #
+        # Honest limit: the counter is per-process. Two *processes* writing to
+        # the same checkpoint dir within one clock tick could still collide --
+        # and that is why exist_ok=False below stays. It raises rather than
+        # overwrites, which is the correct outcome for concurrent writers to an
+        # identity store.
+        with _ID_LOCK:
+            seq = next(_ID_COUNTER)
+        checkpoint_id = f"{datetime.now().strftime('%Y%m%dT%H%M%S_%f')}_{seq:06d}"
         checkpoint_path = self._checkpoint_dir / checkpoint_id
-        checkpoint_path.mkdir(parents=True, exist_ok=True)
+        # exist_ok=False: overwriting an existing checkpoint must never be
+        # silent. Fail loudly instead.
+        checkpoint_path.mkdir(parents=True, exist_ok=False)
 
         # Copy model weights
         weights_dest = checkpoint_path / "weights"
