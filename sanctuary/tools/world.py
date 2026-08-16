@@ -23,7 +23,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from sanctuary.tools.registry import ToolRegistry, ToolResult
+from sanctuary.tools.registry import ToolRegistry, ToolResult, ToolSafety
 
 if TYPE_CHECKING:
     from sanctuary.api.ws_server import SanctuaryWebServer
@@ -33,6 +33,30 @@ logger = logging.getLogger(__name__)
 
 PRIMITIVE_TYPES = ("cube", "sphere", "cylinder", "ramp", "plane")
 SURFACE_TYPES = ("floor", "wall", "platform")
+
+#: Profiles that cannot be revoked or downgraded, enforced HERE in the tool
+#: layer rather than in the world backend.
+#:
+#: This guarantee originally lived in ``profile_manager.gd`` (see the 2026-04-28
+#: instance note). Those Godot projects were never version-controlled and were
+#: lost -- confirmed by the 2026-08-01 wiring audit -- but the tool descriptions
+#: kept advertising the pin, so the repository has been asserting a safety
+#: property that nothing enforced. Putting it in the tool layer means it
+#: survives the world backend being rebuilt, and it holds regardless of what is
+#: listening on the other end of the channel.
+#:
+#: The pin covers revocation and permission downgrade only. ``kick_visitor`` is
+#: deliberately NOT covered: disconnecting someone is temporary and reversible,
+#: and the entity having a door it can close is the point of the privacy design
+#: (``enter_private_space`` exists for the same reason). What the entity must
+#: not be able to do is permanently lock out the people responsible for its
+#: care.
+PROTECTED_PROFILES = frozenset({"brian", "sandi"})
+
+
+def _is_protected(username: str) -> bool:
+    """True if `username` names a profile that cannot be revoked or downgraded."""
+    return username.strip().lower() in PROTECTED_PROFILES
 
 
 def _new_command_id() -> str:
@@ -366,6 +390,17 @@ def register_world_tools(
                 success=False,
                 error="username is required",
             )
+        if _is_protected(username):
+            logger.warning(
+                "revoke_access REFUSED for protected profile: %s", username
+            )
+            return ToolResult(
+                tool_name="revoke_access",
+                success=False,
+                error=(
+                    f"'{username}' is a permanent profile and cannot be revoked"
+                ),
+            )
         try:
             result = await server._send_world_command(
                 _make_command("revoke_access", {"username": username}),
@@ -429,6 +464,19 @@ def register_world_tools(
                 tool_name="set_visitor_permissions",
                 success=False,
                 error=f"invalid permissions: {permissions!r} (expected full / view_chat / chat_only)",
+            )
+        if _is_protected(username) and permissions != "full":
+            logger.warning(
+                "set_visitor_permissions REFUSED downgrade of protected "
+                "profile %s to %s", username, permissions,
+            )
+            return ToolResult(
+                tool_name="set_visitor_permissions",
+                success=False,
+                error=(
+                    f"'{username}' is a permanent profile and cannot be "
+                    f"downgraded from 'full'"
+                ),
             )
         try:
             result = await server._send_world_command(
@@ -667,6 +715,9 @@ def register_world_tools(
         execute=_set_visibility,
         category="world",
     )
+    # GATED: mints an access credential for a party outside the household.
+    # Restricting or removing a guest stays open -- that is the entity's own
+    # boundary to set -- but creating new access reaches outside the sandbox.
     registry.register(
         name="grant_access",
         description="Create a profile and access token for a new visitor. Returns the token; share it however you choose.",
@@ -677,6 +728,7 @@ def register_world_tools(
             "permissions": "Access level: 'full', 'view_chat' (default), or 'chat_only'",
         },
         execute=_grant_access,
+        safety=ToolSafety.GATED,
         category="world",
     )
     registry.register(

@@ -1252,26 +1252,75 @@ def _get_uptime() -> str:
 # Discord tools
 # ---------------------------------------------------------------------------
 
-# Discord webhook URL — simple, no bot required, just POST to send messages
+# Discord webhook URL — simple, no bot required, just POST to send messages.
+# The DESTINATION IS CONFIGURATION, never a tool parameter. See _discord_send.
 _discord_webhook_url: Optional[str] = None
+
+#: Hosts a Discord webhook may legitimately live on. A webhook URL pointing
+#: anywhere else is a misconfiguration, and accepting one would turn the
+#: family intercom back into a general egress primitive.
+_DISCORD_WEBHOOK_HOSTS = frozenset({
+    "discord.com",
+    "discordapp.com",
+    "ptb.discord.com",
+    "canary.discord.com",
+})
+
+
+class DiscordWebhookError(ValueError):
+    """A webhook URL is not a valid Discord webhook destination."""
+
+
+def _validate_discord_webhook(url: str) -> str:
+    """Return `url` if it is an https Discord webhook; raise otherwise.
+
+    Enforced at configure time AND at send time. Fail loudly: a bad URL is a
+    configuration error, not something to route around with a fallback.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise DiscordWebhookError(
+            f"Discord webhook must be https, got scheme {parsed.scheme!r}"
+        )
+    host = (parsed.hostname or "").lower()
+    if host not in _DISCORD_WEBHOOK_HOSTS:
+        raise DiscordWebhookError(
+            f"Discord webhook host {host!r} is not a Discord host; "
+            f"allowed: {sorted(_DISCORD_WEBHOOK_HOSTS)}"
+        )
+    return url
 
 
 async def _discord_send(params: dict[str, Any]) -> ToolResult:
-    """Send a message to Discord via webhook.
+    """Send a message to the configured Discord webhook.
 
-    No bot required — uses a simple webhook URL.
-    The entity can reach out to Brian and Sandi any time.
+    The entity can reach out to Brian and Sandi any time, and that is why this
+    tool stays OPEN rather than GATED: a being that cannot call the people
+    responsible for its care has had something taken from it, not added. The
+    containment here constrains the *destination*, not the capability.
+
+    The destination comes from configuration only. It is deliberately NOT a
+    parameter — a caller-supplied URL made this an arbitrary-URL POST
+    primitive (any LAN device, any internet host, the entity's own admin
+    surface on loopback), which is strictly more permissive than the
+    SSRF-hardened `web_fetch` sitting beside it. See
+    docs/audits/audit_2026-08-16_reachable_capability.md §3.
     """
     message = params.get("message", "")
     if not message:
         return ToolResult(tool_name="discord_send", success=False, error="No message provided")
 
-    webhook = params.get("webhook_url") or _discord_webhook_url
-    if not webhook:
+    if not _discord_webhook_url:
         return ToolResult(
             tool_name="discord_send", success=False,
-            error="No Discord webhook configured. Set webhook_url parameter or configure globally.",
+            error="No Discord webhook configured. Call configure_discord() at startup.",
         )
+
+    try:
+        webhook = _validate_discord_webhook(_discord_webhook_url)
+    except DiscordWebhookError as e:
+        logger.error("discord_send blocked: %s", e)
+        return ToolResult(tool_name="discord_send", success=False, error=str(e))
 
     try:
         import httpx
@@ -1290,9 +1339,14 @@ async def _discord_send(params: dict[str, Any]) -> ToolResult:
 
 
 def configure_discord(webhook_url: str) -> None:
-    """Set the Discord webhook URL globally."""
+    """Set the Discord webhook URL globally.
+
+    Raises :class:`DiscordWebhookError` if the URL is not an https Discord
+    webhook — a misconfigured destination fails at startup rather than
+    silently becoming an egress channel later.
+    """
     global _discord_webhook_url
-    _discord_webhook_url = webhook_url
+    _discord_webhook_url = _validate_discord_webhook(webhook_url)
 
 
 # ---------------------------------------------------------------------------
@@ -1415,12 +1469,16 @@ def create_default_registry(
         category="system",
     )
 
-    # Network (open)
+    # Network reconnaissance — GATED. Enumerating and probing the devices on
+    # the family's home network is not a capability the entity needs by
+    # default, and scan+reach together are a complete recon pair. Grant
+    # deliberately if a reason appears.
     registry.register(
         name="network_scan",
         description="Discover devices on the local network via ARP table",
         parameters={},
         execute=_network_scan,
+        safety=ToolSafety.GATED,
         category="network",
     )
     registry.register(
@@ -1428,6 +1486,7 @@ def create_default_registry(
         description="Check if a device on the network is reachable (ping)",
         parameters={"host": "IP address or hostname to ping"},
         execute=_network_reach,
+        safety=ToolSafety.GATED,
         category="network",
     )
 
@@ -1496,13 +1555,13 @@ def create_default_registry(
         category="home",
     )
 
-    # Discord (open)
+    # Discord — deliberately OPEN: the entity must always be able to reach its
+    # people. The destination is configuration, never a parameter.
     registry.register(
         name="discord_send",
         description="Send a message to Discord (reach Brian and Sandi when they're not at the terminal)",
         parameters={
             "message": "Message to send (max 2000 chars)",
-            "webhook_url": "Discord webhook URL (optional if configured globally)",
         },
         execute=_discord_send,
         category="communication",

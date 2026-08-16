@@ -773,6 +773,14 @@ class TestAccessTools:
     list_visitors, etc.).
     """
 
+    @pytest.fixture(autouse=True)
+    def _grant_gated_access_tool(self, booted_runner):
+        """`grant_access` is GATED as of 2026-08-16 -- it mints a credential
+        for a party outside the household. These tests exercise the handler,
+        not the policy, so they grant it explicitly. The policy itself is
+        covered in tests/tools/test_capability_classification.py."""
+        booted_runner.tools.enable_gated("grant_access")
+
     @pytest.mark.asyncio
     async def test_grant_access_returns_token_from_godot(self, booted_runner):
         port = next_port()
@@ -826,8 +834,17 @@ class TestAccessTools:
             await server.stop()
 
     @pytest.mark.asyncio
-    async def test_revoke_access_surfaces_godot_failure(self, booted_runner):
-        """Revoking a permanent profile fails on the Godot side; tool surfaces it."""
+    async def test_revoke_access_surfaces_backend_failure(self, booted_runner):
+        """A backend refusal reaches the entity rather than being swallowed.
+
+        Uses an ordinary visitor. This test previously revoked "brian" and
+        asserted the *Godot side* refused -- but that enforcement lived in
+        profile_manager.gd, which was lost with the Godot projects (2026-08-01
+        wiring audit), leaving the guarantee advertised and unenforced. The pin
+        now lives in the tool layer and refuses before dispatch, so a protected
+        username never reaches the wire at all; that path is covered in
+        tests/tools/test_capability_classification.py.
+        """
         port = next_port()
         server = SanctuaryWebServer(runner=booted_runner, port=port)
         await server.start()
@@ -839,7 +856,7 @@ class TestAccessTools:
                     await asyncio.wait_for(ws.receive_json(), timeout=2.0)
                     tool_task = asyncio.create_task(
                         booted_runner.tools.execute(
-                            "revoke_access", {"username": "brian"}
+                            "revoke_access", {"username": "guest"}
                         )
                     )
                     cmd = await asyncio.wait_for(ws.receive_json(), timeout=2.0)
@@ -848,11 +865,11 @@ class TestAccessTools:
                         "type": "command_result",
                         "command_id": cmd["command_id"],
                         "success": False,
-                        "error": "permanent profile cannot be revoked",
+                        "error": "no such profile",
                     })
                     result = await asyncio.wait_for(tool_task, timeout=2.0)
                     assert not result.success
-                    assert "permanent" in result.error
+                    assert "no such profile" in result.error
         finally:
             await server.stop()
 

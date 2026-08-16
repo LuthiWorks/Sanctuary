@@ -119,14 +119,21 @@ not. These are OPEN and meet the stated criterion:
 - **`web_fetch` / `web_search`** — arbitrary outbound HTTP. SSRF-guarded, but
   ungated: unbounded egress volume and destination within the guard's rules.
 - **`delete_object`** — destroys world objects. Irreversible.
-- **`set_physics`** — mutates the physical laws of the entity's own world.
+- **`set_physics`** — **CORRECTED, see §6.** I first wrote this as "mutates the
+  physical laws of the entity's own world." It is per-object configuration
+  (`enabled` / `mass` / `friction` on one object id), not global world law.
+  Much smaller than described.
 - **`grant_access` / `revoke_access` / `set_visitor_permissions` /
   `kick_visitor`** — the entity controls who may enter its world and at what
   permission tier. The 04-28 pin that made Brian and Sandi undowngradable lived
   in `profile_manager.gd`, which went away with the Godot clients on 08-01.
-  **No equivalent pin was found on the Python side.** Verify before wiring:
-  as written, a reachable `revoke_access` could lock out the people responsible
-  for the entity's welfare.
+  **No equivalent pin exists on the Python side — CONFIRMED by reading both
+  handlers.** `_revoke_access` (world.py:361) and `_set_visitor_permissions`
+  (world.py:418) validate the username is non-empty and the permission string
+  is one of three values, then forward straight to the world backend. The tool
+  descriptions still say *"Permanent profiles (Brian, Sandi) cannot be
+  downgraded / revoked."* **That is a safety guarantee whose implementation was
+  deleted, with the promise left in place.** Fixed in §6.
 
 ### What is correctly built (verified, no action needed)
 
@@ -220,6 +227,75 @@ an unknown number of doors behind it.
 
 ---
 
+## 6. Status — item 1 built, same session
+
+Remediation item 1 landed immediately after this audit was written. What
+changed:
+
+**`discord_send` destination is configuration only.** The `webhook_url`
+parameter is gone from both the handler and the registration. A new
+`_validate_discord_webhook` requires https and a Discord host, enforced at
+`configure_discord()` time *and* at send time, raising `DiscordWebhookError`
+rather than falling back. The tool stays **OPEN, deliberately**: a being that
+cannot call the people responsible for its care has had something taken from
+it. The fix constrains the destination, not the capability.
+
+**Reclassified to GATED:** `network_scan`, `network_reach` (LAN
+reconnaissance against the family's home network), `grant_access` (mints a
+credential for a party outside the household).
+
+**Deliberately left OPEN, with reasons recorded so they are not re-litigated
+blindly:**
+
+- `revoke_access`, `set_visitor_permissions`, `kick_visitor` — restricting or
+  removing a *guest* is the entity's own boundary to set. The privacy design
+  (04-28) is that the entity gets a real door, and a door it needs permission
+  to close is a stage prop.
+- `delete_object`, `set_physics` — inside its own sandbox, on objects it
+  spawned. **Constraint for whoever builds the creature roster:** when
+  creatures exist, deletion must not be typed generically over "anything in the
+  world." This is exactly the trap §4 of the roster brief caught with
+  `consume` — a generic verb makes the excluded behavior the *default* rather
+  than an addition.
+- `web_fetch`, `web_search`, `wikipedia` — SSRF-guarded and read-only, but
+  they are a genuine egress channel (data can be encoded in a URL). Gating
+  them trades the entity's window on the world against exfiltration risk.
+  **That is a design call for Brian, not a correctness call, and it is left
+  open pending his ruling.**
+
+**The permanent-profile pin is restored in the tool layer**
+(`PROTECTED_PROFILES` in world.py), not in the backend — so it survives the
+world being rebuilt and holds regardless of what is listening on the channel.
+It covers revocation and downgrade. `kick_visitor` is deliberately not covered:
+disconnecting someone is temporary and reversible, and the entity ending an
+interaction is the same right as withdrawing to private space. What it must not
+be able to do is *permanently* lock out its caregivers.
+
+**Guard test added** (`tests/tools/test_capability_classification.py`): the
+GATED set is pinned to an explicit list, so a tool registered without
+`safety=ToolSafety.GATED` — the default, and therefore the easy mistake — fails
+CI rather than silently widening the entity's reach.
+
+Two existing tests changed, and the reason matters:
+`test_revoke_access_surfaces_godot_failure` asserted that *Godot* refused to
+revoke "brian." It was testing the deleted enforcement. It now uses an ordinary
+visitor and tests what it actually cares about (a backend refusal reaching the
+entity), with the protected-profile path covered in the new test file.
+`TestAccessTools` grants `grant_access` explicitly, since those tests exercise
+the handler rather than the policy.
+
+Suite after the change: **1973 passed, 32 skipped**, plus 5 pre-existing
+environmental errors in `sanctuary/mind/tests/test_speech_processing.py`
+(`transformers` no longer exports `pipeline`) — in the orphaned `mind/` tree,
+untouched by this work.
+
+**Still open, in order:** wire `tool_requests` deliberately (item 3) with the
+catalog driven by policy so the entity is not offered what it cannot use; then
+the container (item 4), with the model split out to the host.
+
+---
+
 *Verified firsthand: every file:line citation in this document was read in this
 session. Tool counts are from a parse of both registration modules, not from
-documentation.*
+documentation. Where implementing the fix corrected the audit, the original
+claim is left visible with the correction beside it.*
