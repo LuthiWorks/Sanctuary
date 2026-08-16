@@ -6,51 +6,55 @@ build-backend = "setuptools.build_meta"
 name = "sanctuary"
 version = "0.1.0"
 description = "The Sanctuary - A cognitive architecture framework"
-requires-python = ">=3.11"
+# 3.10 is what this actually runs on (3.10.11). The spec said >=3.11 while the
+# working environment was 3.10, which is one of several reasons `pip install .`
+# could not succeed -- and therefore why the Dockerfile carried a silent
+# fallback to a hand-written package list. Verified 2026-08-16.
+requires-python = ">=3.10"
 dependencies = [
-    # Core ML dependencies
-    "numpy>=2.3.4",
-    "torch>=2.13.0",
-    "transformers>=5.5.0",
+    # --- Core ML ---
+    # torch is CONSTRAINED, not merely floored. torch-directml==0.2.5.dev240914
+    # (the newest on PyPI, from Sept 2024) requires torch==2.4.1 exactly, and
+    # DirectML is currently the only GPU path for this project's AMD RX 7800 XT
+    # on Windows. Anything above 2.4.1 silently means CPU-only training.
+    # This pin is expected to LIFT when the ROCm migration lands -- see
+    # docs/audits/audit_2026-08-16_reachable_capability.md.
+    "torch==2.4.1",
+    "torchvision==0.19.1",
+    "torchaudio==2.4.1",
+    # The rest are floored at what is actually installed and working, not at
+    # aspirational future versions. transformers>=5.5.0 and numpy>=2.3.4 were
+    # both unsatisfiable against this environment.
+    "numpy>=1.26.4,<2",
+    "transformers>=4.57.1,<5",
     "sentence-transformers>=5.1.2",
     "langchain>=1.3.9,<2.0",
     "langchain-community>=0.4.1",
     "langchain-text-splitters>=1.1.2",
     "langchain-chroma>=1.1.0",
     "langchain-huggingface>=1.2.0",
-    "chromadb>=1.5.9",
-    "accelerate>=0.28.0",
-    "bitsandbytes>=0.41.0",
-    # Image generation and vision
-    "diffusers>=0.38.0", # For Flux.1 and image generation
+    "chromadb>=0.4.18",
+    "accelerate>=1.12.0",
     "Pillow>=10.0.0", # For image handling
     "sentencepiece>=0.2.0", # Required for some vision models
-    # Web and API
-    "quart>=0.19.0",
-    "hypercorn>=0.16.0",
+    # --- Web and API ---
+    # The server is aiohttp (sanctuary/api/ws_server.py:59). quart and hypercorn
+    # were declared but are imported nowhere outside tests -- moved to the
+    # `legacy` extra rather than installed into every environment.
     "httpx>=0.28.1",
-    "aiohttp>=3.14.1",
+    "aiohttp>=3.13.2",
     "discord.py>=2.0.0",
-    # Audio processing
+    # --- Audio ---
     "soundfile>=0.13.1",
-    "librosa>=0.11.0",
-    "scipy>=1.16.3",
-    "torchaudio>=2.9.0",
+    "scipy>=1.15.3",
     "sounddevice>=0.5.0", # For microphone capture in device layer
-    # Video capture
-    "opencv-python>=4.8.0", # For camera devices with DirectShow backend (Windows)
-    # Integration tools
-    "arxiv>=2.3.0",
+    # --- Integration tools ---
     "wikipedia>=1.4.0",
-    "wolframalpha>=5.1.3",
-    "playwright>=1.55.0",
-    "aiodocker>=0.21.0",
-    # Async utilities
-    "asyncio>=3.4.3",
+    # --- Async utilities ---
+    # NOTE: the PyPI `asyncio` package was declared here until 2026-08-16. It is
+    # a dead 2015 backport of the stdlib module and installing it can SHADOW
+    # stdlib asyncio. Removed deliberately; do not re-add.
     "anyio>=3.7.1",
-    "schedule>=1.2.0",
-    # GPU monitoring (optional)
-    "nvidia-ml-py>=12.560.30", # For NVLink detection and GPU monitoring
     # CfC / Liquid Neural Networks (experiential layer)
     "ncps>=0.0.7", # Apache 2.0 — PyTorch CfC/LTC cells with AutoNCP wiring
     # ML utilities — sklearn for cosine similarity in cognitive_core/attention.py
@@ -71,6 +75,37 @@ dependencies = [
 [project.optional-dependencies]
 mujoco = [
     "mujoco>=3.0",
+]
+
+# Declared in `dependencies` until 2026-08-16 but imported NOWHERE outside
+# tests (verified by import-site scan). Kept here so nothing is lost and so the
+# core install -- and any container image built from it -- is not carrying
+# hundreds of MB for code that does not exist. Promote back to `dependencies`
+# if and when something actually imports them.
+#
+#   quart / hypercorn  -- superseded; the server is aiohttp
+#   diffusers          -- image generation, never wired
+#   bitsandbytes       -- QLoRA path, pending the delete-or-revive ruling
+#   librosa            -- audio analysis, never wired
+#   playwright         -- browser automation, never wired
+#   aiodocker          -- run_code does not use it
+#   arxiv / wolframalpha -- research tools, never wired
+#   opencv-python      -- one import site, Windows DirectShow capture only
+#   nvidia-ml-py       -- NVIDIA monitoring on an AMD machine
+#   schedule           -- never wired
+legacy = [
+    "quart>=0.19.0",
+    "hypercorn>=0.16.0",
+    "diffusers>=0.35.2",
+    "bitsandbytes>=0.41.0",
+    "librosa>=0.11.0",
+    "playwright>=1.55.0",
+    "aiodocker>=0.21.0",
+    "arxiv>=2.3.0",
+    "wolframalpha>=5.1.3",
+    "opencv-python>=4.8.0",
+    "nvidia-ml-py>=12.560.30",
+    "schedule>=1.2.0",
 ]
 
 [tool.setuptools.packages.find]

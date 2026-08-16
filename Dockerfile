@@ -16,16 +16,29 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip wheel setuptools
 
 WORKDIR /app
-COPY pyproject.toml setup.py ./
+# NOTE: there is no setup.py in this repo and there never was one at this path.
+# This COPY used to name it, which made the build fail on this line -- no image
+# had been built since 2026-05-11. Verified 2026-08-16.
+COPY pyproject.toml README.md ./
+COPY sanctuary ./sanctuary
 
-# Install PyTorch CPU first (large download, cache separately)
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+# GPU NOTE: this image is CPU-only, deliberately and explicitly.
+# The project's GPU path on Windows is torch-directml, which is a DirectX API
+# and does not exist inside a Linux container. Brian ruled on 2026-08-16 that
+# ROCm is the path forward; a ROCm image (which needs /dev/kfd and /dev/dri
+# passed through) replaces this once Docker exists on the machine to test it.
+# Until then, do not let this image imply GPU capability it does not have.
+RUN pip install --no-cache-dir torch==2.4.1 --index-url https://download.pytorch.org/whl/cpu
 
-# Install project dependencies
-RUN pip install --no-cache-dir . || \
-    pip install --no-cache-dir \
-    numpy transformers sentence-transformers langchain chromadb accelerate \
-    quart hypercorn httpx aiohttp "discord.py" python-dotenv pydantic
+# Install project dependencies.
+#
+# This used to be `pip install . || pip install <hand-written package list>`.
+# That fallback is exactly the failure mode CLAUDE.md forbids: the real
+# resolution was failing (the spec demanded torch>=2.13.0, transformers>=5.5.0
+# and requires-python>=3.11 against an environment that had none of those), and
+# the fallback quietly produced an image with different dependencies that
+# reported success. If resolution fails, the build must stop here.
+RUN pip install --no-cache-dir .
 
 # =============================================================================
 # Stage 2: Runtime

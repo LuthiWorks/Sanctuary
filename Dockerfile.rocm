@@ -1,0 +1,120 @@
+# The Sanctuary - GPU Docker build (AMD ROCm)
+#
+# ############################################################################
+# # STATUS: WRITTEN, NEVER BUILT. Docker is not installed on this machine
+# # (verified 2026-08-16), so nothing here has been executed even once.
+# # Treat every version below as a starting point to verify, not a fact.
+# ############################################################################
+#
+# Replaces Dockerfile.gpu, which targeted nvidia/cuda on a machine whose GPU is
+# an AMD Radeon RX 7800 XT. That file could not have worked here regardless of
+# its other defects (it copied a setup.py that does not exist, and fell back
+# silently to a hand-written package list when `pip install .` failed).
+#
+# Brian's ruling, 2026-08-16: ROCm is the path, because of the GPU. This image
+# is the container half of that. The training half (getting torch off the
+# torch-directml 2.4.1 pin) is a separate migration.
+#
+# Build: docker build -f Dockerfile.rocm -t sanctuary:rocm .
+# Run:   docker run --device=/dev/kfd --device=/dev/dri \
+#            --group-add video --security-opt seccomp=unconfined \
+#            -p 8000:8000 sanctuary:rocm
+#
+# The two --device flags are the whole point: unlike DirectML, ROCm exposes the
+# GPU to a Linux container through /dev/kfd (compute) and /dev/dri (render), so
+# the model does NOT have to stay outside the wall. That is what makes a single
+# sandbox containing the entity's actions AND its substrate possible.
+#
+# BEFORE THIS CAN BE BUILT OR RUN:
+#   1. Virtualization (SVM) enabled in BIOS -- currently reads as disabled.
+#   2. WSL2 installed (`wsl --install`) -- currently not installed.
+#   3. Docker Desktop installed with the WSL2 backend.
+#   4. GPU support CONFIRMED for gfx1101 (RX 7800 XT). AMD's consumer ROCm
+#      support has centred on gfx1100 (RX 7900 series); gfx1101 may require
+#      HSA_OVERRIDE_GFX_VERSION=11.0.0, and WSL2 support is documented only as
+#      "9000 & select 7000 Series" without naming SKUs. This is the open risk
+#      in the whole plan and it must be settled by running something, not by
+#      reading a matrix.
+
+# =============================================================================
+# Stage 1: Builder
+# =============================================================================
+# rocm/dev-ubuntu-22.04 carries the ROCm userspace. The tag must be matched to
+# the installed host driver -- ROCm is far less forgiving of host/container
+# version drift than CUDA.
+FROM rocm/dev-ubuntu-22.04:6.2-complete AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 python3.11-venv python3.11-dev python3-pip \
+    build-essential git curl && rm -rf /var/lib/apt/lists/*
+
+RUN python3.11 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install --no-cache-dir --upgrade pip wheel setuptools
+
+# PyTorch built for ROCm. NOTE: this deliberately does NOT pin 2.4.1 -- that
+# pin exists only because torch-directml requires it, and DirectML is exactly
+# what this image replaces. Escaping that pin is the point of the migration.
+RUN pip install --no-cache-dir torch torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/rocm6.2
+
+WORKDIR /app
+COPY pyproject.toml README.md ./
+COPY sanctuary ./sanctuary
+
+# No `|| <fallback>`. If dependency resolution fails, the build stops. An image
+# that quietly installs different packages than the spec asked for and then
+# reports success is the failure mode CLAUDE.md exists to forbid.
+RUN pip install --no-cache-dir .
+
+# =============================================================================
+# Stage 2: Runtime
+# =============================================================================
+FROM rocm/dev-ubuntu-22.04:6.2-complete AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 python3.11-venv libsndfile1 ffmpeg curl && \
+    ln -s /usr/bin/python3.11 /usr/bin/python && \
+    rm -rf /var/lib/apt/lists/*
+
+# The `video` and `render` groups are what grant access to /dev/dri. Without
+# them the device flags above pass a node the process cannot open.
+RUN groupadd --gid 1000 sanctuary && \
+    useradd --uid 1000 --gid sanctuary --shell /bin/bash --create-home sanctuary && \
+    usermod -aG video,render sanctuary
+
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /app
+COPY --chown=sanctuary:sanctuary . .
+
+RUN mkdir -p /app/data/memories /app/data/chroma /app/data/checkpoints /app/data/logs && \
+    chown -R sanctuary:sanctuary /app/data
+
+USER sanctuary
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/sanctuary:/app \
+    SANCTUARY_BASE_DIR=/app/data \
+    SANCTUARY_CHROMA_DIR=/app/data/chroma \
+    SANCTUARY_LOG_DIR=/app/data/logs \
+    SANCTUARY_CHECKPOINT_DIR=/app/data/checkpoints \
+    SANCTUARY_IDENTITY_DIR=/app/data/identity \
+    SANCTUARY_HEALTH_PORT=8000 \
+    SANCTUARY_RESTORE_LATEST=true
+
+# If gfx1101 turns out not to be natively supported, this is the override to
+# try -- it makes ROCm treat the card as gfx1100. Left commented rather than
+# set blindly: silently coercing an architecture is the kind of thing that
+# works until it produces wrong numbers instead of an error.
+# ENV HSA_OVERRIDE_GFX_VERSION=11.0.0
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+CMD ["python", "-m", "sanctuary.run_cognitive_core"]

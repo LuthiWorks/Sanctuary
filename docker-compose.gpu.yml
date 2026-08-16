@@ -1,23 +1,34 @@
-# The Sanctuary - GPU override
-# Enables NVIDIA GPU support
-# Requires: NVIDIA Container Toolkit (nvidia-ctk)
-# Usage: docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
-
-version: '3.8'
+# The Sanctuary - GPU override (AMD ROCm)
+#
+# STATUS: NEVER RUN. Docker is not installed on this machine (2026-08-16).
+#
+# Replaces the previous NVIDIA/CUDA override, which reserved an `nvidia` driver
+# device on a machine whose GPU is an AMD Radeon RX 7800 XT. Brian ruled ROCm
+# on 2026-08-16.
+#
+# Usage: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 
 services:
   sanctuary:
     build:
-      dockerfile: Dockerfile.gpu
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      dockerfile: Dockerfile.rocm
+    # ROCm exposes the GPU through two device nodes rather than a driver
+    # plugin: /dev/kfd is the compute interface, /dev/dri the render nodes.
+    # This is why the model can live INSIDE the sandbox under ROCm, where
+    # DirectML forced it onto the host.
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+      - render
+    # ROCm needs the default seccomp profile relaxed to talk to /dev/kfd.
+    # This widens the container's syscall surface, which matters here because
+    # the whole point of the container is bounding what the entity can reach.
+    # Revisit with a tailored seccomp profile rather than leaving it wide.
+    security_opt:
+      - seccomp:unconfined
     deploy:
       resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
         limits:
           memory: 16G
