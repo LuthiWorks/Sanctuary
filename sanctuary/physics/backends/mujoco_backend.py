@@ -258,6 +258,17 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
         # Kinematic state carried across a model rebuild.
         self._carried: dict[str, tuple[Vec3, Vec3]] = {}
 
+        # Body-name -> mjModel body index, built once per compiled model.
+        # mj_name2id is a string search through the model; it was being called
+        # ~4x per body per step, which is most of what made step() O(n^2)-ish.
+        self._index_of: dict[str, int] = {}
+
+        # Applied force as it was at the moment of the last step. ground_truth()
+        # derives net force lazily (see _ensure_forces), and step() clears the
+        # pending forces, so the value has to be snapshotted rather than re-read.
+        self._applied_snapshot: dict[str, Vec3] = {}
+        self._forces_stale: bool = True
+
     # -- world construction -------------------------------------------------
 
     def reset(self, seed: int | None = None) -> None:
@@ -270,6 +281,9 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
         self._net_force.clear()
         self._resting.clear()
         self._carried.clear()
+        self._index_of.clear()
+        self._applied_snapshot.clear()
+        self._forces_stale = True
         self._model = None
         self._data = None
         self.close_viewer()
@@ -510,6 +524,8 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
             # An empty world still has a clock.
             self._time += dt
             self._step += 1
+            self._applied_snapshot = {}
+            self._forces_stale = True
             self._clear_pending()
             return
 
@@ -527,7 +543,13 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
         for _ in range(substeps):
             mujoco.mj_step(model, data)
 
-        self._record_forces()
+        # Capture what was applied, then defer the derivation. _clear_pending()
+        # below wipes _pending_force, so ground_truth() could not recover it.
+        self._applied_snapshot = {
+            body_id: (force[0], force[1], force[2])
+            for body_id, force in self._pending_force.items()
+        }
+        self._forces_stale = True
 
         # The seam's clock is authoritative: one call, one step, exactly dt.
         self._time += dt
@@ -553,6 +575,9 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
 
     def ground_truth(self) -> PhysicsGroundTruth:
         self._ensure_built()
+        # The only consumer of the force derivation, and therefore the only
+        # place that pays for it.
+        self._ensure_forces()
         bodies = tuple(
             GroundTruthBody(
                 body_id=body_id,
@@ -621,10 +646,20 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
         if not self._specs:
             self._model = None
             self._data = None
+            self._index_of.clear()
             return
 
         self._model = mujoco.MjModel.from_xml_string(self._to_xml())
         self._data = mujoco.MjData(self._model)
+
+        # Resolve every body name once, here, instead of on every read. Must be
+        # populated before the _carried loop below, which calls _body_index.
+        self._index_of = {
+            body_id: mujoco.mj_name2id(
+                self._model, mujoco.mjtObj.mjOBJ_BODY, body_id
+            )
+            for body_id in self._specs
+        }
 
         for body_id, (position, velocity) in self._carried.items():
             if body_id not in self._specs or self._specs[body_id].static:
@@ -699,6 +734,18 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
     # -- state access -------------------------------------------------------
 
     def _body_index(self, body_id: str) -> int:
+        """mjModel body index for a name, from the per-model cache.
+
+        The cache is rebuilt in _build(). Falling back to mj_name2id on a miss
+        keeps this correct if a caller reaches for a body between edits, but a
+        miss should not happen on the hot path -- and if the cache were ever
+        stale rather than merely incomplete, the fallback would return the RIGHT
+        answer while the cache returned a wrong one silently, so the cache is
+        cleared on every rebuild rather than patched.
+        """
+        index = self._index_of.get(body_id)
+        if index is not None:
+            return index
         return self._mujoco.mj_name2id(
             self._model, self._mujoco.mjtObj.mjOBJ_BODY, body_id
         )
@@ -730,7 +777,44 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
                 self._velocity(body_id),
             )
 
-    def _record_forces(self) -> None:
+    def _ensure_forces(self) -> None:
+        """Derive net force and resting state, if a step has happened since.
+
+        Split out of :meth:`step` on 2026-08-18. The derivation is
+        **instrumentation** -- only :meth:`ground_truth` consumes ``_net_force``
+        and ``_resting`` -- but it used to run unconditionally on every step,
+        where it was measured at 15.05 ms of a 15.94 ms step at 121 bodies:
+        **94% of the step, and ~75% of the per-decision budget**, paid whether
+        or not anything was watching.
+
+        Doing only this (laziness) would have been a trap: the moment LUTHISCOPE
+        polls every step the cost returns in full, and the benchmark would still
+        look fixed. So :meth:`_derive_forces` is also vectorized -- the cost is
+        removed when nobody is watching *and* when somebody is.
+        """
+        if not self._forces_stale:
+            return
+        self._derive_forces()
+        self._forces_stale = False
+
+    def _contacting_bodies(self) -> set[int]:
+        """Indices of every body currently in contact, in one vectorized pass.
+
+        Was an O(bodies x ncon) Python scan: for each body, walk every contact
+        and materialize ``data.contact[i]`` -- a struct wrapper per access. At
+        121 resting bodies that is ~14,600 wrapper constructions per step, and
+        it was the dominant term in the old cost.
+
+        MuJoCo exposes the contact array natively, so both geom columns can be
+        mapped through ``geom_bodyid`` at once and reduced to a set.
+        """
+        ncon = self._data.ncon
+        if ncon == 0:
+            return set()
+        geoms = self._data.contact.geom[:ncon]          # (ncon, 2)
+        return set(self._model.geom_bodyid[geoms].ravel().tolist())
+
+    def _derive_forces(self) -> None:
         """Net force and resting state, read from MuJoCo rather than recomputed.
 
         ``net_force`` is the total force acting on the body over the step just
@@ -739,7 +823,13 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
         force cancels gravity, so the vertical component goes to ~0 -- the same
         thing the reference backend arranges by special-casing, arrived at here
         by actually solving the contact.
+
+        Reads the applied force from ``_applied_snapshot`` rather than
+        ``_pending_force``: step() clears the pending forces before this runs,
+        so the value has to have been captured at step time.
         """
+        in_contact = self._contacting_bodies()
+
         for body_id, spec in self._specs.items():
             if spec.static:
                 self._net_force[body_id] = (0.0, 0.0, 0.0)
@@ -747,7 +837,7 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
                 continue
 
             index = self._body_index(body_id)
-            applied = self._pending_force[body_id]
+            applied = self._applied_snapshot.get(body_id, (0.0, 0.0, 0.0))
 
             joint_index = self._model.body_jntadr[index]
             adr = self._model.jnt_dofadr[joint_index]
@@ -762,18 +852,8 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
             velocity = self._velocity(body_id)
             speed = math.sqrt(sum(component * component for component in velocity))
             self._resting[body_id] = (
-                self._in_contact(index) and speed < _REST_VELOCITY_EPS
+                index in in_contact and speed < _REST_VELOCITY_EPS
             )
-
-    def _in_contact(self, body_index: int) -> bool:
-        data, model = self._data, self._model
-        for contact_index in range(data.ncon):
-            contact = data.contact[contact_index]
-            body1 = model.geom_bodyid[contact.geom1]
-            body2 = model.geom_bodyid[contact.geom2]
-            if body_index in (body1, body2):
-                return True
-        return False
 
     def _clear_pending(self) -> None:
         for force in self._pending_force.values():
