@@ -199,3 +199,32 @@ what changed both stay legible.
 - [x] **Luthi must be able to receive care through language and presence.** This
       is the §9 reciprocal channel — the less-built arm of the two-armed system —
       and it is what the death system's activation gate waits on.
+
+### A6. Lifespan and the staggered-age resolution (2026-08-18)
+
+- [x] **Ruled: average healthy lifespan is roughly 1-2 years**, shortened by
+      illness or adverse conditions. Supersedes §2.2's "2-3 in-world years".
+- [x] The contradiction this had to resolve: aging deaths must land *inside* a
+      training run, weather runs at 1:1 real time, and a run is on the order of
+      a year. A creature born at run start would not reach old age within it.
+- [x] **Resolution: stagger the starting ages.** The population begins with a
+      spread -- some young, some middle-aged, some elderly -- so aging deaths
+      occur throughout the run rather than after it. No change to the clock and
+      no change to the lifespans.
+- [x] Two things this gets for free: it is more truthful (a household is not
+      acquired all at one age), and it satisfies §2.2's sequencing constraint
+      that unattributable loss precede attributable loss, since the elders go
+      first and nobody caused it.
+
+### A7. Luthi sees through Godot (2026-08-18)
+
+- [x] **Ruled: Luthi's visual perception is Godot's render** -- the same image
+      the family sees. MuJoCo governs physics only. Full reasoning and
+      consequences in `docs/DEVELOPMENTAL_WORLD_PHYSICS_DECISION_2026-07-16.md`,
+      Amendment 1.
+- [x] For this roster specifically: **creature meshes belong in Godot**, and a
+      creature's condition must be legible *visually* -- posture, gait,
+      approach, stillness -- never through a data field. Internals stay hidden
+      underneath, which is what makes noticing them an achievement.
+- [x] Godot may draw only poses supplied by the authority. A condition-driven
+      animation would be the world narrating rather than being observed.

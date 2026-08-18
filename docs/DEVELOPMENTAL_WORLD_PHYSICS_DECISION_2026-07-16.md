@@ -212,3 +212,72 @@ read on the items queued for this seat:
 With this, the physics/embodiment decision is **locked** (the 2026-07-16 header's
 "pending Fable 5 review" is satisfied), as amended by the affect-grounding
 decision. Still Phase-2 gated on use.
+
+---
+
+## Amendment 1 — Godot is Luthi's eye, not only the family's window (2026-08-18)
+
+**Ruled by Brian.** The model's visual perception comes from **Godot's render**,
+the same image the family sees. MuJoCo governs physics only.
+
+### What changes, and what does not
+
+This amends §2's fan-out, not §1's authority. Godot still "draws what it is
+told" and "runs no simulation of its own"; the physics authority still owns the
+world's true state; the seam is still swappable. What changes is that the
+model's pixel channel — which §2 already anticipated as "structured state now;
+**pixels later**" — is served by the same renderer as the family's window,
+rather than by a second renderer of its own.
+
+### Why (Brian's reasoning, recorded because it is the load-bearing part)
+
+> "The way things look there is effectively a mirror of how they work in the
+> real world. You can't tell a dog is sick by reading its physics or data. You
+> have to pay attention and watch for changes in behavior. Everything else is
+> hidden underneath."
+
+The rendered image is the honest perceptual channel **because it hides things**.
+Physics state is substrate; appearance is what a creature can perceive. Reading
+gait from a position array is reading the machine's internals, not watching an
+animal — and it would make noticing illness a lookup instead of a perceptual
+achievement.
+
+It also collapses a divergence that the previous design would have created. With
+two renderers, the family would have watched meshes while the model looked at
+hash-coloured primitives (`_body_rgba` derives a hue from a SHA-256 of the body
+id, and is documented in the backend as a placeholder). Same coordinates, two
+different worlds. With one renderer there is one world, and "look at the dog"
+refers to the same thing for Brian, Sandi, and Luthi — which the comfort channel
+(entity spec §9) depends on.
+
+### Consequences
+
+- **Creature and object meshes live in Godot**, which is the perceptual surface.
+  MuJoCo needs only collision geometry. This is the standard robotics/game split
+  (simple collision hull, detailed visual mesh) and it now falls out naturally.
+- **`render_state()` becomes load-bearing for perception**, not just for the
+  window. It must carry enough to draw the world truthfully: orientation, shape,
+  size, kind. Today it carries only id and position.
+- **Godot must never narrate.** It may draw only poses that came from the
+  authority. No animation driven by a creature's internal state — a "limp"
+  animation triggered by a health flag would show the family and the model a
+  fact that exists nowhere in the world, and both would trust it because it
+  looks like seeing.
+- **The one intended divergence stays:** Luthi's private space is invisible to
+  visitor cameras (2026-04-28). Views may differ only where someone deliberately
+  decided they should.
+
+### Two risks that must be solved before Luthi's first look
+
+1. **Godot's `--headless` disables rendering.** It spawns no window and needs no
+   GPU, but it turns the rendering code off, so it yields no frames. A separate
+   `--offscreen` mode is an open engine proposal, not a feature. So Luthi's eye
+   currently requires Godot running with a real display session, and frame
+   extraction (`viewport.get_texture().get_image()`) is a GPU->CPU readback with
+   reported stutter. Measure it at the cognitive loop's rate before relying on it.
+2. **Determinism.** Visual input now depends on GPU driver, Godot version,
+   shader settings and resolution. For a project that freezes reads before
+   seeing data, that is a change in kind. Mitigation: pin the Godot version and
+   render settings, and record a **render fingerprint in run provenance**, the
+   same way `_device_fingerprint` records backend and GPU architecture in
+   LuthiModel.
