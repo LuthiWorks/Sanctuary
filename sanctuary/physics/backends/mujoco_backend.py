@@ -79,7 +79,7 @@ from __future__ import annotations
 import colorsys
 import hashlib
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from xml.sax.saxutils import quoteattr
 
@@ -304,6 +304,27 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
         self._net_force.pop(body_id, None)
         self._resting.pop(body_id, None)
         self._dirty = True
+
+    def set_visible(self, body_id: str, visible: bool) -> None:
+        """Show or hide a body WITHOUT rebuilding the model.
+
+        `visible` is consumed only by observe() / ground_truth() /
+        render_state(); `_to_xml()` never reads it, so the compiled model is
+        identical either way and there is nothing to recompile. This is the
+        whole point: a population that changes by toggling visibility costs
+        nothing, where one that changes by add_body/remove_body pays a ~11 ms
+        rebuild plus a ~29 ms renderer reconstruction, and cannot happen at
+        all while a viewer is open.
+
+        Deliberately does NOT set `_dirty`. If a future edit makes `_to_xml()`
+        depend on visibility, this method must start dirtying the model --
+        `test_set_visible_does_not_rebuild_the_model` fails loudly if the two
+        ever disagree.
+        """
+        spec = self._specs.get(body_id)
+        if spec is None:
+            raise KeyError(f"Unknown body id: {body_id!r}")
+        self._specs[body_id] = replace(spec, visible=bool(visible))
 
     # -- cameras ------------------------------------------------------------
 

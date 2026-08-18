@@ -80,6 +80,12 @@ class ReferencePhysicsAuthority(PhysicsAuthority):
         # Raises KeyError if absent — fail loud, don't silently ignore.
         del self._bodies[body_id]
 
+    def set_visible(self, body_id: str, visible: bool) -> None:
+        # KeyError if unknown — intended. This backend compiles nothing, so
+        # there is no rebuild to avoid here; the method exists so the seam is
+        # uniform and world code behaves identically on both backends.
+        self._bodies[body_id].visible = bool(visible)
+
     # -- actuation + time ---------------------------------------------------
 
     def apply_force(self, body_id: str, force: Vec3) -> None:

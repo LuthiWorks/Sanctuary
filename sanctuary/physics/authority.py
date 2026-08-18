@@ -53,6 +53,31 @@ class PhysicsAuthority(ABC):
     def remove_body(self, body_id: str) -> None:
         """Remove a body. Raise ``KeyError`` if it does not exist."""
 
+    @abstractmethod
+    def set_visible(self, body_id: str, visible: bool) -> None:
+        """Show or hide a body. Raise ``KeyError`` if it does not exist.
+
+        Visibility is a property of the three *views*, not of the physics: a
+        hidden body is absent from :meth:`observe` and :meth:`render_state` and
+        still present in :meth:`ground_truth`, because the instrumentation
+        channel reports what is true rather than what is seen. Its dynamics are
+        unchanged — hiding a body does not make it stop falling or stop
+        colliding.
+
+        **Why this exists as a seam operation.** A backend may compile its
+        world (MuJoCo does), so ``add_body``/``remove_body`` can force a model
+        rebuild. Measured on 2026-08-17, one such rebuild mid-run costs ~11 ms
+        and additionally tears down the renderer, whose next frame then costs
+        ~29 ms instead of ~0.7 ms — a ~40 ms stall, 40% of a cognitive cycle,
+        landing exactly when something appeared or vanished. With a viewer
+        open, the rebuild raises instead.
+
+        So a system with a changing population — creatures being born and
+        dying — must **pre-allocate its bodies and toggle visibility** rather
+        than add and remove them. This method is that operation, and it must
+        never dirty a compiled model.
+        """
+
     # -- actuation + time ---------------------------------------------------
 
     @abstractmethod
