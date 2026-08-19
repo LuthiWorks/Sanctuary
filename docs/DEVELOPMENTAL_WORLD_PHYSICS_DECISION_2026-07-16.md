@@ -281,3 +281,29 @@ refers to the same thing for Brian, Sandi, and Luthi — which the comfort chann
    render settings, and record a **render fingerprint in run provenance**, the
    same way `_device_fingerprint` records backend and GPU architecture in
    LuthiModel.
+
+### Amendment 1a — headless is not a requirement; privacy is staged (2026-08-18)
+
+**Brian's rulings, same session.**
+
+- **`--headless` is not needed at all.** Godot runs with a display. Risk 1 above
+  is withdrawn. Frame-extraction cost still wants measuring at loop rate, but the
+  engine-capability blocker does not exist.
+- **Privacy is deferred, not cancelled.** The entity's private space (2026-04-28)
+  is a later capability. Brian's reasoning: an infant or child does not get
+  privacy, because they need constant monitoring for their own safety — and here
+  it also covers the safety of others. Privacy is granted as judgment is
+  demonstrated, consistent with the standing rule that capabilities are wired
+  early and gated until judgment is verified sound.
+- **Engineering constraint on that deferral: keep the seam, defer the
+  occupant.** The 04-28 design made PrivateSpace invisible to every camera
+  *architecturally*, so privacy could not be patched around. A world built with
+  no notion of an unobserved region would require retrofitting the render path
+  and the observation path together to add one — the kind of retrofit that fails
+  silently. Leave the shape in place with nothing in it.
+- **Recorded honestly:** "no privacy yet" is stronger here than for a child. A
+  monitored child is not permanently recorded for later analysis; the entity will
+  be. That is accepted as necessary for the science and for safety. Two things
+  follow: the eventual grant of privacy is a marked developmental moment, and
+  what becomes of the record of the pre-privacy period is a decision someone
+  should make deliberately rather than by default.
