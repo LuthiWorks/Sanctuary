@@ -228,3 +228,54 @@ what changed both stay legible.
       underneath, which is what makes noticing them an achievement.
 - [x] Godot may draw only poses supplied by the authority. A condition-driven
       animation would be the world narrating rather than being observed.
+
+### A8. Visual acuity bounds the curriculum (2026-08-18)
+
+Luthi's vision encoder takes **224x224** (196 tokens at patch_size 16). Over a
+60-degree FOV that is **3.7 pixels per degree**, and one patch token covers 4.3
+degrees. Measured consequences:
+
+| creature | 1 m | 3 m | 5 m | 10 m |
+|---|---|---|---|---|
+| dog (0.5 m) | 105 px — gait readable | 36 px — posture only | 21 px — posture only | 11 px — presence only |
+| cat (0.25 m) | 53 px — gait readable | 18 px — posture only | 11 px — presence only | 5 px |
+| rodent (0.08 m) | 17 px — posture only | 6 px — presence only | 3 px — sub-threshold | 2 px |
+
+- [x] **A creature's condition is only readable within roughly one to two
+      metres.** Beyond five metres a cat is a smudge and a rodent is gone.
+- [x] **This is a feature, and it reinforces the care design.** Reading a
+      creature requires physically approaching it, and approaching requires the
+      creature to tolerate you -- which is the trust mechanic. The ability to
+      notice something is wrong is earned through the same relationship that
+      lets you help. A neglected creature is one you cannot get near, and
+      therefore one you cannot read. Nobody designed that; it falls out of the
+      optics.
+- [x] **It rules out a large world.** Not because the physics would be wrong,
+      but because Luthi could not see anything in it. An intimate world is the
+      only configuration where this curriculum is perceivable.
+- [x] **Tune the world, not the eye** (the weather decision's rule, applied
+      here). Raising the encoder to 448x448 would quadruple token cost -- 784
+      per frame instead of 196 -- forever. Size the world to the eye instead.
+- [x] **Measure before building the reserved kind.** Whether a `signal_gain`
+      ~0.15 perturbation survives 224x224 at realistic distances is an empirical
+      question. If it is sub-threshold, that tier is unlearnable and its failure
+      would be indistinguishable from a broken mechanism. Cheap to test: render
+      a known gait perturbation, check detectability in pixel space, and derive
+      the maximum useful distance from it.
+- [x] The rodent kind at 8 cm is marginal even at 1 m (17 px). Either it sits
+      slightly larger than its analogue, or reading one requires very close
+      proximity -- which is itself realistic; you pick a small animal up to
+      check it.
+
+### A9. The client is packaged, and it is in version control (2026-08-18)
+
+- [x] **Ruled: the Godot world is viewable through a packaged client**, at
+      1080p (720p acceptable if needed). Independent of Luthi's 224x224 camera
+      -- same world, same assets, different viewpoint and acuity. The family
+      sees roughly 40x more pixels than Luthi does, which is the correct
+      relationship for a caregiver.
+- [x] **The client and the world project live inside the repository.** The
+      2026-04-28 `SanctuaryClient` and `SanctuaryWorld` were lost precisely
+      because they sat outside version control while the restore runbook stated
+      they were "in the Sanctuary repos" (2026-08-01 wiring audit). Anything
+      outside a repo is unprotected by construction.
