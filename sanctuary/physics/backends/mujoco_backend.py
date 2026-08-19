@@ -89,7 +89,10 @@ from sanctuary.physics.state import (
     BodyState,
     GroundTruthBody,
     PhysicsGroundTruth,
+    IDENTITY_QUAT,
     PhysicsObservation,
+    Quat,
+    Shape,
     RenderBody,
     RenderFrame,
     Vec3,
@@ -258,6 +261,12 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
         # Kinematic state carried across a model rebuild.
         self._carried: dict[str, tuple[Vec3, Vec3]] = {}
 
+        # Orientation carried across a model rebuild, alongside _carried's
+        # position/velocity. Before 2026-08-18 a rebuild forced every body back
+        # to identity, so adding one prop silently snapped the whole world
+        # upright -- invisible with spheres, catastrophic with creatures.
+        self._carried_orientation: dict[str, Quat] = {}
+
         # Body-name -> mjModel body index, built once per compiled model.
         # mj_name2id is a string search through the model; it was being called
         # ~4x per body per step, which is most of what made step() O(n^2)-ish.
@@ -281,6 +290,7 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
         self._net_force.clear()
         self._resting.clear()
         self._carried.clear()
+        self._carried_orientation.clear()
         self._index_of.clear()
         self._applied_snapshot.clear()
         self._forces_stale = True
@@ -301,6 +311,11 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
         self._capture_state()
         self._specs[spec.body_id] = spec
         self._carried[spec.body_id] = (spec.position, spec.velocity)
+        # Seed the orientation too. _build() restores every carried body's qpos
+        # from these dicts, so a body present in _carried but absent from
+        # _carried_orientation would be written back at identity -- silently
+        # discarding the orientation its own spec declared.
+        self._carried_orientation[spec.body_id] = spec.orientation
         self._pending_force[spec.body_id] = [0.0, 0.0, 0.0]
         self._net_force[spec.body_id] = (0.0, 0.0, 0.0)
         self._resting[spec.body_id] = False
@@ -594,13 +609,35 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
         return PhysicsGroundTruth(time=self._time, step=self._step, bodies=bodies)
 
     def render_state(self) -> RenderFrame:
+        """Poses for the renderer.
+
+        Perception-critical as of 2026-08-18: Godot's render is what Luthi
+        sees, so anything missing here is missing from the entity's visual
+        world. Orientation is real (from ``xquat``), not identity -- a renderer
+        that cannot face a creature cannot show approach, avoidance or posture,
+        which is the whole legibility curriculum.
+        """
         self._ensure_built()
         bodies = tuple(
-            RenderBody(body_id=body_id, position=self._position(body_id))
+            RenderBody(
+                body_id=body_id,
+                position=self._position(body_id),
+                orientation=self._orientation(body_id),
+                shape=spec.shape,
+                size=_resolved_size(spec, self.body_radius),
+                kind=spec.kind,
+            )
             for body_id, spec in self._specs.items()
             if spec.visible
         )
         return RenderFrame(time=self._time, step=self._step, bodies=bodies)
+
+    def _orientation(self, body_id: str) -> Quat:
+        """Body orientation as (w, x, y, z), MuJoCo's own convention."""
+        if self._model is None:
+            return self._carried_orientation.get(body_id, IDENTITY_QUAT)
+        quat = self._data.xquat[self._body_index(body_id)]
+        return (float(quat[0]), float(quat[1]), float(quat[2]), float(quat[3]))
 
     # -- clocks -------------------------------------------------------------
 
@@ -668,10 +705,15 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
             qpos_adr = self._model.jnt_qposadr[joint_index]
             qvel_adr = self._model.jnt_dofadr[joint_index]
             self._data.qpos[qpos_adr : qpos_adr + 3] = position
-            # Identity orientation: this backend does not yet expose rotation
-            # across the seam (RenderBody has no quaternion field), so carrying
-            # an orientation would be state the seam cannot report.
-            self._data.qpos[qpos_adr + 3 : qpos_adr + 7] = (1.0, 0.0, 0.0, 0.0)
+            # Restore the real orientation (fixed 2026-08-18). This used to
+            # force identity, on the reasoning that the seam could not report
+            # rotation anyway -- but that made every model rebuild silently
+            # snap every body upright. Invisible while all bodies were spheres;
+            # with creatures it would mean adding one prop re-orients the whole
+            # world mid-run, a physically impossible event with nothing raising.
+            self._data.qpos[qpos_adr + 3 : qpos_adr + 7] = (
+                self._carried_orientation.get(body_id, IDENTITY_QUAT)
+            )
             self._data.qvel[qvel_adr : qvel_adr + 3] = velocity
             self._data.qvel[qvel_adr + 3 : qvel_adr + 6] = 0.0
 
@@ -704,11 +746,19 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
         for body_id, spec in self._specs.items():
             name = quoteattr(body_id)
             px, py, pz = spec.position
-            parts.append(f"<body name={name} pos='{px} {py} {pz}'>")
+            # Emit the declared orientation. Without this, BodySpec.orientation
+            # would be a field describing a route that does not exist: accepted,
+            # stored, reported back by render_state -- and never applied to the
+            # body it claims to orient.
+            qw, qx, qy, qz = spec.orientation
+            parts.append(
+                f"<body name={name} pos='{px} {py} {pz}' "
+                f"quat='{qw} {qx} {qy} {qz}'>"
+            )
             if not spec.static:
                 parts.append("<freejoint/>")
             parts.append(
-                f"<geom type='sphere' size='{self.body_radius}' "
+                f"<geom type='{spec.shape.value}' size='{_geom_size(spec, self.body_radius)}' "
                 f"mass='{spec.mass}' rgba='{_body_rgba(body_id)}'/>"
             )
             for camera in self._cameras.values():
@@ -776,6 +826,7 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
                 self._position(body_id),
                 self._velocity(body_id),
             )
+            self._carried_orientation[body_id] = self._orientation(body_id)
 
     def _ensure_forces(self) -> None:
         """Derive net force and resting state, if a step has happened since.
@@ -858,6 +909,39 @@ class MuJoCoPhysicsAuthority(PhysicsAuthority):
     def _clear_pending(self) -> None:
         for force in self._pending_force.values():
             force[0] = force[1] = force[2] = 0.0
+
+
+def _geom_size(spec: BodySpec, default_radius: float) -> str:
+    """MuJoCo's `size` attribute for a body's declared shape.
+
+    MuJoCo reads a different number of size components per geom type, so a
+    single Vec3 has to be projected per shape. Getting this wrong produces a
+    body that compiles and simulates at the wrong dimensions -- no error, just
+    a world quietly built to different measurements.
+
+      sphere  -> radius
+      capsule -> radius, half-length
+      box     -> three half-extents
+    """
+    x, y, z = _resolved_size(spec, default_radius)
+    if spec.shape is Shape.SPHERE:
+        return f"{x}"
+    if spec.shape is Shape.CAPSULE:
+        return f"{x} {y}"
+    if spec.shape is Shape.BOX:
+        return f"{x} {y} {z}"
+    raise ValueError(f"unhandled shape {spec.shape!r} for body {spec.body_id!r}")
+
+
+def _resolved_size(spec: BodySpec, default_radius: float) -> Vec3:
+    """A concrete size, resolving `size=None` against the backend's default.
+
+    The renderer needs a real number -- it cannot draw "unspecified" -- so the
+    resolution happens here rather than being pushed across the seam.
+    """
+    if spec.size is not None:
+        return spec.size
+    return (default_radius, default_radius, default_radius)
 
 
 def _body_rgba(body_id: str) -> str:

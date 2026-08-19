@@ -137,7 +137,43 @@ def test_wire_format_is_json_serializable_and_versioned():
     assert payload["v"] == RENDER_WIRE_VERSION
     assert payload["time"] == 1.5
     assert payload["step"] == 3
-    assert payload["bodies"] == [{"id": "a", "position": [1.0, 2.0, 3.0]}]
+    assert payload["bodies"] == [{
+        "id": "a",
+        "position": [1.0, 2.0, 3.0],
+        "shape": "sphere",
+        "size": [0.05, 0.05, 0.05],
+    }]
+
+
+def test_wire_format_carries_pose_and_kind_when_present():
+    """v2. This payload is Luthi's visual world, so what is missing here is
+    missing from its perception."""
+    from sanctuary.physics.state import Shape
+
+    frame = RenderFrame(time=0.0, step=1, bodies=(
+        RenderBody("dog_0", (1.0, 0.0, 2.0),
+                   orientation=(0.7071, 0.0, 0.7071, 0.0),
+                   shape=Shape.CAPSULE, size=(0.1, 0.25, 0.1), kind="dog"),
+    ))
+    body = frame_to_dict(frame)["bodies"][0]
+
+    assert body["orientation"] == [0.7071, 0.0, 0.7071, 0.0]
+    assert body["shape"] == "capsule"
+    assert body["size"] == [0.1, 0.25, 0.1]
+    assert body["kind"] == "dog"
+
+
+def test_shape_serializes_as_a_plain_string():
+    """Godot reads JSON; a Python enum repr would not survive the trip."""
+    from sanctuary.physics.state import Shape
+
+    frame = RenderFrame(time=0.0, step=0, bodies=(
+        RenderBody("a", (0.0, 0.0, 0.0), shape=Shape.BOX),
+    ))
+    value = frame_to_dict(frame)["bodies"][0]["shape"]
+    assert value == "box"
+    assert isinstance(value, str)
+    json.dumps(value)
 
 
 def test_positions_are_lists_of_plain_floats():
@@ -150,17 +186,34 @@ def test_positions_are_lists_of_plain_floats():
 
 
 def test_orientation_is_absent_rather_than_faked():
-    """The backend does not track rotation yet.
+    """A backend that tracks no rotation must say nothing, not say identity.
 
+    The reference backend is a point-mass integrator with no orientation.
     Emitting an identity quaternion would leave a renderer unable to tell an
     authored "no rotation" from an unimplemented one, and it would draw
-    confidently wrong boxes forever. Absence is the honest encoding.
+    confidently wrong forever. Absence is the honest encoding.
     """
     payload = frame_to_dict(
         RenderFrame(time=0.0, step=0, bodies=(RenderBody("a", (0.0, 0.0, 0.0)),))
     )
     assert "orientation" not in payload["bodies"][0]
     assert "rotation" not in payload["bodies"][0]
+
+
+def test_reference_backend_reports_no_orientation():
+    """End to end, not just on a hand-built frame."""
+    runtime = build_world(backend="reference")
+    for body in runtime.world.render_state().bodies:
+        assert body.orientation is None
+
+
+def test_mujoco_backend_reports_real_orientation():
+    pytest.importorskip("mujoco")
+    runtime = build_world(backend="mujoco")
+    runtime.run(3)
+    for body in runtime.world.render_state().bodies:
+        assert body.orientation is not None
+        assert len(body.orientation) == 4
 
 
 # ---------------------------------------------------------------------------

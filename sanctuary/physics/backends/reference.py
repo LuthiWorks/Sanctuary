@@ -30,6 +30,11 @@ from sanctuary.physics.state import (
 
 GRAVITY: float = -9.81   # m/s^2 on the Y axis
 GROUND_Y: float = 0.0    # ground plane
+
+#: Fallback size when a spec leaves it unspecified. This backend has no
+#: geometry -- bodies are points -- so this exists only so the renderer view
+#: reports something concrete rather than None.
+_DEFAULT_SIZE = (0.05, 0.05, 0.05)
 _REST_EPS: float = 1e-9  # |vertical velocity| below this on the ground = resting
 
 
@@ -38,6 +43,7 @@ class _Body:
 
     __slots__ = (
         "position", "velocity", "mass", "static", "visible",
+        "shape", "size", "kind",
         "pending_force", "last_net_force", "resting",
     )
 
@@ -47,6 +53,9 @@ class _Body:
         self.mass: float = spec.mass
         self.static: bool = spec.static
         self.visible: bool = spec.visible
+        self.shape = spec.shape
+        self.size = spec.size
+        self.kind: str = spec.kind
         self.pending_force: list[float] = [0.0, 0.0, 0.0]
         self.last_net_force: Vec3 = (0.0, 0.0, 0.0)
         self.resting: bool = False
@@ -168,8 +177,22 @@ class ReferencePhysicsAuthority(PhysicsAuthority):
         return PhysicsGroundTruth(time=self._time, step=self._step, bodies=bodies)
 
     def render_state(self) -> RenderFrame:
+        """Poses for the renderer.
+
+        ``orientation`` is left ``None``, deliberately: this backend is a
+        point-mass integrator and tracks no rotation. Reporting identity would
+        be a claim it cannot support, and a renderer could not tell the
+        difference between "not rotated" and "not implemented".
+        """
         bodies = tuple(
-            RenderBody(body_id=bid, position=tuple(b.position))
+            RenderBody(
+                body_id=bid,
+                position=tuple(b.position),
+                orientation=None,
+                shape=b.shape,
+                size=b.size if b.size is not None else _DEFAULT_SIZE,
+                kind=b.kind,
+            )
             for bid, b in self._bodies.items()
             if b.visible
         )

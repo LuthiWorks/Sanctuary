@@ -45,7 +45,12 @@ __all__ = [
 #: Bumped when the wire format changes shape. A renderer that receives a
 #: version it does not know must refuse to draw rather than guess -- a viewer
 #: silently drawing a misread frame is worse than a viewer that stops.
-RENDER_WIRE_VERSION = 1
+#:
+#: v2 (2026-08-18): adds orientation, shape, size and kind. Not cosmetic --
+#: Brian ruled that Godot's render is what Luthi sees, so this payload is the
+#: format of the entity's visual world, and anything absent here is absent from
+#: its perception.
+RENDER_WIRE_VERSION = 2
 
 
 @runtime_checkable
@@ -118,21 +123,33 @@ def frame_to_dict(frame: RenderFrame) -> dict[str, Any]:
     JSON has no tuple, and as plain floats so the payload does not depend on
     numpy being present on either side.
 
-    Orientation is absent because the backend does not track rotation yet
-    (:class:`~sanctuary.physics.state.RenderBody` says so). It is NOT emitted
-    as an identity quaternion: a renderer would have no way to tell an
-    authored "no rotation" from an unimplemented one, and would draw
-    confidently wrong boxes forever.
+    ``orientation`` is **omitted entirely** when the backend does not track
+    rotation, rather than sent as identity. A renderer must be able to tell
+    "not rotated" from "not implemented"; conflating them makes it draw
+    confidently wrong forever.
+
+    ``kind`` is the renderer's mesh selector ("dog", "cat"). It travels on this
+    channel and on no other -- the model-facing observation has no such field,
+    so Luthi infers what a thing is from seeing it, never from a label handed
+    across.
     """
+    bodies = []
+    for body in frame.bodies:
+        entry = {
+            "id": body.body_id,
+            "position": [float(c) for c in body.position],
+            "shape": body.shape.value,
+            "size": [float(c) for c in body.size],
+        }
+        if body.orientation is not None:
+            entry["orientation"] = [float(c) for c in body.orientation]
+        if body.kind:
+            entry["kind"] = body.kind
+        bodies.append(entry)
+
     return {
         "v": RENDER_WIRE_VERSION,
         "time": float(frame.time),
         "step": int(frame.step),
-        "bodies": [
-            {
-                "id": body.body_id,
-                "position": [float(c) for c in body.position],
-            }
-            for body in frame.bodies
-        ],
+        "bodies": bodies,
     }
