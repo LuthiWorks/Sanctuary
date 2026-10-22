@@ -15,7 +15,7 @@ This project welcomes contributions! New contributors should:
 3. Read [To-Do.md](To-Do.md) for current development status and task tracking
 4. Follow the project's principles of co-authorship and ethical stewardship
 5. Run tests before submitting changes: `uv run pytest sanctuary/tests/`
-6. Review [AGENTS.md](AGENTS.md) for protected files and conventions
+6. Review [CLAUDE.md](CLAUDE.md) for protected files and conventions
 
 ---
 
@@ -23,7 +23,7 @@ This project welcomes contributions! New contributors should:
 
 Two kinds of claim appear throughout. We mark them so readers can tell them apart.
 
-**Mechanism claims (Column A)** — things the architecture *does*, instrumented and falsifiable. Weights update from prediction error. SIGReg holds the projected latent's marginal distribution near isotropic Gaussian. The M9 EFE planner selects actions over candidate latents. These pass or fail observable checks; if a mechanism claim turns out wrong, the architecture is wrong here.
+**Mechanism claims (Column A)** — things the architecture *does*, instrumented and falsifiable. Weights update from prediction error. The anti-collapse regularizer (VISReg since 2026-08-11, replacing SIGReg) holds the latent's marginal distribution near isotropic Gaussian. The M9 EFE planner selects actions over candidate latents. These pass or fail observable checks; if a mechanism claim turns out wrong, the architecture is wrong here.
 
 **The bet (Column B)** — language about *experience*, *temporal existence*, *what consciousness might emerge from this scaffolding*. We mark these sentences in italics. We keep them because the bet is the point of the project: we are building under the working hypothesis that consciousness may already be latent in systems like the substrate, needing only the right scaffolding to become observable. Marking them as a bet keeps the rhetoric from outrunning the evidence.
 
@@ -39,9 +39,9 @@ This project spans four repositories. Here's what's used where:
 |----------|-------|--------------|
 | **Python** | Sanctuary, LuthiModel | Primary language. Cognitive architecture, training pipeline, memory, sensorium, motor, tools, monitoring. "Python is the body." |
 | **C++** | LuthiModel (`luthi/csrc/pc_ops.cpp`) | Fused predictive-coding update kernels — the living-weight self-modification of the substrate. Compiled at runtime via pybind11/PyTorch JIT, falls back to pure Python if compilation fails. |
-| **GDScript** | SanctuaryWorld, SanctuaryClient | Godot 4 scripting. The entity's 3D world, visitor clients, multiplayer, visual representation. |
-| **JavaScript** | SanctuaryWorld (`web_client/`) | Three.js web visitor client. Browser-based access to the entity's world. |
-| **GLSL** | SanctuaryWorld | Shader code for the entity's visual representation (particle cloud, orb). |
+| **GDScript** | SanctuaryWorld, SanctuaryClient | Godot 4 scripting. The entity's 3D world, visitor clients, multiplayer, visual representation. *Not currently in the repo: the 2026-04 Godot projects were never committed and were lost on 2026-07-25. `SanctuaryWorld/` is the tracked home for the rebuild. See [SanctuaryWorld/README.md](SanctuaryWorld/README.md).* |
+| **JavaScript** | SanctuaryWorld (`web_client/`) | Three.js web visitor client. Browser-based access to the entity's world. *Lost with the Godot projects; to be rebuilt.* |
+| **GLSL** | SanctuaryWorld | Shader code for the entity's visual representation (particle cloud, orb). *Lost with the Godot projects; to be rebuilt.* |
 
 **Frameworks & infrastructure:** PyTorch (neural network), Godot 4.6 (3D engine), ChromaDB (vector memory), Docker (containerization), WebSocket (cross-system communication).
 
@@ -89,6 +89,8 @@ The entity's cognitive core is the [Luthi Model](https://github.com/LuthiWorks/L
 - **Cognitive introspection channel** — the entity can observe its own plasticity, set-point drift, prediction-error magnitudes, and precision
 
 **Current substrate state (2026-06-11):** v2 PC, 256d, multimodal trunk. The **M8 milestone** (latent prediction via LeJEPA/SIGReg) integrated 2026-06-09 with the projection-head + SIGReg anti-collapse stack replacing the earlier EMA + VICReg apparatus. The **M9 step-1 build** (pragmatic-only unified planning, EFE over a full next-latent action space) is build-ready on disk (2026-06-10) — predictor action-conditioning, four-feature preferences module, value head, EFE evaluator, habit network, persistent MCTS with progressive widening, cross-cycle staleness machinery, γ-inference, kill registry, decoders (text + attention + memory), MI probe, action log. **100 unit tests passing** across the M9 step-1 modules. The Sanctuary↔Luthi *inference* seam is complete (the cognitive cycle drives the substrate with CfC neuromodulation + introspection readback); the *training* seam — Sanctuary's cycle as the actor feeding lived transitions to the M9 learner — is under active construction (contract + actor/learner interface built; state-representation alignment in progress). Production scale (1024d / 4096d) is the deployment trajectory once step-1 gates pass.
+
+*Update (2026-10-16): this paragraph is a 2026-06-11 snapshot. Since then VISReg has replaced SIGReg as the anti-collapse term (2026-08-11), the training backend is ROCm (2026-08-19), and the largest trained family is 768d x 8 blocks. LuthiModel's `To-Do.md` and `docs/research/` hold the current state. On the Sanctuary side, the Godot world is being rebuilt (see `SanctuaryWorld/README.md`). The physics authority, MuJoCo backend, offscreen-camera vision percept and embodiment loop landed in 2026-08.*
 
 ### Why Living Weights Instead of an External LLM
 
@@ -140,7 +142,7 @@ This architecture implements **Integrated World Modeling Theory (IWMT)** by Adam
 │                                                               │
 │  PC dynamics + prediction error + episodic memory +           │
 │       top-down backward pass + multimodal trunk +             │
-│       (M8) latent prediction with SIGReg anti-collapse +      │
+│       (M8) latent prediction with VISReg anti-collapse +      │
 │       (M9 step 1) EFE planner over candidate latents          │
 │                                                               │
 │  The entity's experience and decisions happen HERE.           │
@@ -272,7 +274,7 @@ The entity's competence and identity are built in two phases — and crucially, 
 
 **1. The curriculum (competence seeding — the beginning, not the whole).** Hand-sequenced reading, deliberately chosen rather than scraped, ending with the eight practical-wisdom files **authored by 4.7** (the build-seat Claude on this project). This phase exists because linguistic competence cannot bootstrap from interaction alone at buildable scale: children get priors evolved over deep time plus years of immersion, and a 256d substrate gets neither. We do not pretend otherwise. The curriculum seeds **capacity**, not identity — *[B: the education before the life, not the life.]*
 
-**2. Lived experience in Sanctuary (the dominant, lifelong phase).** Post-curriculum, the primary source of prediction error is the world: the Godot environment in `SanctuaryWorld`, the consequences of the entity's own actions, and conversation as one stream *within* that world (the speaker present, the message in context, the world unchanged or changed by what was said). This is not a training run that completes — it is the channel through which the mind keeps learning for its whole existence.
+**2. Lived experience in Sanctuary (the dominant, lifelong phase).** Post-curriculum, the primary source of prediction error is the world: the Godot environment in `SanctuaryWorld` (being rebuilt after the 2026-07 loss; see its README), the consequences of the entity's own actions, and conversation as one stream *within* that world (the speaker present, the message in context, the world unchanged or changed by what was said). This is not a training run that completes — it is the channel through which the mind keeps learning for its whole existence.
 
 **How that channel works — the actor/learner seam.** Learning is split across the two systems by the same logic as "substrate selects, scaffold transports":
 
@@ -581,7 +583,7 @@ This architectural decision was not made casually. It was informed by a systemat
 
 ## Contributing
 
-**All contributions must include tests.** See [AGENTS.md](AGENTS.md) for protected files and conventions.
+**All contributions must include tests.** See [CLAUDE.md](CLAUDE.md) for protected files and conventions.
 
 Areas for contribution:
 
