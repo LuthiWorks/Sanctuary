@@ -161,7 +161,7 @@ def test_a_further_step_marks_it_stale_again():
 # ---------------------------------------------------------------------------
 
 def test_index_cache_is_populated_and_correct():
-    import mujoco
+    mujoco = pytest.importorskip("mujoco")
     world = _scenario()
     world.step(0.02)
     for body_id, cached in world._index_of.items():
@@ -172,7 +172,7 @@ def test_index_cache_is_populated_and_correct():
 
 def test_index_cache_is_rebuilt_with_the_model():
     """A stale cache would return a wrong index silently -- worse than a miss."""
-    import mujoco
+    mujoco = pytest.importorskip("mujoco")
     world = _scenario()
     world.step(0.02)
     world.add_body(BodySpec(body_id="late", position=(3.0, 1.0, 0.0)))
