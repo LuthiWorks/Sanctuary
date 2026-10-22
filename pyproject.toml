@@ -10,7 +10,10 @@ description = "The Sanctuary - A cognitive architecture framework"
 # working environment was 3.10, which is one of several reasons `pip install .`
 # could not succeed -- and therefore why the Dockerfile carried a silent
 # fallback to a hand-written package list. Verified 2026-08-16.
-requires-python = ">=3.10"
+# Capped below 3.13 because torch==2.4.1 (the DirectML pin below) ships no
+# wheels past 3.12; without the cap uv resolves a 3.13 split that can never
+# install and fails on numpy. Lift together with the torch pin. 2026-10-22.
+requires-python = ">=3.10,<3.13"
 dependencies = [
     # --- Core ML ---
     # torch is CONSTRAINED, not merely floored. torch-directml==0.2.5.dev240914
@@ -35,7 +38,10 @@ dependencies = [
     "langchain-huggingface>=1.2.0",
     "chromadb>=0.4.18",
     "accelerate>=1.12.0",
-    "Pillow>=10.0.0", # For image handling
+    # For image handling. Split by Python because Pillow 13 (the first release
+    # clearing the 2026 CVE batch) requires 3.11+; 3.10 tops out at 12.3.0.
+    "Pillow>=12.3.0; python_version < '3.11'",
+    "Pillow>=13.0.0; python_version >= '3.11'",
     "sentencepiece>=0.2.0", # Required for some vision models
     # --- Web and API ---
     # The server is aiohttp (sanctuary/api/ws_server.py:59). quart and hypercorn

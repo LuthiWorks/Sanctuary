@@ -10,8 +10,8 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^40.0.0",
-    "electron-builder": "^24.9.1"
+    "electron": "^41.10.6",
+    "electron-builder": "^26.15.0"
   },
   "build": {
     "appId": "com.sanctuary.desktop",
