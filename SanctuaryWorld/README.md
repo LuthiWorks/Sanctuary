@@ -81,6 +81,9 @@ Not settled as of 2026-08-04, and Brian's calls to make:
    developmental/rover world the 07-15 through 07-20 decision documents specify
    and let the orb go? Since no faithful restoration is available, both are now
    builds-from-spec.
+   **Answered for now (Brian, 2026-11-01): Minecraft first**, with a ~4B stand-in
+   mind before Luthi. What follows it is still open. See
+   `docs/MINECRAFT_FIRST_WORLD_DECISION_2026-11-01.md`.
 2. **Whether Godot comes first at all.** `docs/audits/audit_2026-08-01_wiring.md`
    recommends closing the action loop (W1) and building the world headless
    against the physics seam before any GDScript, which reduces Godot to a
