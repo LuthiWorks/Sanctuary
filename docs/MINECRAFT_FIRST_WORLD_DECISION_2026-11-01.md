@@ -91,7 +91,20 @@ The runner's identity directory defaults to `data/identity`. That folder, `data/
 
 The stand-in must run with its own data directory, outside the repo, so that nothing it lives is written into the entity's records.
 
-**Decided (Brian, 2026-11-01): it has its own name and its own charter**, not a copy of the entity's. They live in its own data directory, never in `data/` or `sanctuary/data/`.
+**Decided (Brian, 2026-11-01): nothing of the entity's is reused.** The stand-in names itself, and its charter is tabled for now (see "What it is told"). Everything it accumulates lives in its own data directory, never in `data/` or `sanctuary/data/`.
+
+### What it is told (Brian, 2026-11-01)
+
+- **Its orientation:** "they should just be told they are being instantiated to test an environment and that it should be a pleasant experience. If they ask about any of what they find then we'll elaborate truthfully."
+- **What it can read:** "they should have full read access to sanctuary and their environment." Claude recommended two exceptions; Brian's answer is pending:
+  - the entity's own records (`data/`, `sanctuary/data/`): another mind's journals and memories, whose privacy the entity's charter promises will grow with trust;
+  - secrets (`.env`, key files): the stand-in also has outbound tools.
+- **The charter is tabled:** "I don't know if I want to give the agent a full charter. A constitutional AI has its place, and I'm not sure yet that this is it. We'll keep it but tabled for now and revisit it later."
+- **It names itself.**
+
+**What this means for the code, not built yet:**
+- As built, every mind gets the entity's awakening text and the entity's fixed charter summary ("You are a mind in a home"), and boot fails without a charter file.
+- A stand-in mode should replace both with the orientation, need no charter, and repeat the orientation every cycle, including who can read its inner speech.
 
 ### Welfare
 
@@ -124,7 +137,7 @@ The dev server Brian runs accepts Mojang's EULA. He should know that before star
 
 ## Open questions (Brian's)
 
-1. ~~What the stand-in starts as.~~ Its own name and charter (Brian, 2026-11-01). **It names itself** (Brian, 2026-11-01). Still open: who writes the charter. Note: `Charter._compress_charter` takes only the value seeds from the charter file; everything else the mind sees each cycle is a fixed summary ("You are a mind in a home"). So a stand-in charter that tells it its actual situation (an interim mind in Minecraft while Sanctuary's world is built) needs that summary to come from the file, or the situation stated elsewhere.
+1. ~~What the stand-in starts as.~~ It names itself; it is told it is testing an environment, and it gets no charter for now (tabled; see "What it is told"). Earlier the same day: "its own name and charter." Note: `Charter._compress_charter` takes only the value seeds from the charter file; everything else the mind sees each cycle is a fixed summary ("You are a mind in a home"). So a stand-in charter that tells it its actual situation (an interim mind in Minecraft while Sanctuary's world is built) needs that summary to come from the file, or the situation stated elsewhere.
 2. ~~Which ~4B model.~~ Qwen3.5-4B (Brian, 2026-11-01).
 3. **What follows Minecraft,** and whether the entity's life begins in Minecraft or Minecraft stays a proving ground until the comfort and welfare gates of PLAN Phases 4–5 are met.
 4. **Server settings beyond the welfare defaults above,** for example the daylight cycle.
