@@ -54,7 +54,9 @@ It plugs in where the text-adventure environment does, at the level of percepts 
 
 ### What it can do (first version)
 
-`look`, `go_to`, `stop`, `dig`, `place`, `craft`, `equip`, `eat`, `pick_up`, `say` (public chat), `whisper`. Each is a registered tool with a short description. Its result (done, failed and why, what changed) returns as a `tool_result` percept.
+`look`, `go_to`, `stop`, `dig`, `place`, `craft`, `equip`, `eat`, `pick_up`, `whisper`.
+
+Public chat needs no tool of its own: the mind's `external_speech` (the stand-in's `speak` function) goes to in-game chat while the Minecraft body is connected. Each is a registered tool with a short description. Its result (done, failed and why, what changed) returns as a `tool_result` percept.
 
 ### Real time
 
@@ -107,8 +109,9 @@ The dev server Brian runs accepts Mojang's EULA. He should know that before star
 
 1. **Close the action loop, model-agnostic half** (audit 2026-08-01, W1). The entity is told what tools exist (`CognitiveInput.tool_catalog`), and the tool request, execution and result loop is tested end to end with a scripted model.
    - The Luthi half of W1 (routing the M9 decoder's selections into `CognitiveOutput`) waits for "then we'll worry about Luthi."
-   - *Started on this branch.*
+   - *Done in PR #195; research log `docs/research/2026-11-01_action-loop-tool-catalog.md`.*
 2. **The `llm` backend**, with tests against a stand-in HTTP server (no model needed).
+   - *Done in PR #195: `sanctuary/core/llm_model.py`, `--model-backend llm`; research log `docs/research/2026-11-01_stand-in-llm-backend.md`.*
 3. **The Minecraft bridge**: the Node game side, the Python tools and percepts, and a recorded-session test that needs no Minecraft server.
 4. **First run on Brian's PC:**
    - a Paper server, local, offline mode, with the settings above;
