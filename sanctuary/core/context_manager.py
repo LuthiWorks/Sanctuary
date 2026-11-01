@@ -126,19 +126,19 @@ class ContextManager:
 
         self._last_stats = stats
 
-        return CognitiveInput(
-            previous_thought=previous_thought,
-            new_percepts=percepts,
-            prediction_errors=cognitive_input.prediction_errors,
-            surfaced_memories=memories,
-            emotional_state=cognitive_input.emotional_state,
-            temporal_context=cognitive_input.temporal_context,
-            self_model=self_model,
-            world_model_query_results=query_results,
-            scaffold_signals=scaffold,
-            experiential_state=cognitive_input.experiential_state,
-            charter_summary=charter_summary,
-        )
+        # Copy, replacing only the compressed sections. Every other field is
+        # carried through as it is. (Rebuilding CognitiveInput field by field
+        # silently dropped self_authored_identity and communication_urges, and
+        # would have dropped any field added later.)
+        return cognitive_input.model_copy(update={
+            "previous_thought": previous_thought,
+            "new_percepts": percepts,
+            "surfaced_memories": memories,
+            "self_model": self_model,
+            "world_model_query_results": query_results,
+            "scaffold_signals": scaffold,
+            "charter_summary": charter_summary,
+        })
 
     def get_last_stats(self) -> Optional[CompressionStats]:
         """Return compression stats from the most recent compress() call."""

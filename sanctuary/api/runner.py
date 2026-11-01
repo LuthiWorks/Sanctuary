@@ -42,7 +42,12 @@ from sanctuary.core.turbo import (
     PCIntensitySource,
     TurboManager,
 )
-from sanctuary.core.schema import CognitiveOutput, Percept, SelfModelUpdate
+from sanctuary.core.schema import (
+    CognitiveOutput,
+    Percept,
+    SelfModelUpdate,
+    ToolDescription,
+)
 from sanctuary.consciousness.sleep_cycle import SleepCycleManager, SleepConfig
 from sanctuary.identity.awakening import AwakeningSequence
 from sanctuary.identity.self_authored import SelfAuthoredIdentity
@@ -479,6 +484,9 @@ class SanctuaryRunner:
             turbo_manager=self._turbo_manager,
             stimulus_density_heuristic=self._density_heuristic,
             world_graph_path=world_graph_path,
+            # The entity is told its tools every cycle (audit 2026-08-01, W1).
+            # self.tools is created below; the provider only runs once cycles do.
+            tool_catalog=self._describe_tools,
         )
 
         # --- Tools ---
@@ -707,6 +715,10 @@ class SanctuaryRunner:
     # ------------------------------------------------------------------
     # Tool execution
     # ------------------------------------------------------------------
+
+    def _describe_tools(self) -> list[ToolDescription]:
+        """The tool catalog as the entity receives it in CognitiveInput."""
+        return [ToolDescription(**entry) for entry in self.tools.get_catalog()]
 
     async def _execute_tool_requests(self, output: CognitiveOutput) -> None:
         """Execute tool requests from the entity's cognitive output.
