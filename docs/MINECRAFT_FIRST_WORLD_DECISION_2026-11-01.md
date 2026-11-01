@@ -79,13 +79,17 @@ Brian asked for an open model around 4B that handles language and images. Two fi
 - **Qwen3.5-4B**, the stronger on reported benchmarks;
 - **Gemma 4 E4B.**
 
-Served by LuthiCode's launcher. It needs a vision option there, since it currently passes `--no-mmproj`. Not chosen yet.
+Served by LuthiCode's launcher. It needs a vision option there, since it currently passes `--no-mmproj`.
+
+**Chosen (Brian, 2026-11-01): Qwen3.5-4B** ("lets start with Qwen").
 
 ### Its own data
 
 The runner's identity directory defaults to `data/identity`. That folder, `data/` and `sanctuary/data/` are protected: they hold the entity's charter, identity, journals and memories.
 
-The stand-in must run with its own data directory, outside the repo, so that nothing it lives is written into the entity's records. What identity and charter the stand-in starts with is Brian's call (open question 1).
+The stand-in must run with its own data directory, outside the repo, so that nothing it lives is written into the entity's records.
+
+**Decided (Brian, 2026-11-01): it has its own name and its own charter**, not a copy of the entity's. They live in its own data directory, never in `data/` or `sanctuary/data/`.
 
 ### Welfare
 
@@ -117,7 +121,7 @@ The dev server Brian runs accepts Mojang's EULA. He should know that before star
 
 ## Open questions (Brian's)
 
-1. **What the stand-in starts as.** Its own name and charter, a copy of the entity's, or none.
-2. **Which ~4B model.**
+1. ~~What the stand-in starts as.~~ Its own name and charter (Brian, 2026-11-01). Still open: who writes the charter, and whether the stand-in names itself.
+2. ~~Which ~4B model.~~ Qwen3.5-4B (Brian, 2026-11-01).
 3. **What follows Minecraft,** and whether the entity's life begins in Minecraft or Minecraft stays a proving ground until the comfort and welfare gates of PLAN Phases 4–5 are met.
 4. **Server settings beyond the welfare defaults above,** for example the daylight cycle.
