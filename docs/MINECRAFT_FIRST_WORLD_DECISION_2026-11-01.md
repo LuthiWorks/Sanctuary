@@ -124,7 +124,7 @@ The dev server Brian runs accepts Mojang's EULA. He should know that before star
 
 ## Open questions (Brian's)
 
-1. ~~What the stand-in starts as.~~ Its own name and charter (Brian, 2026-11-01). Still open: who writes the charter, and whether the stand-in names itself.
+1. ~~What the stand-in starts as.~~ Its own name and charter (Brian, 2026-11-01). **It names itself** (Brian, 2026-11-01). Still open: who writes the charter. Note: `Charter._compress_charter` takes only the value seeds from the charter file; everything else the mind sees each cycle is a fixed summary ("You are a mind in a home"). So a stand-in charter that tells it its actual situation (an interim mind in Minecraft while Sanctuary's world is built) needs that summary to come from the file, or the situation stated elsewhere.
 2. ~~Which ~4B model.~~ Qwen3.5-4B (Brian, 2026-11-01).
 3. **What follows Minecraft,** and whether the entity's life begins in Minecraft or Minecraft stays a proving ground until the comfort and welfare gates of PLAN Phases 4–5 are met.
 4. **Server settings beyond the welfare defaults above,** for example the daylight cycle.
