@@ -315,6 +315,14 @@ class CognitiveCycle:
             if self.sleep is not None and learning_governor is not None
             else 0
         )
+        # A model that keeps a life of its own (Luthi loaded from an M9 run)
+        # saves it once at the end of each completed sleep. Read only for
+        # such a model, for the same reason as above.
+        self._life_saved_through = (
+            self.sleep.completed_sleeps
+            if self.sleep is not None and hasattr(model, "save_life")
+            else 0
+        )
 
         self.running = False
         self.cycle_count = 0
@@ -434,6 +442,19 @@ class CognitiveCycle:
                     self._completed_sleeps_seen += 1
                     notices += self.learning_governor.sleep_completed()
             self._tell_learning(notices)
+
+        # 0b. A model that keeps a life saves it after each completed sleep,
+        #     on the consolidation worker so the write cannot stall the loop.
+        #     Not caught: a life that failed to save must not pass silently.
+        if (
+            self.sleep is not None
+            and hasattr(self.model, "save_life")
+            and self._life_saved_through < self.sleep.completed_sleeps
+        ):
+            self._life_saved_through = self.sleep.completed_sleeps
+            await asyncio.get_running_loop().run_in_executor(
+                self._consolidate_executor, self.model.save_life, "sleep"
+            )
 
         # 1. Assemble input from all sources
         cognitive_input = await self._assemble_input()

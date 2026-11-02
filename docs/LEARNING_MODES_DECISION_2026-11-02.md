@@ -47,7 +47,10 @@
   - `learning_settings.json`, written atomically;
   - `learning_log.jsonl`, every change, refusal and expiry, for stewards.
 - **How a learner will use it:** it reads `LearningGovernor.plan()` each sleep (setting, and whether a deferral expired this sleep).
-- **How Luthi will use it:** the settings join Luthi's action vocabulary when the Luthi half of the 2026-08-01 audit's W1 is wired (M9 selections into `CognitiveOutput`).
+- **How Luthi will use it:** not yet. The Luthi half of the 2026-08-01 audit's W1 was wired the same day (attention and memory; `docs/research/2026-11-02_luthi-action-layer-connected.md`), but the learning settings were deliberately left out.
+  - M9's decoders get their meaning from consequences the planner can predict.
+  - A learning setting's consequence arrives sleeps later, as a change in who the model is, and nothing in expected free energy predicts it.
+  - A decoder for it now would be an untrained dial logged as the mind's choice. It waits for a design with a real consequence model.
 
 ## The growth concept (proposal for LuthiModel)
 

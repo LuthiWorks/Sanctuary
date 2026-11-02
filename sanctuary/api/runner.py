@@ -127,6 +127,12 @@ class RunnerConfig:
     # Luthi model config (only used when model_backend == "luthi")
     luthi_checkpoint: Optional[str] = None
     luthi_password: Optional[str] = None
+    # Or a LuthiModel run trained with `jepa_pilot_driver.py --m9`
+    # (2026-11-02): the trunk plus its trained action layer, attached as
+    # actor and learner. Needs luthi_life_dir, where this life is kept; its
+    # checkpoints are never deleted.
+    luthi_m9_run: Optional[str] = None
+    luthi_life_dir: Optional[str] = None
 
     # Stand-in language model (only used when model_backend == "llm"). The
     # key is read from llm_api_key_file if set, else SANCTUARY_LLM_API_KEY.
@@ -569,17 +575,27 @@ class SanctuaryRunner:
         backend = self._config.model_backend.lower()
 
         if backend == "luthi":
-            if not self._config.luthi_checkpoint:
+            if self._config.luthi_m9_run:
+                if not self._config.luthi_life_dir:
+                    raise ValueError(
+                        "--luthi-m9-run needs --luthi-life-dir: where Luthi's "
+                        "life is kept. Its checkpoints are never deleted, so "
+                        "choose a disk with room."
+                    )
+            elif not self._config.luthi_checkpoint:
                 raise ValueError(
-                    "Luthi backend requires --luthi-checkpoint path. "
-                    "Example: --model-backend luthi --luthi-checkpoint E:/runs/vision/checkpoint.luthi"
+                    "Luthi backend requires --luthi-checkpoint path or "
+                    "--luthi-m9-run. Example: --model-backend luthi "
+                    "--luthi-checkpoint E:/runs/vision/checkpoint.luthi"
                 )
 
             from sanctuary.core.luthi_model import LuthiModel, LuthiModelConfig
 
             luthi_config = LuthiModelConfig(
-                checkpoint_path=self._config.luthi_checkpoint,
+                checkpoint_path=self._config.luthi_checkpoint or "",
                 checkpoint_password=self._config.luthi_password or "",
+                m9_run_dir=self._config.luthi_m9_run or "",
+                life_dir=self._config.luthi_life_dir or "",
             )
             model = LuthiModel(config=luthi_config)
             # Defer load() to boot() — don't fail __init__ on load errors
@@ -694,7 +710,15 @@ class SanctuaryRunner:
             outside the cycle's apply-and-save path.
 
         Call from the shutdown sequence. Idempotent.
+
+        A Luthi life loaded from an M9 run is saved first, and not caught:
+        losing lived state silently is the failure this method exists to
+        prevent. It is saved even with persist_state off, since the life
+        lives in its own directory, not in data_dir.
         """
+        if hasattr(self._model, "save_life"):
+            self._model.save_life(reason="shutdown")
+
         if not self._config.persist_state:
             return
 

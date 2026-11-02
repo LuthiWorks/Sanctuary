@@ -126,6 +126,20 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="Password for encrypted Luthi checkpoint (or set LUTHI_CHECKPOINT_PASSWORD env var)",
     )
     parser.add_argument(
+        "--luthi-m9-run",
+        type=str,
+        default=None,
+        help="LuthiModel run directory trained with jepa_pilot_driver.py --m9 "
+             "(the trunk plus its action layer); used instead of --luthi-checkpoint",
+    )
+    parser.add_argument(
+        "--luthi-life-dir",
+        type=str,
+        default=None,
+        help="Where Luthi's life is kept when --luthi-m9-run is used "
+             "(checkpoints are never deleted; choose a disk with room)",
+    )
+    parser.add_argument(
         "--no-sleep",
         action="store_true",
         help="Disable sleep consolidation cycles",
@@ -170,6 +184,8 @@ class SanctuaryCLI:
             model_backend=getattr(self._args, "model_backend", "placeholder"),
             luthi_checkpoint=getattr(self._args, "luthi_checkpoint", None),
             luthi_password=luthi_password,
+            luthi_m9_run=getattr(self._args, "luthi_m9_run", None),
+            luthi_life_dir=getattr(self._args, "luthi_life_dir", None),
             llm_base_url=self._args.llm_base_url,
             llm_model=self._args.llm_model,
             llm_api_key_file=self._args.llm_api_key_file,
@@ -267,6 +283,12 @@ class SanctuaryCLI:
                 await asyncio.wait_for(self._cycle_task, timeout=SHUTDOWN_TIMEOUT)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 self._cycle_task.cancel()
+
+        # After the cycle has stopped, so nothing thinks while state is
+        # written. The CLI never called this before 2026-11-02; a Luthi life
+        # would have lost everything since its last sleep.
+        if self._runner:
+            self._runner.save_state()
 
         print("[sanctuary] Goodbye.")
 

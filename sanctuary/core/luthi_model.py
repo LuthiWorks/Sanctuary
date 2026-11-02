@@ -66,6 +66,14 @@ class LuthiModelConfig:
 
     checkpoint_path: str = ""
     checkpoint_password: str = ""
+    # A run trained with LuthiModel's `jepa_pilot_driver.py --m9`
+    # (2026-11-02). When set, load() builds the trunk and the M9 action layer
+    # from it instead of checkpoint_path, and attaches the action layer as
+    # actor and learner. life_dir is then required: where this life's own
+    # checkpoints and action log are kept. Nothing there is ever deleted, so
+    # pick a disk with room (about 1.4 GB per save at 768x8).
+    m9_run_dir: str = ""
+    life_dir: str = ""
     # Path to the LuthiModel checkout. Empty means "use the LUTHI_PATH
     # environment variable, or assume luthi is already importable."
     luthi_path: str = ""
@@ -194,6 +202,19 @@ class LuthiModel:
         # on cycle 1 / after attach_seam / when the substrate didn't
         # capture it -- the sink degrades to a head-only update.
         self._last_context_obs = None  # dict | None
+        # What the last selected action does per channel, from the actor's
+        # own decoders (luthi.sanctuary_interface.decode_action). None when
+        # no action was selected or the actor cannot say. This cycle's
+        # selection is carried out in _build_output; the next cycle's
+        # sensory encoding is gated by its attention (2026-11-02, the Luthi
+        # half of the 2026-08-01 audit's W1).
+        self._last_decoded: Optional[dict] = None
+        # The trainer of a life loaded from an M9 run (None otherwise), and
+        # whether text decoded from the trunk is the model speaking
+        # (LuthiModel KNOWN_INCOMPLETE #4). True keeps the legacy behaviour
+        # for checkpoints loaded through `load()`'s LM path.
+        self._m9_trainer = None
+        self._speech_trained: bool = True
 
         logger.info("LuthiModel bridge initialized (model not yet loaded)")
 
@@ -268,6 +289,7 @@ class LuthiModel:
         self._last_efe_breakdown = {}
         self._last_plan_snapshot = None
         self._last_context_obs = None
+        self._last_decoded = None
 
         if async_mode == "off":
             self._async_learner = None
@@ -339,6 +361,10 @@ class LuthiModel:
                 self.device = torch.device("cpu")
                 device_name = "CPU"
 
+        if self.config.m9_run_dir:
+            self._load_m9_run(device_name)
+            return
+
         logger.info(
             "Loading Luthi model: checkpoint=%s, device=%s",
             self.config.checkpoint_path,
@@ -369,6 +395,59 @@ class LuthiModel:
             loaded.epoch,
             load_time,
         )
+
+    def _load_m9_run(self, device_name: str) -> None:
+        """Load a trained M9 run: the trunk, its tokenizer, and the action
+        layer as both actor and learner. A life continues from its newest
+        checkpoint in life_dir; the first start begins from the run."""
+        if not self.config.life_dir:
+            raise ValueError(
+                "m9_run_dir needs life_dir: where Luthi's life is kept "
+                "(its checkpoints are never deleted; choose a disk with room)."
+            )
+        from luthi.sanctuary_interface import (
+            load_m9_run,
+            snapshot_modulatable_state,
+        )
+
+        t0 = time.monotonic()
+        loaded = load_m9_run(
+            self.config.m9_run_dir,
+            life_dir=self.config.life_dir,
+            device=self.device,
+        )
+        self.model = loaded.model
+        self.tokenizer = loaded.tokenizer
+        self.model_config = loaded.config
+        self._m9_trainer = loaded.trainer
+        self._speech_trained = loaded.speech_trained
+        self._base_snapshot = snapshot_modulatable_state(self.model)
+        self._loaded = True
+        self.attach_seam(actor=loaded.trainer, sink=loaded.trainer)
+        logger.info(
+            "Luthi %s from %s on %s: %dd, %d blocks, speech %s, %.1fs",
+            "life continues" if loaded.continuing_life else "life begins",
+            loaded.loaded_from,
+            device_name,
+            self.model_config["d_model"],
+            self.model_config["n_blocks"],
+            "trained" if self._speech_trained else "untrained (silent)",
+            time.monotonic() - t0,
+        )
+
+    def save_life(self, reason: str = "life") -> Optional[Path]:
+        """Save a life loaded from an M9 run as its next checkpoint (all of
+        it: trunk with its lived changes, heads, optimizers, corpus
+        position). Returns the path, or None when this model has no life to
+        save (loaded through the LM path)."""
+        if self._m9_trainer is None:
+            return None
+        from luthi.sanctuary_interface import save_life
+
+        with self._model_critical_section():
+            path = save_life(self._m9_trainer, reason=reason)
+        logger.info("Luthi life saved: %s (%s)", path, reason)
+        return path
 
     def load_from_objects(
         self,
@@ -502,8 +581,8 @@ class LuthiModel:
                 #     context, not just as text descriptions in the prompt.
                 #     Dual path: the tensor flows to the trunk via the encoder;
                 #     the text description still seeds the prompt for context.
-                audio_tokens, vision_tokens = self._encode_sensory_percepts(
-                    cognitive_input
+                audio_tokens, vision_tokens = self._attend(
+                    *self._encode_sensory_percepts(cognitive_input)
                 )
 
                 # 4a (2026-06-16): when a seam is attached and the substrate
@@ -535,11 +614,17 @@ class LuthiModel:
                     )
                     gen_state = None
 
-                # 5. Generate external speech if warranted
-                external_speech = self._generate_external_speech(
-                    cognitive_input,
-                    audio_tokens=audio_tokens,
-                    vision_tokens=vision_tokens,
+                # 5. Generate external speech if warranted. Never from a
+                #    trunk whose text readout is untrained: that text is not
+                #    the model speaking (LuthiModel KNOWN_INCOMPLETE #4).
+                external_speech = (
+                    self._generate_external_speech(
+                        cognitive_input,
+                        audio_tokens=audio_tokens,
+                        vision_tokens=vision_tokens,
+                    )
+                    if self._speech_trained
+                    else None
                 )
 
                 # 6. M9 training-seam (Phase 4a reorder, 2026-06-16). Order is:
@@ -658,6 +743,7 @@ class LuthiModel:
                     self._last_action_summary = ""
                     self._last_efe_breakdown = {}
                     self._last_plan_snapshot = None
+                    self._last_decoded = None
                     self._last_context_obs = context_obs
                     self._last_s_t = s_t
                     return pending
@@ -669,11 +755,13 @@ class LuthiModel:
             self._last_action_summary = selection.readable_summary
             self._last_efe_breakdown = dict(selection.efe_breakdown)
             self._last_plan_snapshot = selection.plan_snapshot
+            self._last_decoded = self._decode(selection, s_t, ctx_latents)
         else:
             self._last_action = None
             self._last_action_summary = ""
             self._last_efe_breakdown = {}
             self._last_plan_snapshot = None
+            self._last_decoded = None
 
         self._last_context_obs = context_obs
         self._last_s_t = s_t
@@ -780,6 +868,7 @@ class LuthiModel:
                     self._last_action_summary = ""
                     self._last_efe_breakdown = {}
                     self._last_plan_snapshot = None
+                    self._last_decoded = None
                     self._last_context_obs = context_obs
                     self._last_s_t = s_t
                     return
@@ -791,11 +880,13 @@ class LuthiModel:
             self._last_action_summary = selection.readable_summary
             self._last_efe_breakdown = dict(selection.efe_breakdown)
             self._last_plan_snapshot = selection.plan_snapshot
+            self._last_decoded = self._decode(selection, s_t, ctx_latents)
         else:
             self._last_action = None
             self._last_action_summary = ""
             self._last_efe_breakdown = {}
             self._last_plan_snapshot = None
+            self._last_decoded = None
 
         self._last_context_obs = context_obs
         self._last_s_t = s_t
@@ -861,6 +952,40 @@ class LuthiModel:
     # ------------------------------------------------------------------
     # Generation
     # ------------------------------------------------------------------
+
+    def _decode(self, selection, s_t, ctx_latents) -> Optional[dict]:
+        """What the selected action does per channel, when the actor can say.
+
+        An M9Trainer can (``decode_selection``); a bare M9Actor cannot, and
+        its selection stays a diagnostic, as before 2026-11-02.
+        """
+        if not hasattr(self._actor, "decode_selection"):
+            return None
+        from luthi.sanctuary_interface import decode_action
+
+        return decode_action(
+            self._actor, selection.action, s_t=s_t, context_latents=ctx_latents,
+        )
+
+    def _attend(self, audio_tokens, vision_tokens):
+        """Carry out the attention the last selected action chose.
+
+        Each sensory channel's tokens are scaled by its gate before they
+        reach the trunk, as the M9 attention decoder specifies. Only when
+        the attention channel acted (``active["attention"]``); otherwise
+        the senses pass unchanged. The text gate has nothing to scale here,
+        since text arrives as discrete tokens; it reaches the cycle through
+        attention guidance only.
+        """
+        decoded = self._last_decoded
+        if decoded is None or not decoded["active"]["attention"]:
+            return audio_tokens, vision_tokens
+        gates = decoded["attention_gates"]
+        if audio_tokens is not None:
+            audio_tokens = audio_tokens * gates["audio"]
+        if vision_tokens is not None:
+            vision_tokens = vision_tokens * gates["vision"]
+        return audio_tokens, vision_tokens
 
     def _encode_sensory_percepts(
         self, ci: CognitiveInput
@@ -950,7 +1075,12 @@ class LuthiModel:
             model=self.model,
             tokenizer=self.tokenizer,
             prompt=prompt,
-            max_tokens=self.config.max_inner_tokens,
+            # Untrained text readout: perceive (the step-0 forward the seam
+            # reads s_t from) and stop. Decoding further would feed the
+            # trunk its own noise, token by token, through living weights.
+            max_tokens=(
+                self.config.max_inner_tokens if self._speech_trained else 1
+            ),
             audio_tokens=audio_tokens,
             vision_tokens=vision_tokens,
             temperature=self.config.temperature,
@@ -967,6 +1097,11 @@ class LuthiModel:
         else:
             full_text = gen_result
             gen_state = None
+
+        if not self._speech_trained:
+            # No inner speech to report: the sampled token is not the
+            # model speaking (LuthiModel KNOWN_INCOMPLETE #4).
+            return ("", gen_state) if return_state else ""
 
         # Extract generated portion by re-encoding and slicing tokens,
         # avoiding BPE roundtrip mismatch at the character level.
@@ -1418,6 +1553,43 @@ class LuthiModel:
 
         return ops
 
+    # Luthi's percept modality names for the M9 attention decoder's channels.
+    _ATTENTION_MODALITIES = {"text": "language", "audio": "audio", "vision": "visual"}
+
+    def _chosen_attention(self, decoded: dict) -> AttentionGuidance:
+        """The attention the selected action chose: focus on modalities
+        gated at or above one half, deprioritize the rest. Empty when the
+        attention channel did not act this cycle."""
+        if not decoded["active"]["attention"]:
+            return AttentionGuidance()
+        gates = decoded["attention_gates"]
+        return AttentionGuidance(
+            focus_on=[
+                self._ATTENTION_MODALITIES[m] for m, g in gates.items() if g >= 0.5
+            ],
+            deprioritize=[
+                self._ATTENTION_MODALITIES[m] for m, g in gates.items() if g < 0.5
+            ],
+        )
+
+    def _chosen_memory(self, decoded: dict, ci: CognitiveInput) -> list[MemoryOp]:
+        """An episodic write of this moment when the memory channel acted,
+        weighted by the chosen salience. The content is what was perceived:
+        a model with no trained speech has no words of its own to store."""
+        if not decoded["active"]["memory"]:
+            return []
+        moment = "; ".join(
+            f"{p.modality}: {p.content}" for p in ci.new_percepts if p.content
+        )
+        return [
+            MemoryOp(
+                type="write_episodic",
+                content=moment[:1000] or "nothing new was perceived",
+                significance=1 + round(9 * decoded["memory_salience"]),
+                tags=["luthi", "chosen"],
+            )
+        ]
+
     # ------------------------------------------------------------------
     # Output construction
     # ------------------------------------------------------------------
@@ -1447,12 +1619,23 @@ class LuthiModel:
         # into the CognitiveOutput surface until the substrate emits.
         predictions: list = []
 
+        # Attention and memory: the action Luthi selected this cycle, when
+        # its action layer can say what that action does (2026-11-02, the
+        # Luthi half of the 2026-08-01 audit's W1). The adapter-authored
+        # heuristics remain only for a model without one.
+        if self._last_decoded is not None:
+            attention_guidance = self._chosen_attention(self._last_decoded)
+            memory_ops = self._chosen_memory(self._last_decoded, cognitive_input)
+        else:
+            attention_guidance = self._determine_attention_guidance()
+            memory_ops = self._determine_memory_ops()
+
         return CognitiveOutput(
             inner_speech=inner_speech,
             external_speech=external_speech,
             predictions=predictions,
-            attention_guidance=self._determine_attention_guidance(),
-            memory_ops=self._determine_memory_ops(),
+            attention_guidance=attention_guidance,
+            memory_ops=memory_ops,
             self_model_updates=SelfModelUpdate(
                 current_state=felt_quality,
             ),
