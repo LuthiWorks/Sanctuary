@@ -336,6 +336,29 @@ class PreviousThought(BaseModel):
     self_model_snapshot: Optional[SelfModel] = None
 
 
+class ToolDescription(BaseModel):
+    """One tool, as the entity sees it in its tool catalog.
+
+    ``available`` is True when the tool policy lets the tool run: it is not
+    gated, it is a gated tool that has been granted, or a confirmation hook
+    may grant it (and may still decline). Gated tools that have not been
+    granted stay in the catalog, marked unavailable, so the entity can see
+    the whole surface and which parts are open to it yet. How a model
+    presents the catalog (prompt text, function schemas, available tools
+    only) is the model adapter's choice.
+    """
+
+    name: str
+    description: str
+    parameters: dict[str, str] = Field(
+        default_factory=dict,
+        description="Parameter name -> description, as registered with the tool",
+    )
+    category: str = ""
+    safety: str = "open"  # ToolSafety value: "open" or "gated"
+    available: bool = True
+
+
 class CognitiveInput(BaseModel):
     """Everything the entity receives for one moment of thought.
 
@@ -368,6 +391,13 @@ class CognitiveInput(BaseModel):
     communication_urges: list[CommunicationUrgeSignal] = Field(
         default_factory=list,
         description="Active communication urges the entity can feel",
+    )
+    tool_catalog: list[ToolDescription] = Field(
+        default_factory=list,
+        description=(
+            "The tools the entity can call through CognitiveOutput.tool_requests. "
+            "Results return as tool_result percepts in the next cycle."
+        ),
     )
 
 

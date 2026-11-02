@@ -84,8 +84,34 @@ def parse_args(argv=None) -> argparse.Namespace:
         "--model-backend",
         type=str,
         default="placeholder",
-        choices=["placeholder", "luthi"],
-        help="Model backend: placeholder (no-model testing) or luthi (living weights)",
+        choices=["placeholder", "luthi", "llm"],
+        help=(
+            "Model backend: placeholder (no-model testing), luthi (living weights), "
+            "or llm (a language model as a stand-in mind)"
+        ),
+    )
+    parser.add_argument(
+        "--llm-base-url",
+        type=str,
+        default="http://127.0.0.1:8080/v1",
+        help="OpenAI-compatible endpoint for --model-backend llm (default: local llama-server)",
+    )
+    parser.add_argument(
+        "--llm-model",
+        type=str,
+        default="qwen3.5-4b",
+        help="Model name sent to the endpoint (llama-server ignores it)",
+    )
+    parser.add_argument(
+        "--llm-api-key-file",
+        type=str,
+        default=None,
+        help="File whose first line is the endpoint's API key (or set SANCTUARY_LLM_API_KEY)",
+    )
+    parser.add_argument(
+        "--llm-thinking",
+        action="store_true",
+        help="Let the stand-in model reason before answering (slower)",
     )
     parser.add_argument(
         "--luthi-checkpoint",
@@ -144,6 +170,10 @@ class SanctuaryCLI:
             model_backend=getattr(self._args, "model_backend", "placeholder"),
             luthi_checkpoint=getattr(self._args, "luthi_checkpoint", None),
             luthi_password=luthi_password,
+            llm_base_url=self._args.llm_base_url,
+            llm_model=self._args.llm_model,
+            llm_api_key_file=self._args.llm_api_key_file,
+            llm_thinking=self._args.llm_thinking,
             sleep_enabled=not getattr(self._args, "no_sleep", False),
         )
 

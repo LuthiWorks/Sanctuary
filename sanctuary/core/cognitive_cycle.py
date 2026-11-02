@@ -22,7 +22,7 @@ import math
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Callable, Dict, Optional, Protocol
 
 from pathlib import Path
 
@@ -41,6 +41,7 @@ from sanctuary.core.schema import (
     Percept,
     ScaffoldSignals,
     TemporalContext,
+    ToolDescription,
     WorldQueryResult,
 )
 from sanctuary.core.stream_of_thought import StreamOfThought
@@ -271,6 +272,7 @@ class CognitiveCycle:
         stimulus_density_heuristic: Optional[StimulusDensityHeuristic] = None,
         world_graph: Optional[WorldGraph] = None,
         world_graph_path: Optional[Path] = None,
+        tool_catalog: Optional[Callable[[], list[ToolDescription]]] = None,
     ):
         self.model = model
         self.scaffold = scaffold or NullScaffold()
@@ -295,6 +297,11 @@ class CognitiveCycle:
         )
         if self.world_graph_path is not None:
             self.world_graph.load(self.world_graph_path)
+
+        # Called each cycle to tell the entity which tools it can call. The
+        # registry can change between cycles (tools registered late, gated
+        # tools granted), so this is a provider, not a fixed list.
+        self.tool_catalog = tool_catalog
 
         self.running = False
         self.cycle_count = 0
@@ -710,6 +717,7 @@ class CognitiveCycle:
             experiential_state=experiential_signals,
             charter_summary=self.identity.get_charter_summary(),
             self_authored_identity=self.identity.get_self_authored_identity(),
+            tool_catalog=self.tool_catalog() if self.tool_catalog is not None else [],
         )
 
     async def _execute(self, output: CognitiveOutput):

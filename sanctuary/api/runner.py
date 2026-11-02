@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Awaitable, Optional
@@ -42,7 +43,12 @@ from sanctuary.core.turbo import (
     PCIntensitySource,
     TurboManager,
 )
-from sanctuary.core.schema import CognitiveOutput, Percept, SelfModelUpdate
+from sanctuary.core.schema import (
+    CognitiveOutput,
+    Percept,
+    SelfModelUpdate,
+    ToolDescription,
+)
 from sanctuary.consciousness.sleep_cycle import SleepCycleManager, SleepConfig
 from sanctuary.identity.awakening import AwakeningSequence
 from sanctuary.identity.self_authored import SelfAuthoredIdentity
@@ -112,12 +118,21 @@ class RunnerConfig:
     # Context budget
     context_budget: Optional[BudgetConfig] = None
 
-    # Model backend: "placeholder" or "luthi" (ollama was retired 2026-04-30)
+    # Model backend: "placeholder", "luthi", or "llm" (a language model as a
+    # stand-in mind; docs/MINECRAFT_FIRST_WORLD_DECISION_2026-11-01.md).
+    # The ollama backend was retired 2026-04-30.
     model_backend: str = "placeholder"
 
     # Luthi model config (only used when model_backend == "luthi")
     luthi_checkpoint: Optional[str] = None
     luthi_password: Optional[str] = None
+
+    # Stand-in language model (only used when model_backend == "llm"). The
+    # key is read from llm_api_key_file if set, else SANCTUARY_LLM_API_KEY.
+    llm_base_url: str = "http://127.0.0.1:8080/v1"
+    llm_model: str = "qwen3.5-4b"
+    llm_api_key_file: Optional[str] = None
+    llm_thinking: bool = False
 
     # Sleep consolidation
     sleep_enabled: bool = True
@@ -479,6 +494,9 @@ class SanctuaryRunner:
             turbo_manager=self._turbo_manager,
             stimulus_density_heuristic=self._density_heuristic,
             world_graph_path=world_graph_path,
+            # The entity is told its tools every cycle (audit 2026-08-01, W1).
+            # self.tools is created below; the provider only runs once cycles do.
+            tool_catalog=self._describe_tools,
         )
 
         # --- Tools ---
@@ -548,8 +566,29 @@ class SanctuaryRunner:
             # Defer load() to boot() — don't fail __init__ on load errors
             return model
 
-        else:
+        if backend == "llm":
+            from sanctuary.core.llm_model import LLMModel, LLMModelConfig
+
+            if self._config.llm_api_key_file:
+                key_text = Path(self._config.llm_api_key_file).read_text(encoding="utf-8")
+                api_key = key_text.splitlines()[0].strip() if key_text.strip() else ""
+            else:
+                api_key = os.environ.get("SANCTUARY_LLM_API_KEY", "")
+            return LLMModel(config=LLMModelConfig(
+                base_url=self._config.llm_base_url,
+                model=self._config.llm_model,
+                api_key=api_key,
+                thinking=self._config.llm_thinking,
+            ))
+
+        if backend == "placeholder":
             return PlaceholderModel()
+
+        # An unknown name used to fall through to the placeholder silently.
+        raise ValueError(
+            f"unknown model backend '{self._config.model_backend}'; "
+            f"expected placeholder, luthi or llm"
+        )
 
     # ------------------------------------------------------------------
     # Boot
@@ -707,6 +746,10 @@ class SanctuaryRunner:
     # ------------------------------------------------------------------
     # Tool execution
     # ------------------------------------------------------------------
+
+    def _describe_tools(self) -> list[ToolDescription]:
+        """The tool catalog as the entity receives it in CognitiveInput."""
+        return [ToolDescription(**entry) for entry in self.tools.get_catalog()]
 
     async def _execute_tool_requests(self, output: CognitiveOutput) -> None:
         """Execute tool requests from the entity's cognitive output.

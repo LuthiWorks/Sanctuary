@@ -246,10 +246,27 @@ class ToolRegistry:
         self._record(result)
         return result
 
+    def is_available(self, name: str) -> bool:
+        """Whether the active policy lets the named tool run.
+
+        True for open tools, granted gated tools, and gated tools a
+        confirmation hook may grant (the hook can still decline a call).
+        """
+        spec = self._tools[name]
+        if spec.safety != ToolSafety.GATED:
+            return True
+        policy = self._policy
+        return (
+            policy.allow_gated
+            or spec.name in policy.enabled_gated
+            or policy.confirm is not None
+        )
+
     def get_catalog(self) -> list[dict]:
         """Get the full tool catalog for inclusion in CognitiveInput.
 
-        Returns a list of tool descriptions the entity can browse.
+        Returns a list of tool descriptions the entity can browse, each
+        marked with whether the current policy lets it run.
         """
         catalog = []
         for spec in sorted(self._tools.values(), key=lambda s: (s.category, s.name)):
@@ -259,6 +276,7 @@ class ToolRegistry:
                 "parameters": spec.parameters,
                 "safety": spec.safety.value,
                 "category": spec.category,
+                "available": self.is_available(spec.name),
             })
         return catalog
 
