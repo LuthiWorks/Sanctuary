@@ -29,7 +29,7 @@ dependencies = [
     # aspirational future versions. transformers>=5.5.0 and numpy>=2.3.4 were
     # both unsatisfiable against this environment.
     "numpy>=1.26.4,<2",
-    "transformers>=4.57.1,<5",
+    "transformers>=5.10.1,<6",
     "sentence-transformers>=5.1.2",
     "langchain>=1.3.9,<2.0",
     "langchain-community>=0.4.1",
