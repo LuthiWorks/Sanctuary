@@ -127,8 +127,8 @@ class RunnerConfig:
     # Luthi model config (only used when model_backend == "luthi")
     luthi_checkpoint: Optional[str] = None
     luthi_password: Optional[str] = None
-    # Or a LuthiModel run trained with `jepa_pilot_driver.py --m9`
-    # (2026-11-02): the trunk plus its trained action layer, attached as
+    # Or a LuthiModel run trained with M9 (`jepa_pilot_driver.py`'s default
+    # since 2026-11-02): the trunk plus its trained action layer, attached as
     # actor and learner. Needs luthi_life_dir, where this life is kept; its
     # checkpoints are never deleted.
     luthi_m9_run: Optional[str] = None

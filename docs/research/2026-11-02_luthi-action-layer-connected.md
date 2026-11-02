@@ -128,8 +128,9 @@ Sanctuary can run Luthi with its trained action layer:
 
 What remains open:
 
-- **Nothing has run on Brian's PC.** The first real test is an `--m9` run at
-  scale, then Sanctuary on it.
+- **Nothing has run on Brian's PC.** The first real test is a training run
+  at scale (M9 is on by default since Brian's later ruling the same day;
+  `--no-m9` opts out), then Sanctuary on it.
 - **The "active" calls are noise until the activity bands warm up** (their
   window is 32 cycles) and the decoders have been trained on something more than
   cycle-consistency. In the smoke run the text channel was flagged "active"

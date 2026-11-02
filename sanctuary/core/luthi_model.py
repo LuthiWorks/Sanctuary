@@ -66,8 +66,8 @@ class LuthiModelConfig:
 
     checkpoint_path: str = ""
     checkpoint_password: str = ""
-    # A run trained with LuthiModel's `jepa_pilot_driver.py --m9`
-    # (2026-11-02). When set, load() builds the trunk and the M9 action layer
+    # A run trained with M9 (LuthiModel's `jepa_pilot_driver.py` default since
+    # 2026-11-02). When set, load() builds the trunk and the M9 action layer
     # from it instead of checkpoint_path, and attaches the action layer as
     # actor and learner. life_dir is then required: where this life's own
     # checkpoints and action log are kept. Nothing there is ever deleted, so

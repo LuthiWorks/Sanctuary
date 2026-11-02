@@ -129,8 +129,9 @@ def parse_args(argv=None) -> argparse.Namespace:
         "--luthi-m9-run",
         type=str,
         default=None,
-        help="LuthiModel run directory trained with jepa_pilot_driver.py --m9 "
-             "(the trunk plus its action layer); used instead of --luthi-checkpoint",
+        help="LuthiModel run directory trained with M9 (jepa_pilot_driver.py's "
+             "default; the trunk plus its action layer); used instead of "
+             "--luthi-checkpoint",
     )
     parser.add_argument(
         "--luthi-life-dir",

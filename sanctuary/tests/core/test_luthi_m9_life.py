@@ -254,7 +254,7 @@ def _train_tiny_m9_run(root: Path) -> Path:
         n_blocks=1, epochs=1, batch_size=4, seq_len=32, stride=32, lr=3e-4,
         holdout_fraction=0.2, heldout_batches=2, probe_batches=2,
         kill_warmup=10**9, checkpoint_interval=900, checkpoint_slots=3,
-        max_batches_per_epoch=4, m9=True,
+        max_batches_per_epoch=4,  # M9 is the driver's default
     ))
     return root / "runs" / "living_32d_seed42"
 
