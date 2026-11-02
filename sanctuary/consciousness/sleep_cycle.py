@@ -119,6 +119,8 @@ class SleepCycleManager:
         self._consolidation_history: deque[ConsolidationResult] = deque(maxlen=100)
         self._current_consolidation: Optional[ConsolidationResult] = None
         self._forced_wake: bool = False
+        # Sleeps that ran to completion (a forced wake doesn't count).
+        self.completed_sleeps: int = 0
 
     @property
     def stage(self) -> SleepStage:
@@ -286,5 +288,6 @@ class SleepCycleManager:
             self._consolidation_history.append(self._current_consolidation)
             self._current_consolidation = None
         self._cycles_since_sleep = 0
+        self.completed_sleeps += 1
         self._transition_to(SleepStage.AWAKE)
         logger.debug("Sleep cycle complete — fully awake")

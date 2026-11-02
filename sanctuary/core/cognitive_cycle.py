@@ -30,6 +30,7 @@ from sanctuary.consciousness.sleep_cycle import SleepCycleManager, SleepStage
 from sanctuary.core.authority import AuthorityManager
 from sanctuary.core.context_manager import BudgetConfig, ContextManager
 from sanctuary.core.cycle_rate import CycleRateController, clamp_to_slider
+from sanctuary.core.learning_governor import LearningGovernor
 from sanctuary.core.stimulus_density import StimulusDensityHeuristic
 from sanctuary.core.turbo import TurboManager
 from sanctuary.core.schema import (
@@ -273,6 +274,7 @@ class CognitiveCycle:
         world_graph: Optional[WorldGraph] = None,
         world_graph_path: Optional[Path] = None,
         tool_catalog: Optional[Callable[[], list[ToolDescription]]] = None,
+        learning_governor: Optional[LearningGovernor] = None,
     ):
         self.model = model
         self.scaffold = scaffold or NullScaffold()
@@ -302,6 +304,17 @@ class CognitiveCycle:
         # registry can change between cycles (tools registered late, gated
         # tools granted), so this is a provider, not a fixed list.
         self.tool_catalog = tool_catalog
+
+        # The mind's say over its own consolidation. Present only for a mind
+        # whose weights change (docs/LEARNING_MODES_DECISION_2026-11-02.md).
+        self.learning_governor = learning_governor
+        # Read only when there is a governor, so sleep managers without a
+        # completed-sleep count (test stubs) are unaffected.
+        self._completed_sleeps_seen = (
+            self.sleep.completed_sleeps
+            if self.sleep is not None and learning_governor is not None
+            else 0
+        )
 
         self.running = False
         self.cycle_count = 0
@@ -412,6 +425,16 @@ class CognitiveCycle:
         if self.sleep is not None:
             self.sleep.tick(self.cycle_count)
 
+        # 0a. Learning settings: count completed sleeps against deferrals,
+        #     and tell the mind anything that changed without its asking.
+        if self.learning_governor is not None:
+            notices = self.learning_governor.drain_notices()
+            if self.sleep is not None:
+                while self._completed_sleeps_seen < self.sleep.completed_sleeps:
+                    self._completed_sleeps_seen += 1
+                    notices += self.learning_governor.sleep_completed()
+            self._tell_learning(notices)
+
         # 1. Assemble input from all sources
         cognitive_input = await self._assemble_input()
         self._last_cognitive_input = cognitive_input
@@ -516,6 +539,20 @@ class CognitiveCycle:
                 logger.error(
                     "Cycle-rate proposal routing error (non-fatal): %s — proposal=%r",
                     e, cognitive_output.cycle_rate_proposal,
+                )
+
+        # 5d-2. Route the mind's learning preference to its governor. No
+        #       try/except: a failed settings write is a PersistenceError and
+        #       must not be swallowed (CLAUDE.md, crash-boundary carve-out).
+        if cognitive_output.learning_preference is not None:
+            if self.learning_governor is None:
+                logger.warning(
+                    "Learning preference from a mind with no learning to govern; "
+                    "ignored: %r", cognitive_output.learning_preference,
+                )
+            else:
+                self._tell_learning(
+                    self.learning_governor.propose(cognitive_output.learning_preference)
                 )
 
         # 5e. Surface a size-warning percept if the graph just crossed
@@ -718,7 +755,17 @@ class CognitiveCycle:
             charter_summary=self.identity.get_charter_summary(),
             self_authored_identity=self.identity.get_self_authored_identity(),
             tool_catalog=self.tool_catalog() if self.tool_catalog is not None else [],
+            learning_state=(
+                self.learning_governor.state() if self.learning_governor is not None else None
+            ),
         )
+
+    def _tell_learning(self, notices: list[str]) -> None:
+        """Deliver learning-settings notices to the mind as percepts."""
+        for notice in notices:
+            self.sensorium.inject_percept(
+                Percept(modality="system", content=notice, source="learning")
+            )
 
     async def _execute(self, output: CognitiveOutput):
         """Execute actions from the integrated output.

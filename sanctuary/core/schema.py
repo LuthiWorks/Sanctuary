@@ -359,6 +359,49 @@ class ToolDescription(BaseModel):
     available: bool = True
 
 
+LearningSetting = Literal["allow", "defer", "emphasize"]
+
+
+class LearningRouteState(BaseModel):
+    """The mind's current setting for one kind of learning.
+
+    ``setting``: allow (the default), defer (hold this kind of change out of
+    consolidation), or emphasize (give it more weight when consolidating).
+    ``deferred_sleeps`` counts completed sleeps since the current holding
+    period began. ``permitted`` lists the settings the mind may choose now
+    (the graduated-authority ramp).
+    """
+
+    setting: LearningSetting = "allow"
+    deferred_sleeps: int = 0
+    permitted: list[LearningSetting] = Field(
+        default_factory=lambda: ["allow", "defer", "emphasize"]
+    )
+
+
+class LearningState(BaseModel):
+    """The mind's say over its own consolidation, as it stands this cycle.
+
+    Two kinds of learning (Brian, 2026-11-01/02;
+    docs/LEARNING_MODES_DECISION_2026-11-02.md):
+
+    - **skills**: capability that matters in particular situations, consolidated
+      into new modules;
+    - **character**: tendencies that color everything, consolidated into the
+      shared weights' home settings.
+
+    The mind controls whether and when each kind consolidates, not which kind
+    a given change is. ``consolidation_active`` is True only when a learner
+    actually acts on these settings; until then the mind is told the truth
+    that they are recorded but govern nothing yet.
+    """
+
+    consolidation_active: bool = False
+    skills: LearningRouteState = Field(default_factory=LearningRouteState)
+    character: LearningRouteState = Field(default_factory=LearningRouteState)
+    max_deferred_sleeps: int = 3
+
+
 class CognitiveInput(BaseModel):
     """Everything the entity receives for one moment of thought.
 
@@ -397,6 +440,14 @@ class CognitiveInput(BaseModel):
         description=(
             "The tools the entity can call through CognitiveOutput.tool_requests. "
             "Results return as tool_result percepts in the next cycle."
+        ),
+    )
+    learning_state: Optional[LearningState] = Field(
+        default=None,
+        description=(
+            "The mind's settings over its own consolidation. None for a mind "
+            "whose weights never change (the placeholder, a stand-in language "
+            "model): there is no learning for it to govern."
         ),
     )
 
@@ -528,6 +579,19 @@ class KnowledgeCellRequest(BaseModel):
     output_names: list[str] = Field(default_factory=list)
 
 
+class LearningPreference(BaseModel):
+    """The mind's request to change how its learning consolidates.
+
+    A field left as None leaves that kind of learning as it is. The
+    scaffold applies what the authority ramp permits and tells the mind,
+    as a percept, what changed and what it could not do yet.
+    """
+
+    skills: Optional[LearningSetting] = None
+    character: Optional[LearningSetting] = None
+    reason: str = ""
+
+
 class CycleRateProposal(BaseModel):
     """Entity-initiated request to change the cognitive cycle rate.
 
@@ -608,6 +672,13 @@ class CognitiveOutput(BaseModel):
     tool_requests: list[ToolRequest] = Field(
         default_factory=list,
         description="Entity-initiated tool invocations (results return as percepts)",
+    )
+    learning_preference: Optional[LearningPreference] = Field(
+        default=None,
+        description=(
+            "Optional change to how this mind's learning consolidates "
+            "(allow / defer / emphasize, per kind). See LearningState."
+        ),
     )
     cycle_rate_proposal: Optional[CycleRateProposal] = Field(
         default=None,

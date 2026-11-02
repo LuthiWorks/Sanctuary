@@ -134,6 +134,21 @@ async def test_the_mind_is_not_told_its_inner_speech_is_private():
 
 
 @pytest.mark.asyncio
+async def test_the_stand_in_is_never_offered_control_over_learning():
+    """Its weights never change, so a learning control would be a dial
+    connected to nothing (the honest-context right). Even if a learning
+    state reaches it, it is neither offered nor mentioned."""
+    from sanctuary.core.schema import LearningState
+
+    server = ScriptedServer(reply("hm"))
+    await server.model().think(moment(learning_state=LearningState()))
+    body = server.requests[0]
+    offered = {t["function"]["name"] for t in body["tools"]}
+    assert offered == OWN_FUNCTION_NAMES | {"clock", "go_to"}
+    assert "learning" not in json.dumps(body["messages"]).lower()
+
+
+@pytest.mark.asyncio
 async def test_no_key_means_no_authorization_header():
     server = ScriptedServer(reply("hm"))
     await server.model().think(moment())

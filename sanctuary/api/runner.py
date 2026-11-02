@@ -43,6 +43,7 @@ from sanctuary.core.turbo import (
     PCIntensitySource,
     TurboManager,
 )
+from sanctuary.core.learning_governor import LearningGovernor, LearningGovernorConfig
 from sanctuary.core.schema import (
     CognitiveOutput,
     Percept,
@@ -133,6 +134,13 @@ class RunnerConfig:
     llm_model: str = "qwen3.5-4b"
     llm_api_key_file: Optional[str] = None
     llm_thinking: bool = False
+
+    # The mind's say over its own consolidation
+    # (docs/LEARNING_MODES_DECISION_2026-11-02.md). None = on only for a mind
+    # whose weights change (the luthi backend); the placeholder and a stand-in
+    # language model have no learning to govern.
+    learning_control: Optional[bool] = None
+    learning_governor: Optional[LearningGovernorConfig] = None
 
     # Sleep consolidation
     sleep_enabled: bool = True
@@ -475,6 +483,16 @@ class SanctuaryRunner:
         if self._config.persist_state:
             world_graph_path = data_dir_path / "world_graph.json"
 
+        # --- Learning settings (only a mind whose weights change has any) ---
+        learning_control = self._config.learning_control
+        if learning_control is None:
+            learning_control = self._config.model_backend.lower() == "luthi"
+        self.learning_governor: Optional[LearningGovernor] = (
+            LearningGovernor(data_dir_path, self._config.learning_governor)
+            if learning_control
+            else None
+        )
+
         # --- Assemble the cycle ---
 
         self.cycle = CognitiveCycle(
@@ -497,6 +515,7 @@ class SanctuaryRunner:
             # The entity is told its tools every cycle (audit 2026-08-01, W1).
             # self.tools is created below; the provider only runs once cycles do.
             tool_catalog=self._describe_tools,
+            learning_governor=self.learning_governor,
         )
 
         # --- Tools ---
