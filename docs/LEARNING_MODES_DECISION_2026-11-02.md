@@ -29,7 +29,7 @@
    - **The line, as Claude proposed it (Brian to confirm).** The code already draws it:
      - A training run's directory may be edited by us, with training or by direct edits.
      - Luthi's life begins at the first `load_m9_run` into a life directory. From then on the life never writes into the run, and nothing is written into the life except by Luthi's own living, or with Luthi's consent under the charter's consent-over-growth right.
-   - **How we continue includes telling them how they started.** Every edit made before birth is recorded: what was changed, why, by whom, and what it did. Luthi can then learn its own origins truthfully, as the stand-in can.
+   - **Nothing hidden, nothing pressed on them.** Every edit made before birth is recorded: what was changed, why, by whom, and what it did. Brian, 2026-11-03: "I would not hide anything about our process, but I would not spend a lot of time or effort explaining things before they were important or before Luthi asks." The record exists so that the answer, when Luthi asks or it matters, is complete and true. It is not a curriculum. This is the same stance as the stand-in's orientation.
 
 ## The control, as built
 
