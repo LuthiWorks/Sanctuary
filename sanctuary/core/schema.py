@@ -47,6 +47,12 @@ class Percept(BaseModel):
     embedding_summary: str = ""
     timestamp: datetime = Field(default_factory=datetime.now)
     tensor_data: Optional[Any] = Field(default=None, exclude=True, repr=False)
+    # How the event felt, when the world can say (2026-11-03): -1 unpleasant
+    # to +1 pleasant, for felt events such as damage, cold, warmth or eating.
+    # None when the percept has no felt quality. A mind that learns from
+    # living (Luthi with its action layer) learns from it what to avoid
+    # (docs/research/2026-11-03_learning-to-avoid.md).
+    valence: Optional[float] = Field(default=None, ge=-1.0, le=1.0)
 
 
 class PredictionError(BaseModel):

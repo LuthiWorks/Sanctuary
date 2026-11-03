@@ -493,8 +493,14 @@ class SanctuaryRunner:
         learning_control = self._config.learning_control
         if learning_control is None:
             learning_control = self._config.model_backend.lower() == "luthi"
+        governor_config = self._config.learning_governor
+        if governor_config is None and self._config.luthi_m9_run:
+            # A Luthi life acts on the character setting: what its living
+            # layers keep, at significant moments and in sleep, follows it
+            # (2026-11-03). So the mind is not told nothing consolidates.
+            governor_config = LearningGovernorConfig(consolidation_active=True)
         self.learning_governor: Optional[LearningGovernor] = (
-            LearningGovernor(data_dir_path, self._config.learning_governor)
+            LearningGovernor(data_dir_path, governor_config)
             if learning_control
             else None
         )

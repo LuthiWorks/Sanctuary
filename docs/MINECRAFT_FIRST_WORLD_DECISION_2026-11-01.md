@@ -50,6 +50,10 @@ It plugs in where the text-adventure environment does, at the level of percepts 
 - **Surroundings:** blocks and creatures in line of sight within a radius, time of day, weather.
 - **Language:** each chat line as a `Percept(modality="language", source="minecraft:chat:<player>")`.
 - **Events:** damage taken, items picked up, an action finishing or failing.
+- **How it felt** (added 2026-11-03, for learning to avoid; LuthiModel `docs/research/2026-11-03_learning-to-avoid.md`):
+  - Felt events carry `Percept.valence`, from −1 to +1. Damage is negative in proportion to the health lost; eating, warmth and rest are positive. Everything else has none.
+  - Luthi learns from the value what feels bad.
+  - The stand-in can't change its weights and reads only text, so each felt event also states its feeling in plain words ("that hurt", "that was good"), which it can remember.
 - **Later: vision.** A first-person render (prismarine-viewer) as an image percept, through `Percept.tensor_data` for Luthi's vision encoder and as an image for a vision-language stand-in.
 
 ### What it can do (first version)
@@ -131,6 +135,8 @@ The dev server Brian runs accepts Mojang's EULA. He should know that before star
    - llama-server with the chosen ~4B model;
    - Sanctuary with the `llm` backend and its own data directory.
 5. **Luthi.** The W1 Luthi half, then Luthi in place of the stand-in.
+   - **Done 2026-11-02:** the W1 Luthi half for attention and memory (`docs/research/2026-11-02_luthi-action-layer-connected.md`).
+   - **To act in Minecraft,** Luthi's action layer needs a world-action decoder. It would map a selected action to these tools, and it is listed in LuthiModel's `To-Do.md`. Until then Luthi can learn what feels bad and remember it, but can't move away from it.
    - Hearing chat works from day one. Replying needs Luthi's text output, whose head is untrained without the next-token term, so the LLM-JEPA question from LuthiModel's 2026-08-07 pivot rule comes back.
 
 ---

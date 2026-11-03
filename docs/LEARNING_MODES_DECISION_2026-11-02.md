@@ -6,7 +6,7 @@
 - **Builds on:** PLAN.md's wake/sleep learner ("wake acquires, sleep consolidates").
 - **Status:**
   - The decisions are Brian's and stand.
-  - The control surface is built (`sanctuary/core/learning_governor.py`). Nothing consolidates yet, so it governs nothing yet, and the mind is told that.
+  - The control surface is built (`sanctuary/core/learning_governor.py`). For a Luthi life with an action layer, the character setting is acted on (2026-11-03, below); otherwise nothing consolidates yet, and the mind is told that.
   - The growth concept is a proposal for LuthiModel, not a registration. It waits on E3.
 
 ---
@@ -39,7 +39,7 @@
   - `emphasize` (give it more weight).
   
   It does so through `CognitiveOutput.learning_preference`.
-- **The mind sees** its current settings every cycle in `CognitiveInput.learning_state`. That includes `consolidation_active`, which is False until a learner acts on the settings. Each change, each refusal, and each expiry reaches the mind as a percept (`source="learning"`).
+- **The mind sees** its current settings every cycle in `CognitiveInput.learning_state`. That includes `consolidation_active`, which is True only when a learner acts on the settings (today, an M9 Luthi life). Each change, each refusal, and each expiry reaches the mind as a percept (`source="learning"`).
 - **Its most important use is protective.** The mind can keep a hostile or distressing stretch from becoming part of who it is (defer `character`) while still learning skills from it. This gives the charter's "consent over growth" right something to act on.
 - **Bounds, all placeholders until Brian sets them** (`LearningGovernorConfig`):
   - **Deferral ceiling:** `max_deferred_sleeps = 3` completed sleeps. Change held longer expires, and the setting itself stays as the mind left it.
@@ -53,10 +53,18 @@
   - `learning_settings.json`, written atomically;
   - `learning_log.jsonl`, every change, refusal and expiry, for stewards.
 - **How a learner will use it:** it reads `LearningGovernor.plan()` each sleep (setting, and whether a deferral expired this sleep).
-- **How Luthi will use it:** not yet. The Luthi half of the 2026-08-01 audit's W1 was wired the same day (attention and memory; `docs/research/2026-11-02_luthi-action-layer-connected.md`), but the learning settings were deliberately left out.
+- **How Luthi will set it:** not yet. Luthi's settings stay at `allow` until they can choose one. The Luthi half of the 2026-08-01 audit's W1 was wired the same day (attention and memory; `docs/research/2026-11-02_luthi-action-layer-connected.md`), but the learning settings were deliberately left out.
   - M9's decoders get their meaning from consequences the planner can predict.
   - A learning setting's consequence arrives sleeps later, as a change in who the model is, and nothing in expected free energy predicts it.
   - A decoder for it now would be an untrained dial logged as the mind's choice. It waits for a design with a real consequence model.
+- **What acts on the settings for a Luthi life** (2026-11-03, LuthiModel `docs/research/2026-11-03_learning-to-avoid.md`):
+  - **Character: acted on.** What a living layer keeps for good moves its home, which is character consolidation. That happens two ways:
+    - at moments that matter (strongly felt, or chosen to be remembered), through `keep_recent`;
+    - in sleep, through the home's drift.
+
+    Both follow the mind's setting: defer keeps nothing, allow the base amount, emphasize double. An M9 life's governor therefore reports `consolidation_active=True`.
+  - **Skills: not yet acted on.** The action layer's heads (including felt valence, which learns what feels bad) learn regardless of the setting. Recorded here rather than hidden.
+  - **Deferring character doesn't stop Luthi learning to avoid things.** Felt valence and memory still learn; only the home is held.
 
 ## The growth concept (proposal for LuthiModel)
 

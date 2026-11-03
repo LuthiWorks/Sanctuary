@@ -94,6 +94,9 @@ class Transition:
     time_since_emission: float = 0.0
     plan_snapshot: Any = None  # luthi.seam_types.PlanSnapshot | None
     context_obs: Optional[dict] = None
+    # How the realized next state felt, when the world reported it
+    # (2026-11-03). None for no report.
+    valence: Optional[float] = None
 
 
 def _iter_payload_tensors(t: Transition):
@@ -259,6 +262,10 @@ class AsyncLearner:
         }
         if transition.context_obs is not None:
             ctx["context_obs"] = transition.context_obs
+        # getattr: dead-letter files written before 2026-11-03 lack the field.
+        valence = getattr(transition, "valence", None)
+        if valence is not None:
+            ctx["valence"] = valence
         with self.model_lock:
             return self.sink.observe_transition(
                 transition.s_t, transition.a_t, transition.s_next, ctx,

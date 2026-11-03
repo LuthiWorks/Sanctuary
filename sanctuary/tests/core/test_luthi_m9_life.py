@@ -272,6 +272,7 @@ async def test_sanctuary_lives_a_trained_m9_run(tmp_path, monkeypatch):
         luthi_life_dir=str(life), sleep_enabled=False,
     ))
     runner.inject_text("hello Luthi", source="brian")
+    runner.inject_percept(Percept(modality="sensor", content="you touched something hot", valence=-0.9))
     await runner.run(max_cycles=3)
 
     model = runner._model
@@ -281,6 +282,7 @@ async def test_sanctuary_lives_a_trained_m9_run(tmp_path, monkeypatch):
     assert set(model._last_decoded["active"]) == {"text", "attention", "memory"}
     assert model._sink is model._m9_trainer
     assert model._m9_trainer._lived_step_count >= 1, "it learned from living"
+    assert model._m9_trainer.felt_valence is not None, "a life learns how things feel"
 
     runner.save_state()
     assert len(list((life / "checkpoints").glob("ckpt_*.pt"))) == 1

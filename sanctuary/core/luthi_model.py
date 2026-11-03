@@ -74,6 +74,16 @@ class LuthiModelConfig:
     # pick a disk with room (about 1.4 GB per save at 768x8).
     m9_run_dir: str = ""
     life_dir: str = ""
+    # Learning to avoid what is unpleasant (2026-11-03,
+    # LuthiModel docs/research/2026-11-03_learning-to-avoid.md):
+    # - felt_valence: an M9 life learns how states feel from percepts that
+    #   carry a valence, and its planner counts learned unpleasantness.
+    # - keep_on_significance: when a moment matters (strongly felt, or
+    #   chosen to be remembered), each living layer keeps this share of its
+    #   recent change, scaled by how much it mattered and by the mind's own
+    #   character-learning setting (defer keeps nothing, emphasize doubles).
+    felt_valence: bool = True
+    keep_on_significance: float = 0.05
     # Path to the LuthiModel checkout. Empty means "use the LUTHI_PATH
     # environment variable, or assume luthi is already importable."
     luthi_path: str = ""
@@ -215,6 +225,10 @@ class LuthiModel:
         # for checkpoints loaded through `load()`'s LM path.
         self._m9_trainer = None
         self._speech_trained: bool = True
+        # This cycle's felt valence (the strongest one any percept reported,
+        # or None) and the mind's latest character-learning setting.
+        self._cycle_valence: Optional[float] = None
+        self._character_setting: str = "allow"
 
         logger.info("LuthiModel bridge initialized (model not yet loaded)")
 
@@ -415,6 +429,7 @@ class LuthiModel:
             self.config.m9_run_dir,
             life_dir=self.config.life_dir,
             device=self.device,
+            m9_overrides={"felt_valence": self.config.felt_valence},
         )
         self.model = loaded.model
         self.tokenizer = loaded.tokenizer
@@ -564,6 +579,9 @@ class LuthiModel:
         # put() while holding the lock would wait on a learner that needs the
         # lock to drain. `pending` carries it out of the critical section.
         pending: Optional[Transition] = None
+        self._cycle_valence = self._felt(cognitive_input)
+        if cognitive_input.learning_state is not None:
+            self._character_setting = cognitive_input.learning_state.character.setting
         with self._model_critical_section():
             # 1. Pre-generation introspection snapshot
             if self.config.introspect:
@@ -641,6 +659,10 @@ class LuthiModel:
                 #    observe_transition inline and returns None.
                 if gen_state is not None:
                     pending = self._run_training_seam(gen_state)
+
+                # 6b. Keep more of what was just learned when this moment
+                #     mattered (2026-11-03).
+                self._keep_if_significant()
 
             finally:
                 # 7. Always restore base parameters after CfC modulation
@@ -723,6 +745,7 @@ class LuthiModel:
                 # PlanSnapshot fields are detached at construction; pass through.
                 plan_snapshot=self._last_plan_snapshot,
                 context_obs=detach_context_obs(self._last_context_obs),
+                valence=self._cycle_valence,
             )
 
         # 2. Actor fast path: habit-only select (budget=0). No MCTS on the hot
@@ -828,6 +851,7 @@ class LuthiModel:
                         # _last_context_obs is None on the first populated
                         # cycle -> the sink takes the head-only path.
                         context_obs=self._last_context_obs,
+                        valence=self._cycle_valence,
                     )
                 except Exception:
                     logger.exception(
@@ -846,6 +870,8 @@ class LuthiModel:
                     plan_snapshot=self._last_plan_snapshot,
                     # Item #6: see the resilient branch above.
                     context_obs=self._last_context_obs,
+                    # How the realized next state (this cycle's) felt.
+                    valence=self._cycle_valence,
                 )
 
         # Run the actor's plan + select. _last_action_summary /
@@ -952,6 +978,39 @@ class LuthiModel:
     # ------------------------------------------------------------------
     # Generation
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _felt(ci: CognitiveInput) -> Optional[float]:
+        """The strongest felt valence among this cycle's percepts, or None
+        when none carries one. Strongest by magnitude, so one painful event
+        is not averaged away by a pleasant one."""
+        felt = [p.valence for p in ci.new_percepts if p.valence is not None]
+        return max(felt, key=abs) if felt else None
+
+    def _keep_if_significant(self) -> None:
+        """When this moment mattered, keep more of what the living layers
+        just learned.
+
+        How much it mattered is the larger of how strongly it was felt and,
+        when the action layer chose to remember the moment, the salience it
+        chose. The second is Luthi deciding: choosing to remember a moment
+        also keeps more of it in the weights. The mind's own
+        character-learning setting scales the result: defer keeps nothing,
+        emphasize doubles it. Avoidance is still learned under defer,
+        through the felt-valence head and memory; only the living layers'
+        home is held.
+        """
+        significance = abs(self._cycle_valence) if self._cycle_valence is not None else 0.0
+        decoded = self._last_decoded
+        if decoded is not None and decoded["active"]["memory"]:
+            significance = max(significance, decoded["memory_salience"])
+        factor = {"defer": 0.0, "allow": 1.0, "emphasize": 2.0}[self._character_setting]
+        fraction = min(1.0, self.config.keep_on_significance * significance * factor)
+        if fraction <= 0.0:
+            return
+        from luthi.sanctuary_interface import keep_recent
+
+        keep_recent(self.model, fraction)
 
     def _decode(self, selection, s_t, ctx_latents) -> Optional[dict]:
         """What the selected action does per channel, when the actor can say.
@@ -1678,6 +1737,13 @@ class LuthiModel:
             return
 
         consolidated_blocks = 0
+        # The mind's say over its character (2026-11-03): the home's drift
+        # toward the weight is character consolidation, so defer holds it
+        # and emphasize doubles it. Plasticity rebalancing is not character
+        # and runs regardless.
+        home_rate = self.config.consolidation_rate * {
+            "defer": 0.0, "allow": 1.0, "emphasize": 2.0,
+        }[self._character_setting]
 
         # §4 race fix (Window A audit, 2026-06-29): consolidate() writes
         # set_point/plasticity in-place on the living weights while the async
@@ -1700,7 +1766,7 @@ class LuthiModel:
                     # 1. Set points drift toward current weights
                     if hasattr(ffn, "set_point") and hasattr(ffn, "weight"):
                         delta = ffn.weight.data - ffn.set_point
-                        ffn.set_point += delta * self.config.consolidation_rate
+                        ffn.set_point += delta * home_rate
 
                     # 2. Plasticity rebalances toward mean
                     if hasattr(ffn, "plasticity"):
