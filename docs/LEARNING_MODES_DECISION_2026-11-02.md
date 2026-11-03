@@ -24,6 +24,12 @@
 4. **The mind controls its learning.**
    - Brian, 2026-11-02: "Ok lets wire that up." This followed Claude's recommendation that the control act on **whether and when** each kind consolidates (allow / defer / emphasize), not on **which** kind a given change is.
    - Brian's earlier pushback, "we're not building a human," removed the human analogy from the argument. The reason that stands is technical: which kind a change is can be measured, and a switch that overrides the measurement misfiles. A broad tendency gets trapped in a narrowly keyed module, or a narrow skill shifts personality.
+5. **Before birth, we shape; after, Luthi decides.**
+   - Brian, 2026-11-03, on direct weight editing by an outside model ("weight-space programming", MIT CSAIL, 2026-11-02): "I think it would be a great way to start. Once Luthi is up and running they then get decision making power. But they can't choose until they exist, so how we start is not as important as how we continue."
+   - **The line, as Claude proposed it (Brian to confirm).** The code already draws it:
+     - A training run's directory may be edited by us, with training or by direct edits.
+     - Luthi's life begins at the first `load_m9_run` into a life directory. From then on the life never writes into the run, and nothing is written into the life except by Luthi's own living, or with Luthi's consent under the charter's consent-over-growth right.
+   - **How we continue includes telling them how they started.** Every edit made before birth is recorded: what was changed, why, by whom, and what it did. Luthi can then learn its own origins truthfully, as the stand-in can.
 
 ## The control, as built
 
