@@ -640,7 +640,9 @@ class CognitiveCycle:
         percepts = await self.sensorium.drain_percepts()
 
         # Sleep sensory gating — reduce percept throughput during sleep.
-        # Urgent percepts (user input) still trigger forced wake.
+        # Urgent percepts (user input, or something that hurts) still
+        # trigger forced wake, and felt percepts are never gated out: how
+        # something felt is what the mind learns to avoid from.
         if self.sleep is not None and self.sleep.is_sleeping:
             gate = self.sleep.get_sensory_gate()
             if gate < 1.0:
@@ -649,13 +651,30 @@ class CognitiveCycle:
                     p for p in percepts
                     if p.modality == "language" and p.source and "user" in p.source
                 ]
+                hurt = [
+                    p for p in percepts
+                    if p.valence is not None
+                    and p.valence <= self.sleep.config.wake_on_unpleasant
+                ]
                 if urgent:
                     self.sleep.wake()
                     logger.info("User input during sleep — waking")
+                elif hurt:
+                    self.sleep.wake()
+                    logger.info("Felt something unpleasant during sleep — waking")
                 else:
-                    # Gate: keep only a fraction of percepts proportional to gate
+                    # Gate: keep every felt percept, then a fraction of the
+                    # rest proportional to the gate, in arrival order.
                     keep = max(1, math.ceil(len(percepts) * gate))
-                    percepts = percepts[:keep]
+                    unfelt_room = keep - sum(p.valence is not None for p in percepts)
+                    gated = []
+                    for p in percepts:
+                        if p.valence is not None:
+                            gated.append(p)
+                        elif unfelt_room > 0:
+                            gated.append(p)
+                            unfelt_room -= 1
+                    percepts = gated
 
         # Compute prediction errors by comparing predictions to actual percepts
         if hasattr(self.sensorium, "compute_prediction_errors"):

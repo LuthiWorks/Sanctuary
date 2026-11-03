@@ -204,12 +204,16 @@ class ContextManager:
             if group_chars <= per_modality_budget:
                 compressed.extend(group)
             elif len(group) > 3:
-                # Batch: summarize count, keep most recent
+                # Batch: summarize count, keep most recent. The summary keeps
+                # the strongest felt valence among what it batched, so one
+                # painful event in a burst is not lost to the summary.
+                felt = [p.valence for p in group[:-1] if p.valence is not None]
                 summary = Percept(
                     modality=modality,
                     content=f"[{len(group) - 1} {modality} percepts batched]",
                     source="context_manager",
                     timestamp=group[-1].timestamp,
+                    valence=max(felt, key=abs) if felt else None,
                 )
                 compressed.append(summary)
                 compressed.append(group[-1])  # Keep most recent

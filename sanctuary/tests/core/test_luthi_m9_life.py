@@ -272,17 +272,25 @@ async def test_sanctuary_lives_a_trained_m9_run(tmp_path, monkeypatch):
         luthi_life_dir=str(life), sleep_enabled=False,
     ))
     runner.inject_text("hello Luthi", source="brian")
-    runner.inject_percept(Percept(modality="sensor", content="you touched something hot", valence=-0.9))
-    await runner.run(max_cycles=3)
-
+    await runner.run(max_cycles=1)
     model = runner._model
+    felt = model._m9_trainer.felt_valence.net[-1]
+    assert not felt.bias.any() and not felt.weight.any(), "nothing feels bad at birth"
+
+    # A felt event travels the whole path a world's would: sensorium, the
+    # cycle, compression, the adapter, the interface, the trainer. (The
+    # first cycle of a life has no transition to attach a feeling to, so
+    # the event arrives on a later one.)
+    runner.inject_percept(Percept(modality="sensor", content="you touched something hot", valence=-0.9))
+    await runner.run(max_cycles=2)
+    assert felt.bias.item() < 0, "Luthi learned that it felt bad"
+
     assert model._m9_trainer is not None and model._actor is model._m9_trainer
     assert model._speech_trained is False
     assert model._last_decoded is not None, "the selection was decoded"
     assert set(model._last_decoded["active"]) == {"text", "attention", "memory"}
     assert model._sink is model._m9_trainer
     assert model._m9_trainer._lived_step_count >= 1, "it learned from living"
-    assert model._m9_trainer.felt_valence is not None, "a life learns how things feel"
 
     runner.save_state()
     assert len(list((life / "checkpoints").glob("ckpt_*.pt"))) == 1

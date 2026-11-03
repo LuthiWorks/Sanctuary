@@ -44,6 +44,48 @@ def test_a_percept_can_say_how_it_felt():
         Percept(modality="sensor", content="x", valence=-1.5)
 
 
+def test_a_felt_event_survives_batching():
+    from sanctuary.core.context_manager import BudgetConfig, ContextManager
+
+    percepts = [Percept(modality="sensor", content=f"reading_{i}" * 10) for i in range(20)]
+    percepts[3] = percepts[3].model_copy(update={"valence": -0.8})
+    percepts[7] = percepts[7].model_copy(update={"valence": 0.4})
+    compressed = ContextManager(BudgetConfig(new_percepts=100, chars_per_token=1)).compress(
+        CognitiveInput(new_percepts=percepts)
+    )
+    assert len(compressed.new_percepts) < 20, "the burst was batched"
+    assert [p.valence for p in compressed.new_percepts] == [-0.8, None]
+
+
+def _sleeping_cycle():
+    from sanctuary.consciousness.sleep_cycle import SleepConfig, SleepCycleManager, SleepStage
+    from sanctuary.core.cognitive_cycle import CognitiveCycle
+    from sanctuary.core.placeholder import PlaceholderModel
+
+    sleep = SleepCycleManager(SleepConfig(sensory_gate_sleep=0.1))
+    sleep._stage = SleepStage.NREM
+    return CognitiveCycle(model=PlaceholderModel(), sleep_manager=sleep), sleep
+
+
+@pytest.mark.asyncio
+async def test_sleep_never_gates_out_a_felt_event():
+    cycle, sleep = _sleeping_cycle()
+    for i in range(10):
+        cycle.inject_percept(Percept(modality="sensor", content=f"hum {i}"))
+    cycle.inject_percept(Percept(modality="sensor", content="cold", valence=-0.3))
+    ci = await cycle._assemble_input()
+    assert [p.content for p in ci.new_percepts] == ["hum 0", "cold"]
+    assert sleep.is_sleeping, "mild discomfort does not wake"
+
+
+@pytest.mark.asyncio
+async def test_something_that_hurts_wakes_the_mind():
+    cycle, sleep = _sleeping_cycle()
+    cycle.inject_percept(Percept(modality="sensor", content="took damage", valence=-0.7))
+    await cycle._assemble_input()
+    assert sleep._forced_wake
+
+
 def _runner_config(tmp_path: Path, **fields) -> RunnerConfig:
     data_dir = tmp_path / "identity"
     data_dir.mkdir(parents=True)
