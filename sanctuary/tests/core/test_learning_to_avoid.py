@@ -15,7 +15,11 @@ Pins:
 - The keep has a budget between sleeps, per kind of moment, that it records
   when it reaches. Sleep renews it.
 - The mind is told when a retention rollback undoes recent learning.
-- Affect channels that do nothing on this model are reported at load.
+- Affect channels that do nothing on this model are reported at load, and so
+  is the fact that the signals behind them aren't live.
+- A mind at rest learns at exactly the tested rate, and arousal moves it within
+  bounds. The adapter records how far each affect signal has moved.
+- The adapter hands the scaffold no authored valence, whatever the drift.
 
 The adapter tests need the luthi package (set LUTHI_PATH); the schema and
 runner tests do not.
@@ -366,7 +370,58 @@ def test_inert_affect_channels_are_reported_at_load(caplog):
     adapter.model.blocks = torch.nn.ModuleList([_Block()])
     adapter._report_modulation_channels()
     message = next(r.message for r in caplog.records if "Affect modulation" in r.message)
-    assert "arousal, precision, valence" in message and "attention" not in message
+    assert "precision, valence" in message
+    assert "arousal" not in message and "attention" not in message
+    assert any("not live yet" in r.message for r in caplog.records)
+
+
+@needs_luthi
+@pytest.mark.parametrize("arousal,scale", [(0.2, 1.0), (0.0, 0.75), (1.0, 2.0), (0.6, 1.5)])
+def test_arousal_sets_the_learning_rate_around_rest(arousal, scale, monkeypatch):
+    import luthi.sanctuary_interface as si
+    from sanctuary.core.schema import ExperientialSignals
+
+    seen = {}
+    monkeypatch.setattr(si, "apply_external_modulation", lambda model, **kw: seen.update(kw))
+    adapter = _adapter()
+    adapter.model = torch.nn.Module()
+    adapter._apply_cfc_modulation(ExperientialSignals(affect_arousal=arousal))
+    assert seen["plasticity_scale"] == pytest.approx(scale)
+
+
+@needs_luthi
+def test_rest_matches_the_scaffolds_resting_arousal():
+    from sanctuary.core.luthi_model import LuthiModelConfig
+    from sanctuary.scaffold.affect import AffectConfig
+
+    assert LuthiModelConfig().arousal_baseline == AffectConfig().baseline_arousal
+
+
+@needs_luthi
+def test_the_adapter_records_how_far_each_signal_has_moved(monkeypatch):
+    import luthi.sanctuary_interface as si
+    from sanctuary.core.schema import ExperientialSignals
+
+    monkeypatch.setattr(si, "apply_external_modulation", lambda model, **kw: None)
+    adapter = _adapter()
+    adapter.model = torch.nn.Module()
+    adapter._apply_cfc_modulation(ExperientialSignals(affect_arousal=0.2))
+    adapter._apply_cfc_modulation(ExperientialSignals(affect_arousal=0.7))
+    ranges = adapter.get_metrics()["affect_signal_range"]
+    assert ranges["arousal"] == [0.2, 0.7]
+    assert ranges["precision"] == [0.5, 0.5], "a constant shows as a range of nothing"
+
+
+@needs_luthi
+def test_no_authored_valence_reaches_the_scaffold():
+    from sanctuary.core.schema import CognitiveInput
+
+    adapter = _adapter()
+    adapter._introspection_delta = {"drift_change": 0.01, "plasticity_change": 0.5}
+    output = adapter._build_output(
+        cognitive_input=CognitiveInput(), inner_speech="", external_speech=None,
+    )
+    assert output.emotional_state.valence_shift == 0.0
 
 
 @needs_luthi

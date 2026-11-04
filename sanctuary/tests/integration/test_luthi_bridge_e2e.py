@@ -341,11 +341,11 @@ async def test_bridge_all_four_channels_modulate_in_cycle(loaded_bridge):
     assert captured, "apply_external_modulation was never called"
     last = captured[-1]
     # Canonical mappings (with default config gain=1.0):
-    #   plasticity_scale       = 0.5 + 1.5 * arousal     -> 0.5 + 1.2  = 1.7
+    #   plasticity_scale       = 1 + (arousal - 0.2) / 0.8 -> 1 + 0.75  = 1.75
     #   spike_threshold_scale  = 0.75 + 0.5 * precision  -> 0.75 + 0.3 = 1.05
     #   excitability_bias      = valence * 0.1           -> 0.05
     #   salience_threshold_scale = 1.0 - 0.5 * salience  -> 1.0 - 0.45 = 0.55
-    assert last["plasticity_scale"] == pytest.approx(1.7)
+    assert last["plasticity_scale"] == pytest.approx(1.75)
     assert last["spike_threshold_scale"] == pytest.approx(1.05)
     assert last["excitability_bias"] == pytest.approx(0.05)
     assert last["salience_threshold_scale"] == pytest.approx(0.55)

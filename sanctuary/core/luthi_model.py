@@ -109,7 +109,10 @@ class LuthiModelConfig:
 
     # CfC modulation strengths — per-channel gain on top of the canonical
     # mappings. Set <1.0 to soften a channel, >1.0 to amplify it.
-    arousal_plasticity_scale: float = 1.0       # arousal -> hebb_rate
+    arousal_plasticity_scale: float = 1.0       # arousal -> hebb_rate / pc_rate
+    # The resting arousal, where learning runs at exactly its tested rate. Must
+    # match the scaffold's AffectConfig.baseline_arousal.
+    arousal_baseline: float = 0.2
     precision_threshold_scale: float = 1.0      # precision -> spike_threshold
     valence_excitability_scale: float = 1.0     # valence -> excitability_acc
     salience_threshold_scale: float = 1.0       # attention -> salience_threshold
@@ -243,6 +246,9 @@ class LuthiModel:
         self._keep_capped_moments: int = 0
         # Retention rollbacks the mind has already been told about.
         self._rollbacks_told: int = 0
+        # The lowest and highest value each affect signal has reached, so that
+        # "connected" can't be mistaken for "doing something".
+        self._affect_signal_range: dict[str, list[float]] = {}
 
         logger.info("LuthiModel bridge initialized (model not yet loaded)")
 
@@ -479,6 +485,11 @@ class LuthiModel:
                 "channels are requested every cycle and change nothing.",
                 ", ".join(inert),
             )
+        logger.warning(
+            "Affect signals are not live yet: the CfC cells are untrained and carry "
+            "no authority, so arousal stays near rest and precision and attention "
+            "are constants. See affect_signal_range in get_metrics."
+        )
 
     def renew_keep_budget(self) -> None:
         """A sleep has completed, so the significance keep's budget renews. Once
@@ -1331,7 +1342,8 @@ class LuthiModel:
 
         The affective system shapes cognition through four independent channels:
 
-        - Arousal → Hebbian learning rate (more alert → faster learning)
+        - Arousal → the living layers' learning rate (more alert → faster
+          learning), exactly the tested rate at rest
         - Precision → spike threshold (more precise → fewer, more selective)
         - Valence → excitability bias (approach amplifies, withdrawal dampens)
         - Attention → salience threshold (more attention → broader episodes)
@@ -1345,10 +1357,11 @@ class LuthiModel:
         Goes through ``luthi.sanctuary_interface`` rather than reaching
         into Luthi internals — that adapter is the contract surface.
 
-        On a v2 living layer only the attention channel acts today: the
-        attributes behind arousal, precision and valence don't exist there, so
-        those requests change nothing. ``_report_modulation_channels`` says so
-        at load (2026-11-04).
+        On a v2 living layer arousal and attention act (2026-11-04). The
+        attributes behind precision and valence don't exist there, so those
+        requests change nothing. ``_report_modulation_channels`` says so at load.
+        Also, the signals themselves aren't live yet: see
+        Sanctuary docs/research/2026-11-04_affect-channels.md.
         """
         from luthi.sanctuary_interface import apply_external_modulation
 
@@ -1356,12 +1369,22 @@ class LuthiModel:
         precision = signals.precision_weight
         valence = signals.affect_valence
         salience = signals.attention_salience
+        for name, value in (
+            ("arousal", arousal), ("precision", precision),
+            ("valence", valence), ("attention", salience),
+        ):
+            seen = self._affect_signal_range.setdefault(name, [value, value])
+            seen[0], seen[1] = min(seen[0], value), max(seen[1], value)
 
-        # Arousal → Hebbian learning rate
-        # Range: 0.5x (calm, arousal=0) to 2.0x (peak, arousal=1)
-        plasticity_scale = (
-            (0.5 + 1.5 * arousal) * self.config.arousal_plasticity_scale
-        )
+        # Arousal → learning rate
+        # 1.0x at rest, 0.75x at arousal=0, 2.0x at arousal=1. Anchored at rest so
+        # that a mind at rest learns at the tested rate (DO NOT REINVENT #4).
+        rest = self.config.arousal_baseline
+        if arousal >= rest:
+            plasticity_scale = 1.0 + (arousal - rest) / (1.0 - rest)
+        else:
+            plasticity_scale = 1.0 - 0.25 * (rest - arousal) / rest
+        plasticity_scale *= self.config.arousal_plasticity_scale
         # Precision → spike threshold
         # Higher precision = higher threshold = fewer spikes = more selective
         # Range: 0.75x (low precision) to 1.25x (high precision)
@@ -1561,33 +1584,6 @@ class LuthiModel:
     # Neural → Cognitive translation
     # ------------------------------------------------------------------
 
-    def _neural_to_valence_shift(self) -> float:
-        """Map neural dynamics to emotional valence shift (-1 to 1).
-
-        Drift toward set points → positive (settling, comfort).
-        Drift away from set points → negative (disequilibrium).
-        Learning (plasticity increase) → slight positive.
-
-        Typical drift_change values: -0.001 to +0.001
-        Typical plast_change values: -0.01 to +0.01
-        """
-        delta = self._introspection_delta
-        if not delta:
-            return 0.0
-
-        drift_change = delta.get("drift_change", 0.0)
-        plast_change = delta.get("plasticity_change", 0.0)
-
-        # Moving toward equilibrium (drift decreasing) feels positive.
-        # Scale: drift_change of ±0.001 maps to valence of ∓0.5
-        valence = -drift_change * 500.0
-
-        # Active learning adds slight positive valence
-        # Scale: plast_change of ±0.01 maps to ±0.2
-        valence += plast_change * 20.0
-
-        return max(-1.0, min(1.0, valence))
-
     def _neural_to_arousal_shift(self) -> float:
         """Map neural dynamics to arousal shift (-1 to 1).
 
@@ -1778,7 +1774,12 @@ class LuthiModel:
             goal_proposals=[],
             emotional_state=EmotionalOutput(
                 felt_quality=felt_quality,
-                valence_shift=self._neural_to_valence_shift(),
+                # Never authored here (2026-11-04). A formula used to call drift
+                # from home a bad feeling, and it read about -0.85 at rest, since
+                # a living mind drifts constantly. The affect-grounding decision
+                # rules that nothing hands the model a signed valence. The drift
+                # itself still reaches the mind through introspection.
+                valence_shift=0.0,
                 arousal_shift=self._neural_to_arousal_shift(),
             ),
             growth_reflection=None,
@@ -1877,6 +1878,7 @@ class LuthiModel:
             "cycle_count": self.cycle_count,
             "kept_since_sleep": dict(self._kept_since_sleep),
             "keep_capped_moments": self._keep_capped_moments,
+            "affect_signal_range": {k: list(v) for k, v in self._affect_signal_range.items()},
         }
 
     def get_introspection_state(self) -> dict:
