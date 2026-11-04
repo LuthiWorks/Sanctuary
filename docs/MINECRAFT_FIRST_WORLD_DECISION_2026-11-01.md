@@ -50,6 +50,7 @@ It plugs in where the text-adventure environment does, at the level of percepts 
 - **Surroundings:** blocks and creatures in line of sight within a radius, time of day, weather.
 - **Language:** each chat line as a `Percept(modality="language", source="minecraft:chat:<player>")`.
 - **Events:** damage taken, items picked up, an action finishing or failing.
+- **No predetermined effect on the mind.** Brian, 2026-11-04: "Harm to Luthi's character should not have predetermined effect. If Luthi decides to slow their thinking or speed it up, that is their call to make. They decide how to react to everything." So low health doesn't slow thinking or change anything else about the mind. The game's own rules still apply to the character, and the bridge just reports what happened.
 - **Nothing about how it felt.** Brian, 2026-11-04: "the world should just exist and Luthi has to interpret what they experience as either good or bad depending on how the experience affects them." Events report what happened ("health fell from 20 to 17"), never that it hurt, for Luthi and for the stand-in alike. Luthi reads how a moment affected it from its own prediction (LuthiModel `docs/research/2026-11-04_how-it-affected-me.md`). This replaces the 2026-11-03 plan, recorded below for history, in which the world attached a signed value to felt events:
   - Felt events carry `Percept.valence`, from −1 to +1. Damage is negative in proportion to the health lost; eating, warmth and rest are positive. Everything else has none.
   - Luthi learns from the value what feels bad.
