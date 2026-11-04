@@ -285,7 +285,7 @@ def test_the_budget_follows_the_minds_setting(kept):
 
 
 @needs_luthi
-def test_sleep_renews_the_budget(kept):
+def test_a_completed_sleep_renews_the_budget_and_a_cycle_of_it_does_not(kept):
     adapter = _adapter(keep_on_significance=0.05, keep_budget_per_wake=0.05)
     adapter._cycle_valence = -1.0
     adapter._keep_if_significant()
@@ -295,7 +295,21 @@ def test_sleep_renews_the_budget(kept):
     adapter.model.blocks = torch.nn.ModuleList()
     adapter.consolidate()
     adapter._keep_if_significant()
+    assert len(kept) == 1, "NREM runs consolidate many times per sleep"
+    adapter.renew_keep_budget()
+    adapter._keep_if_significant()
     assert len(kept) == 2
+
+
+@pytest.mark.asyncio
+async def test_sleep_never_gates_out_a_notice_about_learning():
+    cycle, sleep = _sleeping_cycle()
+    for i in range(10):
+        cycle.inject_percept(Percept(modality="sensor", content=f"hum {i}"))
+    cycle.inject_percept(Percept(modality="system", content="undone", source="learning"))
+    ci = await cycle._assemble_input()
+    assert "undone" in [p.content for p in ci.new_percepts]
+    assert sleep.is_sleeping
 
 
 class _RollbackCounter:

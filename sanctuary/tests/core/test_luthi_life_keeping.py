@@ -30,6 +30,22 @@ class _LivingModel:
         self.saves.append(reason)
 
 
+@pytest.mark.asyncio
+async def test_the_keep_budget_renews_once_per_completed_sleep():
+    class _Renewing(_LivingModel):
+        renewals = 0
+
+        def renew_keep_budget(self):
+            self.renewals += 1
+
+    model = _Renewing()
+    sleep = SleepCycleManager(_short_sleep())
+    cycle = CognitiveCycle(model=model, cycle_delay=0.0, sleep_manager=sleep)
+    await cycle.run(max_cycles=30)
+    assert sleep.completed_sleeps >= 2
+    assert model.renewals == len(model.saves)
+
+
 def _short_sleep() -> SleepConfig:
     return SleepConfig(
         cycles_between_sleep=3, drowsy_duration=1, nrem_duration=2,

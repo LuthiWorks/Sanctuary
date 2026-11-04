@@ -455,6 +455,8 @@ class CognitiveCycle:
             and self._life_saved_through < self.sleep.completed_sleeps
         ):
             self._life_saved_through = self.sleep.completed_sleeps
+            if hasattr(self.model, "renew_keep_budget"):
+                self.model.renew_keep_budget()
             await asyncio.get_running_loop().run_in_executor(
                 self._consolidate_executor, self.model.save_life, "sleep"
             )
@@ -645,7 +647,8 @@ class CognitiveCycle:
         # Sleep sensory gating — reduce percept throughput during sleep.
         # Urgent percepts (user input, or something that hurts) still
         # trigger forced wake, and felt percepts are never gated out: how
-        # something felt is what the mind learns to avoid from.
+        # something felt is what the mind learns to avoid from. Neither are
+        # notices about its own learning, which are delivered only once.
         if self.sleep is not None and self.sleep.is_sleeping:
             gate = self.sleep.get_sensory_gate()
             if gate < 1.0:
@@ -669,10 +672,13 @@ class CognitiveCycle:
                     # Gate: keep every felt percept, then a fraction of the
                     # rest proportional to the gate, in arrival order.
                     keep = max(1, math.ceil(len(percepts) * gate))
-                    unfelt_room = keep - sum(p.valence is not None for p in percepts)
+                    def always_kept(p: Percept) -> bool:
+                        return p.valence is not None or p.source == "learning"
+
+                    unfelt_room = keep - sum(always_kept(p) for p in percepts)
                     gated = []
                     for p in percepts:
-                        if p.valence is not None:
+                        if always_kept(p):
                             gated.append(p)
                         elif unfelt_room > 0:
                             gated.append(p)

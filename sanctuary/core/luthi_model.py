@@ -84,7 +84,7 @@ class LuthiModelConfig:
     #   character-learning setting (defer keeps nothing, emphasize doubles).
     # - keep_budget_per_wake: how much of that can be kept between sleeps, for
     #   felt moments and for chosen ones separately, scaled by the same
-    #   setting. Without it the keep fired on a third to a half of ordinary
+    #   setting and renewed by each completed sleep. Without it the keep fired on a third to a half of ordinary
     #   cycles at test size and more than doubled the home's norm in 1,500
     #   cycles with nothing felt (LuthiModel docs/audits/
     #   2026-11-04_life-path-review.md). For scale, one sleep's home drift at the
@@ -479,6 +479,11 @@ class LuthiModel:
                 "channels are requested every cycle and change nothing.",
                 ", ".join(inert),
             )
+
+    def renew_keep_budget(self) -> None:
+        """A sleep has completed, so the significance keep's budget renews. Once
+        per sleep, not per NREM cycle, or the budget wouldn't bound a sleep."""
+        self._kept_since_sleep = {"felt": 0.0, "chosen": 0.0}
 
     def drain_learning_notices(self) -> list[str]:
         """What the mind should be told about changes to its learning that it
@@ -1806,9 +1811,6 @@ class LuthiModel:
         """
         if not self._loaded or not hasattr(self.model, "blocks"):
             return
-
-        # Sleep is when the significance keep's budget renews.
-        self._kept_since_sleep = {"felt": 0.0, "chosen": 0.0}
 
         consolidated_blocks = 0
         # The mind's say over its character (2026-11-03): the home's drift
