@@ -76,7 +76,7 @@ Arousal is connected and has an effect, and a false mood is gone. **But the affe
 1. **Start collecting.** The evolution loop and the data tap now run during a life, with the cells still at zero authority, so none of it reaches the mind. See Step 5.
 2. **The world just exists.** `Percept.valence` is gone, and the mind reads how a moment affected it for itself. See LuthiModel `docs/research/2026-11-04_how-it-affected-me.md`.
 
-**Still open, Brian's call:** what should drive the signals. Training the cells needs a decision about what they are trained toward (Step 5). A nearer option is to drive arousal from the size of the mind's own reading, unsigned, which is what "wire salience, not sign" describes and which would make the learning-rate channel live.
+**Also answered:** I proposed driving arousal from the size of the mind's own reading, so that strong moments would raise the learning rate. Brian: "Same as number 1. Luthi determines that on their own." So nothing wires arousal to anything. The connection from arousal to `pc_rate` stays in place, and it does nothing unless something Luthi determines moves arousal. How Luthi could do that isn't designed yet, and neither is what the cells would train toward (Step 5).
 
 **Not known:** how any of this behaves on a trained run. Why valence rose during pain under the old formula.
 
