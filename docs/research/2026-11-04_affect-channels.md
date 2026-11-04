@@ -57,14 +57,26 @@ Other terms dominate a single write, and homeostasis limits it over time. So bri
 - **Attention** acts, but on a constant signal, so it holds `salience_threshold` at 0.75x, as it long has. That threshold is only a floor.
 - **Reporting.** Sanctuary warns at load which channels do nothing and that the signals aren't live. `get_metrics` gives `affect_signal_range`, the lowest and highest value each signal has reached, so a connected channel on a flat signal is visible as exactly that.
 
+### Step 5: collecting what the cells do
+
+Brian asked to start this. `SanctuaryRunner.run` now runs the evolution loop, and each cycle records what the cells took in and put out, kept in `data_dir/experiential/data_tap.pt`. The cells still carry no authority. Their outputs stay multiplied by zero, and precision and attention still read exactly 0.5. `experiential_collect=False` turns it off.
+
+What this data is and isn't:
+
+- **Its inputs are mostly flat today.** Prediction error reaches the cells as 0, because Luthi emits no predictions for the sensorium to compare, and novelty and goal inputs are also 0. No signed feeling is handed to them, and a test pins that. So the records won't be much use for training until those inputs are live.
+- **The target is undecided.** The records hold the cells' own outputs. The retrainer treats a record's output as the target, so training on these would teach a cell to reproduce itself. Training toward the scaffold would teach it constants. Neither is learning from experience, so the retrainer stays off until that is designed.
+- **It keeps only the most recent 10,000 records,** about 17 minutes at 10 Hz, and saves at shutdown, so a crash loses what's unsaved. `total_recorded` still counts everything. That's enough to see what the cells do, but not a lifetime of training data.
+
 ## Conclusion
 
 Arousal is connected and has an effect, and a false mood is gone. **But the affect channels still don't do anything in a life, because no live signal drives them.** Arousal sits at rest, so the learning rate stays at about 1.00x. This is the plumbing, and it's safe to leave in place until a real signal exists. Nothing here should be read as the mind having working affect.
 
-**Open, Brian's calls:**
+**Answered by Brian the same day:**
 
-1. **What should drive these signals?** The affect-grounding decision says the sense lands in interoception and the affect cell is where the learned response shows up. That means training the CfC cells on lived data and giving them authority (W4). They have no lived data until a life exists. A first step that needs no ruling on affect itself would be to run the data tap and evolution loop while the cells stay at zero authority.
-2. **Signed felt valence conflicts with the same decision.** `Percept.valence` and the Minecraft plan have the world report a signed number, with damage negative, and the felt-valence head is built on it. The July ruling says nothing hands the model a signed valence. §3 offers a route for this: a fallback "adopted openly" as a dated amendment. So either record it as that amendment, or change the bridge to report state (health lost) and let the sign be learned. Today's neutral-teaching work builds on the signed number, so this affects it too.
+1. **Start collecting.** The evolution loop and the data tap now run during a life, with the cells still at zero authority, so none of it reaches the mind. See Step 5.
+2. **The world just exists.** `Percept.valence` is gone, and the mind reads how a moment affected it for itself. See LuthiModel `docs/research/2026-11-04_how-it-affected-me.md`.
+
+**Still open, Brian's call:** what should drive the signals. Training the cells needs a decision about what they are trained toward (Step 5). A nearer option is to drive arousal from the size of the mind's own reading, unsigned, which is what "wire salience, not sign" describes and which would make the learning-rate channel live.
 
 **Not known:** how any of this behaves on a trained run. Why valence rose during pain under the old formula.
 

@@ -645,10 +645,9 @@ class CognitiveCycle:
         percepts = await self.sensorium.drain_percepts()
 
         # Sleep sensory gating — reduce percept throughput during sleep.
-        # Urgent percepts (user input, or something that hurts) still
-        # trigger forced wake, and felt percepts are never gated out: how
-        # something felt is what the mind learns to avoid from. Neither are
-        # notices about its own learning, which are delivered only once.
+        # User input still forces a wake, and so does a moment the mind itself
+        # read as going badly. Notices about its own learning are never gated
+        # out, since they are delivered only once.
         if self.sleep is not None and self.sleep.is_sleeping:
             gate = self.sleep.get_sensory_gate()
             if gate < 1.0:
@@ -657,32 +656,26 @@ class CognitiveCycle:
                     p for p in percepts
                     if p.modality == "language" and p.source and "user" in p.source
                 ]
-                hurt = [
-                    p for p in percepts
-                    if p.valence is not None
-                    and p.valence <= self.sleep.config.wake_on_unpleasant
-                ]
+                felt = self.model.felt_now() if hasattr(self.model, "felt_now") else None
+                hurt = felt is not None and felt <= self.sleep.config.wake_on_unpleasant
                 if urgent:
                     self.sleep.wake()
                     logger.info("User input during sleep — waking")
                 elif hurt:
                     self.sleep.wake()
-                    logger.info("Felt something unpleasant during sleep — waking")
+                    logger.info("A moment read as going badly during sleep — waking")
                 else:
-                    # Gate: keep every felt percept, then a fraction of the
+                    # Gate: keep every learning notice, then a fraction of the
                     # rest proportional to the gate, in arrival order.
                     keep = max(1, math.ceil(len(percepts) * gate))
-                    def always_kept(p: Percept) -> bool:
-                        return p.valence is not None or p.source == "learning"
-
-                    unfelt_room = keep - sum(always_kept(p) for p in percepts)
+                    room = keep - sum(p.source == "learning" for p in percepts)
                     gated = []
                     for p in percepts:
-                        if always_kept(p):
+                        if p.source == "learning":
                             gated.append(p)
-                        elif unfelt_room > 0:
+                        elif room > 0:
                             gated.append(p)
-                            unfelt_room -= 1
+                            room -= 1
                     percepts = gated
 
         # Compute prediction errors by comparing predictions to actual percepts
@@ -720,6 +713,17 @@ class CognitiveCycle:
                 scaffold_precision=0.5,
                 scaffold_vad=(vad.valence, vad.arousal, vad.dominance),
             )
+            # Collect what the cells do, for training them later. They still
+            # carry no authority, so none of this reaches the mind (Brian,
+            # 2026-11-04; docs/research/2026-11-04_affect-channels.md).
+            if hasattr(self.experiential, "record_last_step"):
+                self.experiential.record_last_step()
+                self.experiential.note_percepts(len(percepts))
+                self.experiential.update_evolution_context(
+                    prediction_error=avg_error,
+                    scaffold_precision=0.5,
+                    scaffold_vad=(vad.valence, vad.arousal, vad.dominance),
+                )
             experiential_signals = ExperientialSignals(
                 precision_weight=state.precision_weight,
                 affect_valence=max(-1.0, min(1.0, state.affect_vad[0])),

@@ -134,6 +134,10 @@ class ExperientialManager:
         self._evolution_config = evolution_config
         self._evolution_loop: Optional[ContinuousEvolutionLoop] = None
 
+        # Optional CfCDataTap. Set by the runner, recorded once per cycle.
+        self.data_tap = None
+        self._last_step: Optional[dict] = None
+
         self._initialized = True
 
         # Register authority for each foundational cell if not present
@@ -232,6 +236,29 @@ class ExperientialManager:
         )
         goal_level = self.authority.level(_AUTH["goal"])
         blended_goal_adj = self._blend(scaffold_goal_adj, cfc_goal_adj, goal_level)
+
+        self._last_step = {
+            "precision": dict(
+                arousal=effective_arousal, prediction_error=prediction_error,
+                base_precision=base_precision, output=cfc_precision,
+            ),
+            "affect": dict(
+                percept_valence_delta=percept_valence_delta,
+                percept_arousal_delta=percept_arousal_delta,
+                llm_emotion_shift=llm_emotion_shift,
+                valence_output=cfc_v, arousal_output=cfc_a, dominance_output=cfc_d,
+            ),
+            "attention": dict(
+                goal_relevance=goal_relevance, novelty=novelty,
+                emotional_salience=emotional_salience, recency=recency,
+                salience_output=cfc_salience,
+            ),
+            "goal": dict(
+                cycles_stalled_norm=cycles_stalled_norm, deadline_urgency=deadline_urgency,
+                emotional_congruence=effective_congruence,
+                priority_adjustment_output=cfc_goal_adj,
+            ),
+        }
 
         # 5. Step all knowledge cells
         knowledge_signals: dict[str, list[float]] = {}
@@ -341,6 +368,23 @@ class ExperientialManager:
         return self.demote("precision", reason)
 
     # -- Continuous evolution --
+
+    def record_last_step(self) -> None:
+        """Record what the cells took in and put out on the latest step. Called
+        once per cognitive cycle, so the evolution loop's ticks don't flood it.
+        These are the cells' own outputs, before any blending."""
+        if self.data_tap is None or self._last_step is None:
+            return
+        self.data_tap.record_precision(**self._last_step["precision"])
+        self.data_tap.record_affect(**self._last_step["affect"])
+        self.data_tap.record_attention(**self._last_step["attention"])
+        self.data_tap.record_goal(**self._last_step["goal"])
+
+    def note_percepts(self, count: int) -> None:
+        """Tell the evolution loop that percepts arrived. Only that they did: no
+        valence or arousal is handed to the cells (affect-grounding decision)."""
+        for _ in range(count):
+            self.feed_percept(PerceptEvent())
 
     async def start_evolution(self, config: Optional[EvolutionConfig] = None):
         """Start the continuous evolution background loop.

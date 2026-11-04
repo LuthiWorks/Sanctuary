@@ -76,8 +76,8 @@ class LuthiModelConfig:
     life_dir: str = ""
     # Learning to avoid what is unpleasant (2026-11-03,
     # LuthiModel docs/research/2026-11-03_learning-to-avoid.md):
-    # - felt_valence: an M9 life learns how states feel from percepts that
-    #   carry a valence, and its planner counts learned unpleasantness.
+    # - felt_valence: an M9 life learns how states feel from its own reading of
+    #   how each moment affected it, and its planner counts learned unpleasantness.
     # - keep_on_significance: when a moment matters (strongly felt, or
     #   chosen to be remembered), each living layer keeps this share of its
     #   recent change, scaled by how much it mattered and by the mind's own
@@ -236,8 +236,8 @@ class LuthiModel:
         # for checkpoints loaded through `load()`'s LM path.
         self._m9_trainer = None
         self._speech_trained: bool = True
-        # This cycle's felt valence (the strongest one any percept reported,
-        # or None) and the mind's latest character-learning setting.
+        # How this cycle affected the mind, by its own reading (or None), and
+        # the mind's latest character-learning setting.
         self._cycle_valence: Optional[float] = None
         self._character_setting: str = "allow"
         # What the significance keep has used since the last sleep, per kind
@@ -645,7 +645,6 @@ class LuthiModel:
         # put() while holding the lock would wait on a learner that needs the
         # lock to drain. `pending` carries it out of the critical section.
         pending: Optional[Transition] = None
-        self._cycle_valence = self._felt(cognitive_input)
         if cognitive_input.learning_state is not None:
             self._character_setting = cognitive_input.learning_state.character.setting
         with self._model_critical_section():
@@ -725,6 +724,7 @@ class LuthiModel:
                 #    observe_transition inline and returns None.
                 if gen_state is not None:
                     pending = self._run_training_seam(gen_state)
+                self._cycle_valence = self.felt_now()
 
                 # 6b. Keep more of what was just learned when this moment
                 #     mattered (2026-11-03).
@@ -811,7 +811,6 @@ class LuthiModel:
                 # PlanSnapshot fields are detached at construction; pass through.
                 plan_snapshot=self._last_plan_snapshot,
                 context_obs=detach_context_obs(self._last_context_obs),
-                valence=self._cycle_valence,
             )
 
         # 2. Actor fast path: habit-only select (budget=0). No MCTS on the hot
@@ -917,7 +916,6 @@ class LuthiModel:
                         # _last_context_obs is None on the first populated
                         # cycle -> the sink takes the head-only path.
                         context_obs=self._last_context_obs,
-                        valence=self._cycle_valence,
                     )
                 except Exception:
                     logger.exception(
@@ -936,8 +934,6 @@ class LuthiModel:
                     plan_snapshot=self._last_plan_snapshot,
                     # Item #6: see the resilient branch above.
                     context_obs=self._last_context_obs,
-                    # How the realized next state (this cycle's) felt.
-                    valence=self._cycle_valence,
                 )
 
         # Run the actor's plan + select. _last_action_summary /
@@ -1045,13 +1041,14 @@ class LuthiModel:
     # Generation
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _felt(ci: CognitiveInput) -> Optional[float]:
-        """The strongest felt valence among this cycle's percepts, or None
-        when none carries one. Strongest by magnitude, so one painful event
-        is not averaged away by a pleasant one."""
-        felt = [p.valence for p in ci.new_percepts if p.valence is not None]
-        return max(felt, key=abs) if felt else None
+    def felt_now(self) -> Optional[float]:
+        """How the latest moment affected the mind, by its own reading, or None
+        when it wasn't felt or there is no life to read."""
+        if self._m9_trainer is None:
+            return None
+        from luthi.sanctuary_interface import felt_now
+
+        return felt_now(self._m9_trainer)
 
     def _keep_if_significant(self) -> None:
         """When this moment mattered, keep more of what the living layers
@@ -1879,7 +1876,15 @@ class LuthiModel:
             "kept_since_sleep": dict(self._kept_since_sleep),
             "keep_capped_moments": self._keep_capped_moments,
             "affect_signal_range": {k: list(v) for k, v in self._affect_signal_range.items()},
+            "felt_summary": self._felt_summary(),
         }
+
+    def _felt_summary(self) -> dict:
+        if self._m9_trainer is None:
+            return {}
+        from luthi.sanctuary_interface import felt_summary
+
+        return felt_summary(self._m9_trainer)
 
     def get_introspection_state(self) -> dict:
         """Return the most recent introspection data for external monitoring."""

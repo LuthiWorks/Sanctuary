@@ -185,6 +185,10 @@ class RunnerConfig:
     # the entity's ExperientialSignals. Defaults to on per PLAN.md's
     # body description.
     experiential_enabled: bool = True
+    # Run the cells between cycles, and record what they do, so that they can be
+    # trained on lived experience later. At zero authority none of it reaches the
+    # mind (Brian, 2026-11-04; docs/research/2026-11-04_affect-channels.md).
+    experiential_collect: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -467,6 +471,13 @@ class SanctuaryRunner:
             try:
                 from sanctuary.experiential.manager import ExperientialManager
                 self._experiential = ExperientialManager(authority=self.authority)
+                if self._config.experiential_collect:
+                    from sanctuary.growth.cfc_retrainer import CfCDataTap
+
+                    self._experiential.data_tap = CfCDataTap()
+                    tap_path = data_dir_path / "experiential" / "data_tap.pt"
+                    if self._config.persist_state and tap_path.exists():
+                        self._experiential.data_tap.load(tap_path)
                 if self._config.persist_state:
                     exp_dir = data_dir_path / "experiential"
                     if exp_dir.exists():
@@ -698,7 +709,14 @@ class SanctuaryRunner:
         if not self._booted:
             await self.boot()
 
-        await self.cycle.run(max_cycles=max_cycles)
+        collecting = self._experiential is not None and self._config.experiential_collect
+        if collecting:
+            await self._experiential.start_evolution()
+        try:
+            await self.cycle.run(max_cycles=max_cycles)
+        finally:
+            if collecting:
+                await self._experiential.stop_evolution()
 
     def stop(self) -> None:
         """Stop the cognitive cycle."""
@@ -733,6 +751,8 @@ class SanctuaryRunner:
         if self._experiential is not None:
             try:
                 self._experiential.save(data_dir / "experiential")
+                if self._experiential.data_tap is not None:
+                    self._experiential.data_tap.save(data_dir / "experiential" / "data_tap.pt")
             except Exception as e:
                 logger.error("Failed to save experiential layer: %s", e)
 

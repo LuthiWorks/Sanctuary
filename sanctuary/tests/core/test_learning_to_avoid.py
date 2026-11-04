@@ -3,10 +3,9 @@ Brian: "We still need Luthi to learn to avoid dangerous or unpleasant
 things"; LuthiModel docs/research/2026-11-03_learning-to-avoid.md).
 
 Pins:
-- A percept can say how it felt (valence, -1..1), and nothing else changes
-  when it does not.
-- The adapter takes the cycle's strongest felt valence and hands it to the
-  learner with the realized transition, sync and async.
+- A percept can't say how anything felt: the world just exists, and how a moment
+  affected the mind is the mind's own reading (Brian, 2026-11-04).
+- A moment the mind reads as going badly wakes it.
 - When a moment matters (strongly felt, or chosen to be remembered), the
   living layers keep more of it, scaled by the mind's own character
   setting: defer keeps nothing, emphasize doubles. Sleep's home drift
@@ -45,26 +44,6 @@ from sanctuary.core.schema import (
 )
 
 
-def test_a_percept_can_say_how_it_felt():
-    assert Percept(modality="sensor", content="took damage", valence=-0.8).valence == -0.8
-    assert Percept(modality="language", content="hi").valence is None
-    with pytest.raises(ValidationError):
-        Percept(modality="sensor", content="x", valence=-1.5)
-
-
-def test_a_felt_event_survives_batching():
-    from sanctuary.core.context_manager import BudgetConfig, ContextManager
-
-    percepts = [Percept(modality="sensor", content=f"reading_{i}" * 10) for i in range(20)]
-    percepts[3] = percepts[3].model_copy(update={"valence": -0.8})
-    percepts[7] = percepts[7].model_copy(update={"valence": 0.4})
-    compressed = ContextManager(BudgetConfig(new_percepts=100, chars_per_token=1)).compress(
-        CognitiveInput(new_percepts=percepts)
-    )
-    assert len(compressed.new_percepts) < 20, "the burst was batched"
-    assert [p.valence for p in compressed.new_percepts] == [-0.8, None]
-
-
 def _sleeping_cycle():
     from sanctuary.consciousness.sleep_cycle import SleepConfig, SleepCycleManager, SleepStage
     from sanctuary.core.cognitive_cycle import CognitiveCycle
@@ -73,25 +52,6 @@ def _sleeping_cycle():
     sleep = SleepCycleManager(SleepConfig(sensory_gate_sleep=0.1))
     sleep._stage = SleepStage.NREM
     return CognitiveCycle(model=PlaceholderModel(), sleep_manager=sleep), sleep
-
-
-@pytest.mark.asyncio
-async def test_sleep_never_gates_out_a_felt_event():
-    cycle, sleep = _sleeping_cycle()
-    for i in range(10):
-        cycle.inject_percept(Percept(modality="sensor", content=f"hum {i}"))
-    cycle.inject_percept(Percept(modality="sensor", content="cold", valence=-0.3))
-    ci = await cycle._assemble_input()
-    assert [p.content for p in ci.new_percepts] == ["hum 0", "cold"]
-    assert sleep.is_sleeping, "mild discomfort does not wake"
-
-
-@pytest.mark.asyncio
-async def test_something_that_hurts_wakes_the_mind():
-    cycle, sleep = _sleeping_cycle()
-    cycle.inject_percept(Percept(modality="sensor", content="took damage", valence=-0.7))
-    await cycle._assemble_input()
-    assert sleep._forced_wake
 
 
 def _runner_config(tmp_path: Path, **fields) -> RunnerConfig:
@@ -132,26 +92,14 @@ needs_luthi = pytest.mark.skipif(not HAVE_LUTHI, reason="luthi not importable; s
 D = 8
 
 
-def _ci(*valences, setting: str | None = None) -> CognitiveInput:
-    percepts = [
-        Percept(modality="sensor", content=f"event {i}", valence=v)
-        for i, v in enumerate(valences)
-    ]
+def _ci(setting: str | None = None) -> CognitiveInput:
+    percepts = [Percept(modality="sensor", content="event")]
     learning = None
     if setting is not None:
         learning = LearningState(
             skills=LearningRouteState(), character=LearningRouteState(setting=setting),
         )
     return CognitiveInput(new_percepts=percepts, learning_state=learning)
-
-
-@needs_luthi
-def test_the_strongest_felt_valence_counts():
-    from sanctuary.core.luthi_model import LuthiModel
-
-    assert LuthiModel._felt(_ci()) is None
-    assert LuthiModel._felt(_ci(None, 0.3)) == 0.3
-    assert LuthiModel._felt(_ci(0.6, -0.9, 0.2)) == -0.9
 
 
 class _Actor:
@@ -186,34 +134,6 @@ def _adapter(**config):
 
 def _state() -> "GenerationState":
     return GenerationState(s_t=torch.ones(1, D), ctx_latents=torch.ones(1, 4, D))
-
-
-@needs_luthi
-def test_the_learner_hears_how_the_next_state_felt():
-    adapter = _adapter()
-    sink = _Sink()
-    adapter.attach_seam(actor=_Actor(), sink=sink)
-    adapter._cycle_valence = None
-    adapter._run_training_seam(_state())
-    adapter._cycle_valence = -0.7
-    adapter._run_training_seam(_state())
-    assert sink.ctxs[-1]["valence"] == -0.7
-
-
-@needs_luthi
-def test_the_async_transition_carries_it():
-    from sanctuary.core.async_learner import AsyncLearner, Transition
-
-    sink = _Sink()
-    import threading
-
-    learner = AsyncLearner(sink, threading.Lock(), mode="drain")
-    learner.submit(Transition(
-        s_t=torch.zeros(1, D), a_t=torch.zeros(D), s_next=torch.zeros(1, D), valence=-0.5,
-    ))
-    assert sink.ctxs[-1]["valence"] == -0.5
-    learner.submit(Transition(s_t=torch.zeros(1, D), a_t=torch.zeros(D), s_next=torch.zeros(1, D)))
-    assert "valence" not in sink.ctxs[-1]
 
 
 @pytest.fixture
@@ -303,6 +223,21 @@ def test_a_completed_sleep_renews_the_budget_and_a_cycle_of_it_does_not(kept):
     adapter.renew_keep_budget()
     adapter._keep_if_significant()
     assert len(kept) == 2
+
+
+def test_the_world_cannot_say_how_something_felt():
+    assert "valence" not in Percept.model_fields
+    with pytest.raises(ValidationError):
+        Percept(modality="sensor", content="took damage", valence=-0.7)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("felt,wakes", [(-0.7, True), (-0.2, False), (None, False), (0.9, False)])
+async def test_a_moment_read_as_going_badly_wakes_the_mind(felt, wakes):
+    cycle, sleep = _sleeping_cycle()
+    cycle.model.felt_now = lambda: felt
+    await cycle._assemble_input()
+    assert sleep._forced_wake is wakes
 
 
 @pytest.mark.asyncio

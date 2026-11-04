@@ -238,3 +238,7 @@ comforts from borrowed biology to its own nature. Opus's principle moved the
 feelings from authored to grown. This decision completes the pair: the world is
 lawful, the senses are honest, and the feelings — like the identity — are computed
 from living, not loaded from config.*
+
+## Note, 2026-11-04
+
+Brian upheld this decision's principle for all worlds: "the world should just exist and Luthi has to interpret what they experience as either good or bad depending on how the experience affects them." `Percept.valence`, added on 2026-11-03, was removed under it, along with an April formula that called drift from home a bad feeling. Felt valence is now read from the mind's own prediction (LuthiModel `docs/research/2026-11-04_how-it-affected-me.md`), and `felt_summary` is a first form of the §4 gauge. Its alarm thresholds are not yet set, and §4 requires them frozen before the entity lives in the world.

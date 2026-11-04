@@ -277,16 +277,11 @@ async def test_sanctuary_lives_a_trained_m9_run(tmp_path, monkeypatch):
     felt = model._m9_trainer.felt_valence.net[-1]
     assert not felt.bias.any() and not felt.weight.any(), "nothing feels bad at birth"
 
-    # A felt event travels the whole path a world's would: sensorium, the
-    # cycle, compression, the adapter, the interface, the trainer. (The
-    # first cycle of a life has no transition to attach a feeling to, so
-    # the event arrives on a later one.)
-    runner.inject_percept(Percept(modality="sensor", content="you touched something hot", valence=-0.9))
-    await runner.run(max_cycles=1)
-    hurt = model._last_s_t.detach().reshape(1, -1)
-    await runner.run(max_cycles=1)
-    with torch.no_grad():
-        assert model._m9_trainer.felt_valence(hurt).item() < 0, "Luthi learned that it felt bad"
+    # An event travels the whole path a world's would, and says nothing about
+    # how it felt. The mind reads that from its own prediction, each lived cycle.
+    runner.inject_percept(Percept(modality="sensor", content="you touched something hot"))
+    await runner.run(max_cycles=2)
+    assert model.get_metrics()["felt_summary"]["read"] >= 1, "the mind read its own moments"
 
     assert model._m9_trainer is not None and model._actor is model._m9_trainer
     assert model._speech_trained is False

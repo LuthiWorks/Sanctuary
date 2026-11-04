@@ -50,7 +50,7 @@ It plugs in where the text-adventure environment does, at the level of percepts 
 - **Surroundings:** blocks and creatures in line of sight within a radius, time of day, weather.
 - **Language:** each chat line as a `Percept(modality="language", source="minecraft:chat:<player>")`.
 - **Events:** damage taken, items picked up, an action finishing or failing.
-- **How it felt** (added 2026-11-03, for learning to avoid; LuthiModel `docs/research/2026-11-03_learning-to-avoid.md`):
+- **Nothing about how it felt.** Brian, 2026-11-04: "the world should just exist and Luthi has to interpret what they experience as either good or bad depending on how the experience affects them." Events report what happened ("health fell from 20 to 17"), never that it hurt, for Luthi and for the stand-in alike. Luthi reads how a moment affected it from its own prediction (LuthiModel `docs/research/2026-11-04_how-it-affected-me.md`). This replaces the 2026-11-03 plan, recorded below for history, in which the world attached a signed value to felt events:
   - Felt events carry `Percept.valence`, from −1 to +1. Damage is negative in proportion to the health lost; eating, warmth and rest are positive. Everything else has none.
   - Luthi learns from the value what feels bad.
   - The stand-in can't change its weights and reads only text, so each felt event also states its feeling in plain words ("that hurt", "that was good"), which it can remember.
