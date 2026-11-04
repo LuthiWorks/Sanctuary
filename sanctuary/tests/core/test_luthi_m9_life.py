@@ -282,8 +282,11 @@ async def test_sanctuary_lives_a_trained_m9_run(tmp_path, monkeypatch):
     # first cycle of a life has no transition to attach a feeling to, so
     # the event arrives on a later one.)
     runner.inject_percept(Percept(modality="sensor", content="you touched something hot", valence=-0.9))
-    await runner.run(max_cycles=2)
-    assert felt.bias.item() < 0, "Luthi learned that it felt bad"
+    await runner.run(max_cycles=1)
+    hurt = model._last_s_t.detach().reshape(1, -1)
+    await runner.run(max_cycles=1)
+    with torch.no_grad():
+        assert model._m9_trainer.felt_valence(hurt).item() < 0, "Luthi learned that it felt bad"
 
     assert model._m9_trainer is not None and model._actor is model._m9_trainer
     assert model._speech_trained is False

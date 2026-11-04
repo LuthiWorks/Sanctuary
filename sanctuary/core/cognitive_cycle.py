@@ -442,6 +442,9 @@ class CognitiveCycle:
                     self._completed_sleeps_seen += 1
                     notices += self.learning_governor.sleep_completed()
             self._tell_learning(notices)
+        # A model that keeps a life can also change its learning unasked.
+        if hasattr(self.model, "drain_learning_notices"):
+            self._tell_learning(self.model.drain_learning_notices())
 
         # 0b. A model that keeps a life saves it after each completed sleep,
         #     on the consolidation worker so the write cannot stall the loop.

@@ -82,8 +82,16 @@ class LuthiModelConfig:
     #   chosen to be remembered), each living layer keeps this share of its
     #   recent change, scaled by how much it mattered and by the mind's own
     #   character-learning setting (defer keeps nothing, emphasize doubles).
+    # - keep_budget_per_wake: how much of that can be kept between sleeps, for
+    #   felt moments and for chosen ones separately, scaled by the same
+    #   setting. Without it the keep fired on a third to a half of ordinary
+    #   cycles at test size and more than doubled the home's norm in 1,500
+    #   cycles with nothing felt (LuthiModel docs/audits/
+    #   2026-11-04_life-path-review.md). For scale, one sleep's home drift at the
+    #   defaults is about 0.18. A placeholder, like the values above.
     felt_valence: bool = True
     keep_on_significance: float = 0.05
+    keep_budget_per_wake: float = 0.10
     # Path to the LuthiModel checkout. Empty means "use the LUTHI_PATH
     # environment variable, or assume luthi is already importable."
     luthi_path: str = ""
@@ -229,6 +237,12 @@ class LuthiModel:
         # or None) and the mind's latest character-learning setting.
         self._cycle_valence: Optional[float] = None
         self._character_setting: str = "allow"
+        # What the significance keep has used since the last sleep, per kind
+        # of moment, and how many moments its budget has cut short.
+        self._kept_since_sleep: dict[str, float] = {"felt": 0.0, "chosen": 0.0}
+        self._keep_capped_moments: int = 0
+        # Retention rollbacks the mind has already been told about.
+        self._rollbacks_told: int = 0
 
         logger.info("LuthiModel bridge initialized (model not yet loaded)")
 
@@ -421,6 +435,7 @@ class LuthiModel:
             )
         from luthi.sanctuary_interface import (
             load_m9_run,
+            retention_rollbacks,
             snapshot_modulatable_state,
         )
 
@@ -435,10 +450,12 @@ class LuthiModel:
         self.tokenizer = loaded.tokenizer
         self.model_config = loaded.config
         self._m9_trainer = loaded.trainer
+        self._rollbacks_told = retention_rollbacks(loaded.trainer)
         self._speech_trained = loaded.speech_trained
         self._base_snapshot = snapshot_modulatable_state(self.model)
         self._loaded = True
         self.attach_seam(actor=loaded.trainer, sink=loaded.trainer)
+        self._report_modulation_channels()
         logger.info(
             "Luthi %s from %s on %s: %dd, %d blocks, speech %s, %.1fs",
             "life continues" if loaded.continuing_life else "life begins",
@@ -449,6 +466,39 @@ class LuthiModel:
             "trained" if self._speech_trained else "untrained (silent)",
             time.monotonic() - t0,
         )
+
+    def _report_modulation_channels(self) -> None:
+        """Say which affect channels do nothing on this model. They would
+        otherwise run every cycle and look connected."""
+        from luthi.sanctuary_interface import modulation_channels
+
+        inert = [c for c, acts in modulation_channels(self.model).items() if not acts]
+        if inert:
+            logger.warning(
+                "Affect modulation does nothing on this model for: %s. These "
+                "channels are requested every cycle and change nothing.",
+                ", ".join(inert),
+            )
+
+    def drain_learning_notices(self) -> list[str]:
+        """What the mind should be told about changes to its learning that it
+        did not ask for, delivered once. Today: retention rollbacks, which undo
+        recent learning in the world-model core."""
+        if self._m9_trainer is None:
+            return []
+        from luthi.sanctuary_interface import retention_rollbacks
+
+        count = retention_rollbacks(self._m9_trainer)
+        new = count - self._rollbacks_told
+        self._rollbacks_told = count
+        if new <= 0:
+            return []
+        return [
+            "Some of what you learned recently was undone"
+            + (f" ({new} times since you last heard)" if new > 1 else "")
+            + ": it was pulling your understanding too far from what you knew "
+            "before, so your world model went back to its last steady state."
+        ]
 
     def save_life(self, reason: str = "life") -> Optional[Path]:
         """Save a life loaded from an M9 run as its next checkpoint (all of
@@ -1000,14 +1050,30 @@ class LuthiModel:
         through the felt-valence head and memory; only the living layers'
         home is held.
         """
-        significance = abs(self._cycle_valence) if self._cycle_valence is not None else 0.0
+        felt = abs(self._cycle_valence) if self._cycle_valence is not None else 0.0
+        chosen = 0.0
         decoded = self._last_decoded
         if decoded is not None and decoded["active"]["memory"]:
-            significance = max(significance, decoded["memory_salience"])
+            chosen = decoded["memory_salience"]
+        kind = "felt" if felt >= chosen else "chosen"
+        significance = max(felt, chosen)
         factor = {"defer": 0.0, "allow": 1.0, "emphasize": 2.0}[self._character_setting]
         fraction = min(1.0, self.config.keep_on_significance * significance * factor)
         if fraction <= 0.0:
             return
+        room = self.config.keep_budget_per_wake * factor - self._kept_since_sleep[kind]
+        if fraction > room:
+            if self._keep_capped_moments == 0:
+                logger.warning(
+                    "The significance keep reached its budget for %s moments; "
+                    "further ones wait for sleep (counted in get_metrics).",
+                    kind,
+                )
+            self._keep_capped_moments += 1
+            fraction = max(room, 0.0)
+            if fraction == 0.0:
+                return
+        self._kept_since_sleep[kind] += fraction
         from luthi.sanctuary_interface import keep_recent
 
         keep_recent(self.model, fraction)
@@ -1273,6 +1339,11 @@ class LuthiModel:
         restored after each think() call so modulation never accumulates.
         Goes through ``luthi.sanctuary_interface`` rather than reaching
         into Luthi internals — that adapter is the contract surface.
+
+        On a v2 living layer only the attention channel acts today: the
+        attributes behind arousal, precision and valence don't exist there, so
+        those requests change nothing. ``_report_modulation_channels`` says so
+        at load (2026-11-04).
         """
         from luthi.sanctuary_interface import apply_external_modulation
 
@@ -1736,6 +1807,9 @@ class LuthiModel:
         if not self._loaded or not hasattr(self.model, "blocks"):
             return
 
+        # Sleep is when the significance keep's budget renews.
+        self._kept_since_sleep = {"felt": 0.0, "chosen": 0.0}
+
         consolidated_blocks = 0
         # The mind's say over its character (2026-11-03): the home's drift
         # toward the weight is character consolidation, so defer holds it
@@ -1799,6 +1873,8 @@ class LuthiModel:
             ),
             "total_tokens_generated": self._total_tokens_generated,
             "cycle_count": self.cycle_count,
+            "kept_since_sleep": dict(self._kept_since_sleep),
+            "keep_capped_moments": self._keep_capped_moments,
         }
 
     def get_introspection_state(self) -> dict:

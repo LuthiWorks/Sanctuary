@@ -12,6 +12,10 @@ Pins:
   setting: defer keeps nothing, emphasize doubles. Sleep's home drift
   follows the same setting.
 - An M9 life's learning governor reports that it acts on the settings.
+- The keep has a budget between sleeps, per kind of moment, that it records
+  when it reaches. Sleep renews it.
+- The mind is told when a retention rollback undoes recent learning.
+- Affect channels that do nothing on this model are reported at load.
 
 The adapter tests need the luthi package (set LUTHI_PATH); the schema and
 runner tests do not.
@@ -241,6 +245,114 @@ def test_a_moment_chosen_to_be_remembered_is_kept_too(kept):
     adapter._last_decoded = {"active": {"memory": False}, "memory_salience": 0.6}
     adapter._keep_if_significant()
     assert kept == [], "an unremarkable moment keeps nothing extra"
+
+
+@needs_luthi
+def test_the_keep_stops_at_its_budget_and_says_so(kept, caplog):
+    adapter = _adapter(keep_on_significance=0.05, keep_budget_per_wake=0.1)
+    adapter._cycle_valence = None
+    adapter._last_decoded = {"active": {"memory": True}, "memory_salience": 0.8}
+    for _ in range(10):
+        adapter._keep_if_significant()
+    assert kept == [pytest.approx(0.04), pytest.approx(0.04), pytest.approx(0.02)]
+    metrics = adapter.get_metrics()
+    assert metrics["kept_since_sleep"]["chosen"] == pytest.approx(0.1)
+    assert metrics["keep_capped_moments"] == 8
+    assert sum("reached its budget" in r.message for r in caplog.records) == 1
+
+
+@needs_luthi
+def test_ordinary_moments_cannot_use_up_what_a_felt_moment_needs(kept):
+    adapter = _adapter(keep_on_significance=0.05, keep_budget_per_wake=0.1)
+    adapter._cycle_valence = None
+    adapter._last_decoded = {"active": {"memory": True}, "memory_salience": 1.0}
+    for _ in range(5):
+        adapter._keep_if_significant()
+    kept.clear()
+    adapter._cycle_valence = -1.0
+    adapter._keep_if_significant()
+    assert kept == [pytest.approx(0.05)]
+
+
+@needs_luthi
+def test_the_budget_follows_the_minds_setting(kept):
+    adapter = _adapter(keep_on_significance=0.05, keep_budget_per_wake=0.1)
+    adapter._cycle_valence = -1.0
+    adapter._character_setting = "emphasize"
+    for _ in range(5):
+        adapter._keep_if_significant()
+    assert sum(kept) == pytest.approx(0.2)
+
+
+@needs_luthi
+def test_sleep_renews_the_budget(kept):
+    adapter = _adapter(keep_on_significance=0.05, keep_budget_per_wake=0.05)
+    adapter._cycle_valence = -1.0
+    adapter._keep_if_significant()
+    adapter._keep_if_significant()
+    assert len(kept) == 1
+    adapter.model = torch.nn.Module()
+    adapter.model.blocks = torch.nn.ModuleList()
+    adapter.consolidate()
+    adapter._keep_if_significant()
+    assert len(kept) == 2
+
+
+class _RollbackCounter:
+    retention_rollbacks = 0
+
+
+@needs_luthi
+def test_the_mind_is_told_about_a_rollback_once():
+    adapter = _adapter()
+    assert adapter.drain_learning_notices() == [], "no life, nothing to tell"
+    adapter._m9_trainer = _RollbackCounter()
+    adapter._m9_trainer.retention_rollbacks = 0
+    assert adapter.drain_learning_notices() == []
+    adapter._m9_trainer.retention_rollbacks = 1
+    notices = adapter.drain_learning_notices()
+    assert len(notices) == 1 and "undone" in notices[0]
+    assert adapter.drain_learning_notices() == []
+    adapter._m9_trainer.retention_rollbacks = 4
+    assert "(3 times" in adapter.drain_learning_notices()[0]
+
+
+@pytest.mark.asyncio
+async def test_the_cycle_delivers_what_the_model_has_to_tell():
+    from sanctuary.core.cognitive_cycle import CognitiveCycle
+    from sanctuary.core.placeholder import PlaceholderModel
+
+    class _Telling(PlaceholderModel):
+        notices = ["Some of what you learned recently was undone."]
+
+        def drain_learning_notices(self):
+            notices, self.notices = self.notices, []
+            return notices
+
+    cycle = CognitiveCycle(model=_Telling())
+    await cycle._cycle()
+    told = [p for p in cycle._last_cognitive_input.new_percepts if p.source == "learning"]
+    assert [p.content for p in told] == ["Some of what you learned recently was undone."]
+
+
+@needs_luthi
+def test_inert_affect_channels_are_reported_at_load(caplog):
+    from luthi.v2.living_layer_pc import PredictiveCodingLayer
+
+    adapter = _adapter()
+
+    class _Block(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.living_ffn = PredictiveCodingLayer(
+                D, D, num_episodes=2, context_dim=4, salience_threshold=1e9,
+            )
+
+    adapter.model = torch.nn.Module()
+    adapter.model.blocks = torch.nn.ModuleList([_Block()])
+    adapter._report_modulation_channels()
+    message = next(r.message for r in caplog.records if "Affect modulation" in r.message)
+    assert "arousal, precision, valence" in message and "attention" not in message
 
 
 @needs_luthi

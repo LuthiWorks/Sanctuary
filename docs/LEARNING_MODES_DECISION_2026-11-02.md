@@ -63,6 +63,7 @@
     - in sleep, through the home's drift.
 
     Both follow the mind's setting: defer keeps nothing, allow the base amount, emphasize double. An M9 life's governor therefore reports `consolidation_active=True`.
+    Moments that matter can move the home only so far between sleeps: `keep_budget_per_wake`, a placeholder of 0.10 for felt moments and 0.10 for chosen ones, scaled by the same setting (2026-11-04, LuthiModel `docs/research/2026-11-04_feeling-neutral.md`).
   - **Skills: not yet acted on.** The action layer's heads (including felt valence, which learns what feels bad) learn regardless of the setting. Recorded here rather than hidden.
   - **Deferring character doesn't stop Luthi learning to avoid things.** Felt valence and memory still learn; only the home is held.
 
