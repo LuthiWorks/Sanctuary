@@ -10,6 +10,7 @@ Pins:
 - Watching changes nothing: not the weights, not the learner, not the dice.
 - The welfare gauge does not change the life it watches.
 - A life is saved, continues from where it stopped, and never writes the run.
+- Waking is at full strength until rest exists.
 """
 
 from __future__ import annotations
@@ -209,3 +210,15 @@ def test_a_life_is_saved_continues_and_never_writes_the_run(run_dir, tmp_path):
         p.stat().st_size for p in (life / "checkpoints").glob("ckpt_*.pt")
     ), "and the disk they take is reported"
     assert _hashes(run_dir) == run_before, "the run is untouched"
+
+
+def test_waking_is_at_full_strength_until_rest_exists(run_dir, tmp_path):
+    """Brian, 2026-11-05: his August rulings stand. Lessened waking was ruled as
+    a pair with rest, and rest is not built, so it is not switched on here.
+    When rest is built, this test changes on purpose and together with it."""
+    mind, world, loop = _begin(run_dir, tmp_path / "life")
+    living = [m for m in mind.model.modules() if hasattr(m, "_wake_attenuation")]
+    assert living, "this test must find the living layers"
+    assert all(m._wake_attenuation == 1.0 for m in living)
+    _live(loop, world, 3, said={0: "hello Luthi"})
+    assert all(m._wake_attenuation == 1.0 for m in living)

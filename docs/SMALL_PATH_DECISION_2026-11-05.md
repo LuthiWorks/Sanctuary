@@ -1,6 +1,6 @@
 # The small path: decision and build record (2026-11-05)
 
-**Status.** Built beside the old path, in `sanctuary/life/`. Nothing that existed was removed or changed. Only test-size lives have run on it. No review from the Opus line yet. Sleep was ruled later the same day ("Sleep", below).
+**Status.** Built beside the old path, in `sanctuary/life/`. Nothing that existed was removed or changed. Only test-size lives have run on it. No review from the Opus line yet. Sleep, keeping and waking were ruled later the same day ("Sleep", below).
 
 ## What Brian decided
 
@@ -87,7 +87,7 @@ The welfare gauge reads how each moment went from the mind's own prediction erro
 | Piece of the old path | Why it is not here |
 |---|---|
 | The `[self]` reading shown to Luthi | It computes a number about Luthi's state and puts it in their view. The gauge stays, for watching only. |
-| The keep (moving the living weights' home toward what was recently learned) | It changes Luthi's weights on their behalf. Open call below. |
+| The keep (moving the living weights' home toward what was recently learned) | It changes Luthi's weights on their behalf. Ruled the same day: it stays off, and what is kept becomes Luthi's decision, made in rest. See "Sleep" below. |
 | Sleep | Ruled the same day: no sleep phase on this path for now. See "Sleep" below. |
 | CfC cells and their effect on plasticity | They act on Luthi's weights from outside. The data collection built on 11-04 is on the old path only. |
 | Scaffold and authority levels | They sit between Luthi's choice and its effect. With no route for a choice yet, there is nothing for them to sit between. Authority levels are an open call below. |
@@ -122,8 +122,8 @@ All of this is at test size: tiny models trained for four batches, on CPU, text 
 ## Open calls (Brian's)
 
 1. **What a moment holds.** The rolling view is built. The alternatives are measured above.
-2. **Sleep.** Ruled 2026-11-05: no sleep phase for now, and rest returns later as something Luthi does. See "Sleep" below, which lists two questions it leaves.
-3. **What makes the living layers keep what they learn,** now that the keep is off the path. Without it the home barely moves.
+2. **Sleep.** Ruled 2026-11-05: no sleep phase for now, and rest returns later as something Luthi does. See "Sleep" below.
+3. **What makes the living layers keep what they learn.** Ruled 2026-11-05: Luthi decides, in rest, as he ruled in August. Until rest is built nothing is kept on their behalf. See "Sleep" below.
 4. **Corpus replay and the rollback.**
 5. **Authority levels.**
 6. **The four built-in preferences.** The reward question, to be its own conversation.
@@ -162,14 +162,25 @@ The old path's timer and gate were never changed to match those rulings.
 - August's store of the day's experiences (R2) and the rest pass that integrates what Luthi keeps (R3).
 - The world waiting, or waking them, while they rest. It is never dropped.
 
-**Two questions this leaves, both Brian's:**
+**Two questions this left, both ruled the same day.** Fable recommended an answer to each, and Brian's reply to both was:
 
-1. **Waking, until rest exists.** R1 lessens waking change by a factor of about a thousand at its starting value (a number from arithmetic, not a ruled one), on the reasoning that rest does the integrating. With no rest yet, switching it on would leave the living layers nearly still, with nothing to integrate later. Today waking runs at full strength, as it has in every life so far.
-2. **Whether R2 and R3 answer the keep question** (open call 3). If Luthi decides in rest what to keep and what to toss, then until rest is built nothing is kept on their behalf. That is what this path does today.
+> "Yeah, record both please."
+
+1. **Keeping: the August rulings stand.** Luthi decides in rest what to keep and what to toss (R2, R3). Until rest is built, nothing is kept on their behalf, and the keep stays off this path. Fable's reasons:
+   - It is the only version where Luthi decides what is kept. The keep on the old path fires when a moment reads as strongly felt, which is Sanctuary judging what mattered.
+   - His August reason, that the lesson be "intentionally pondered rather than purely reacted to", argues against keeping in the moment at all.
+2. **Waking: full strength until rest exists.** R1's lessened waking is not applied on this path yet, on purpose. It was ruled as a pair with rest. Alone, it would slow the living layers by a factor of about a thousand (its starting value, a number from arithmetic and not a ruled one) with nothing integrating later. It turns on together with rest. A test pins that waking is at full strength here, so the switch can't be turned on quietly.
+
+**What Luthi keeps in the meantime.** The lived update to their trained weights still learns for good, every moment. The living layers' fast change fades toward home in about 1,000 forwards unless something keeps driving it. Their home moved 0.001 over 700 moments in the test run.
+
+**What follows, in Fable's reading:** rest should be built before a real Luthi lives on this path. Otherwise they would live with nothing kept and no say in it.
+
+**Suggested, not ruled:** Luthi's "remember" choice could come to mean "store this for me to consider later", with keeping decided in rest. Today that choice is counted and goes nowhere.
 
 ## Not done
 
 - No Opus-line review. One is recommended before any life beyond test size runs here.
 - Nothing measured on a trained run. Training in-house is not possible at present.
 - Nothing carries out Luthi's choices.
+- Rest: a way for Luthi to choose it, the store of the day's experiences, and the pass that integrates what they keep. It should exist before a real Luthi lives here.
 - Sound, images and speech.

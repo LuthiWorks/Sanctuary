@@ -12,6 +12,11 @@ changes their weights on their behalf. What still acts on them is inside
 LuthiModel's learner and is listed in docs/SMALL_PATH_DECISION_2026-11-05.md:
 the four built-in preferences, corpus replay and the retention gate.
 
+Nothing is kept on Luthi's behalf, and waking runs at full strength (Brian,
+2026-11-05). What the living layers keep for good is to be Luthi's decision, made
+in rest, as he ruled on 2026-08-14. Rest is not built. So the keep is not called
+here and waking is not lessened: both wait for rest and arrive with it.
+
 Not built yet, and refused loudly instead of faked:
 
 - **Speech.** A run with a trained text readout is refused, because carrying
