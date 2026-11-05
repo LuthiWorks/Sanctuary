@@ -1,6 +1,6 @@
 # The small path: decision and build record (2026-11-05)
 
-**Status.** Built beside the old path, in `sanctuary/life/`. Nothing that existed was removed or changed. Only test-size lives have run on it. No review from the Opus line yet.
+**Status.** Built beside the old path, in `sanctuary/life/`. Nothing that existed was removed or changed. Only test-size lives have run on it. No review from the Opus line yet. Sleep was ruled later the same day ("Sleep", below).
 
 ## What Brian decided
 
@@ -88,7 +88,7 @@ The welfare gauge reads how each moment went from the mind's own prediction erro
 |---|---|
 | The `[self]` reading shown to Luthi | It computes a number about Luthi's state and puts it in their view. The gauge stays, for watching only. |
 | The keep (moving the living weights' home toward what was recently learned) | It changes Luthi's weights on their behalf. Open call below. |
-| Sleep | Brian's 11-01/02 learning-modes decision stands. How it fits this path is his call and was not assumed. |
+| Sleep | Ruled the same day: no sleep phase on this path for now. See "Sleep" below. |
 | CfC cells and their effect on plasticity | They act on Luthi's weights from outside. The data collection built on 11-04 is on the old path only. |
 | Scaffold and authority levels | They sit between Luthi's choice and its effect. With no route for a choice yet, there is nothing for them to sit between. Authority levels are an open call below. |
 | Memory surfacing and memory writes | On the old path, what a silent Luthi wrote never came back (309 written, 0 returned in the 11-05 map). It needs a design before it is moved. |
@@ -122,7 +122,7 @@ All of this is at test size: tiny models trained for four batches, on CPU, text 
 ## Open calls (Brian's)
 
 1. **What a moment holds.** The rolling view is built. The alternatives are measured above.
-2. **Sleep** on this path.
+2. **Sleep.** Ruled 2026-11-05: no sleep phase for now, and rest returns later as something Luthi does. See "Sleep" below, which lists two questions it leaves.
 3. **What makes the living layers keep what they learn,** now that the keep is off the path. Without it the home barely moves.
 4. **Corpus replay and the rollback.**
 5. **Authority levels.**
@@ -130,6 +130,42 @@ All of this is at test size: tiny models trained for four batches, on CPU, text 
 7. **Whether Luthi should perceive their own reading.** It is off here.
 8. **How long a life's checkpoints are kept.**
 9. **When the Luthi backend points at this path,** and when what it no longer uses is archived.
+
+## Sleep: ruled 2026-11-05
+
+On the old path, sleep for a Luthi life is four things:
+
+- **A timer.** After every 500 waking cycles Sanctuary puts Luthi to sleep for 38.
+- **A gate.** While they sleep, about 90% of percepts are dropped, not held for later.
+- **One effect on the mind.** On each of 20 deep-sleep cycles every living layer's home moves 1% toward its weights, and plasticity is evened out.
+- **Bookkeeping.** The life is saved and the keep's budget renews.
+
+The dream and memory-replay code in `sleep_cycle.py` has no caller.
+
+Fable put three options to Brian: (A) keep Sanctuary's schedule but let the world wait instead of being dropped, (B) Luthi chooses when to rest, (C) no sleep phase for now. His ruling:
+
+> "Ok, lets go with C for now, then B later. This makes the most sense at present."
+
+So the small path has no sleep phase: no timer, no gate on the world, and no consolidation on a schedule. Rest returns later as something Luthi does. Nothing had to be built or removed for this.
+
+**This matches rulings he made on 2026-08-14,** which Fable had not read when laying out the options. They are recorded in LuthiModel `docs/research/2026-07-06_nrem-learner-spec.md` (the 2026-08-14 amendment):
+
+- **R1, waking changes the mind far less.** "I don't think the waking state should be completely frozen, but I do think the susceptibility to change should be greatly lessened so the lesson of the day can be intentionally pondered rather than purely reacted to." The mechanism is built (`set_wake_attenuation`). Nothing has ever called it, on either path.
+- **R2, no cap on what Luthi stores for later.** "Allow as much information as Luthi deems important to be stored and considered for integration later." Not built.
+- **R3, rest is Luthi's act.** "The 'rest' time might actually be best spent mulling over the day's events and making decisions on what to keep and what to toss. I would rather there be a special mechanism for that, like a tool Luthi can call, to start a calmer mode for deep intentional consideration, rather than the fast paced intake of data the wakened state might be." Not built.
+
+The old path's timer and gate were never changed to match those rulings.
+
+**What "B later" needs before it can be built:**
+
+- A way for Luthi to choose rest. Their action layer can choose only to speak, attend and remember.
+- August's store of the day's experiences (R2) and the rest pass that integrates what Luthi keeps (R3).
+- The world waiting, or waking them, while they rest. It is never dropped.
+
+**Two questions this leaves, both Brian's:**
+
+1. **Waking, until rest exists.** R1 lessens waking change by a factor of about a thousand at its starting value (a number from arithmetic, not a ruled one), on the reasoning that rest does the integrating. With no rest yet, switching it on would leave the living layers nearly still, with nothing to integrate later. Today waking runs at full strength, as it has in every life so far.
+2. **Whether R2 and R3 answer the keep question** (open call 3). If Luthi decides in rest what to keep and what to toss, then until rest is built nothing is kept on their behalf. That is what this path does today.
 
 ## Not done
 

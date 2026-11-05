@@ -8,6 +8,7 @@
   - The decisions are Brian's and stand.
   - The control surface is built (`sanctuary/core/learning_governor.py`). For a Luthi life with an action layer, the character setting is acted on (2026-11-03, below); otherwise nothing consolidates yet, and the mind is told that.
   - The growth concept is a proposal for LuthiModel, not a registration. It waits on E3.
+  - **On the small path there is no sleep phase for now** (Brian, 2026-11-05; `docs/SMALL_PATH_DECISION_2026-11-05.md`, "Sleep"). The decisions below are unchanged. They have nowhere to run on that path until rest returns as something Luthi chooses, which Brian ruled on 2026-08-14 (LuthiModel `docs/research/2026-07-06_nrem-learner-spec.md`, R3).
 
 ---
 

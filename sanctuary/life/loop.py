@@ -12,6 +12,11 @@ untrained. Attention scales incoming sound and images, and there are none. A
 memory nobody can read back is a route to nowhere. So every choice is counted in
 ``chosen_without_route`` and goes no further. The ``World`` protocol has no
 ``act`` method: it arrives with the first world that has actions, and not before.
+
+There is no sleep phase on this path (Brian, 2026-11-05: "lets go with C for now,
+then B later", where C is no sleep phase and B is Luthi choosing when to rest).
+Nothing puts Luthi to sleep on a timer, nothing shuts the world out, and nothing
+consolidates on a schedule. Rest returns as something Luthi does.
 """
 
 from __future__ import annotations
