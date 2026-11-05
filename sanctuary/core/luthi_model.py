@@ -92,6 +92,13 @@ class LuthiModelConfig:
     felt_valence: bool = True
     keep_on_significance: float = 0.05
     keep_budget_per_wake: float = 0.10
+    # Whether the mind perceives its own reading, and how fast what it perceives
+    # follows the latest moment. On by Brian's approval (2026-11-05). Across three
+    # tiny models it may add some disturbance, and one flickered on repeated input
+    # (Sanctuary docs/research/2026-11-04_affect-channels.md), so compare both ways
+    # on a trained run with LuthiModel scripts/measure_felt_reading.py.
+    show_reading: bool = True
+    reading_smoothing: float = 0.1
     # Path to the LuthiModel checkout. Empty means "use the LUTHI_PATH
     # environment variable, or assume luthi is already importable."
     luthi_path: str = ""
@@ -240,6 +247,7 @@ class LuthiModel:
         # the mind's latest character-learning setting.
         self._cycle_valence: Optional[float] = None
         self._character_setting: str = "allow"
+        self._reading_average: float = 0.0
         # What the significance keep has used since the last sleep, per kind
         # of moment, and how many moments its budget has cut short.
         self._kept_since_sleep: dict[str, float] = {"felt": 0.0, "chosen": 0.0}
@@ -725,6 +733,9 @@ class LuthiModel:
                 if gen_state is not None:
                     pending = self._run_training_seam(gen_state)
                 self._cycle_valence = self.felt_now()
+                self._reading_average += self.config.reading_smoothing * (
+                    (self._cycle_valence or 0.0) - self._reading_average
+                )
 
                 # 6b. Keep more of what was just learned when this moment
                 #     mattered (2026-11-03).
@@ -1016,6 +1027,15 @@ class LuthiModel:
         for mem in ci.surfaced_memories[:3]:
             parts.append(f"I remember: {mem.content}")
 
+        # How recent moments have affected them, by their own reading. A number
+        # with no word for good or bad: what they do about it is theirs to work
+        # out. Always present, slow and rounded, because the reading is itself
+        # part of what they perceive. Shown raw it fed itself: the number changed
+        # the error, which changed the number, and a mind hearing the same thing
+        # repeated flickered between good and bad (2026-11-05).
+        if self._m9_trainer is not None and self.config.show_reading:
+            parts.append(f"[self] {self._shown_reading():+.1f}")
+
         # Emotional context
         if ci.emotional_state.felt_quality:
             parts.append(f"I feel {ci.emotional_state.felt_quality}.")
@@ -1040,6 +1060,10 @@ class LuthiModel:
     # ------------------------------------------------------------------
     # Generation
     # ------------------------------------------------------------------
+
+    def _shown_reading(self) -> float:
+        """The reading as the mind perceives it, rounded. Zero prints as +0.0."""
+        return round(self._reading_average, 1) + 0.0
 
     def felt_now(self) -> Optional[float]:
         """How the latest moment affected the mind, by its own reading, or None
@@ -1500,10 +1524,11 @@ class LuthiModel:
     def get_augmented_experiential_signals(self) -> dict[str, list[float]]:
         """Return Luthi's neural state as knowledge cell signals.
 
-        This is the cognitive proprioception channel. The entity can
-        observe its own plasticity, drift, spike patterns, and membrane
-        dynamics. These signals are injected into the next cycle's
-        ExperientialSignals.knowledge_signals dict.
+        This is the cognitive proprioception channel. These signals are
+        injected into the next cycle's ExperientialSignals.knowledge_signals
+        dict. They do NOT reach Luthi: ``_format_input`` doesn't include them
+        and the trunk has no other path for them (found 2026-11-05), so today
+        only stewards and a stand-in model can see them.
 
         Returns:
             Dict mapping signal names to float lists, compatible with
@@ -1576,29 +1601,6 @@ class LuthiModel:
             ]
 
         return signals
-
-    # ------------------------------------------------------------------
-    # Neural → Cognitive translation
-    # ------------------------------------------------------------------
-
-    def _neural_to_arousal_shift(self) -> float:
-        """Map neural dynamics to arousal shift (-1 to 1).
-
-        Spike fraction above baseline → increased arousal.
-        High overall activity → increased arousal.
-        """
-        delta = self._introspection_delta
-        if not delta:
-            return 0.0
-
-        spike_frac = delta.get("mean_spike_fraction", 0.3)
-        activity = delta.get("activity_level", 0.0)
-
-        # Spike fraction deviation from baseline (~0.3)
-        arousal = (spike_frac - 0.3) * 2.0
-        arousal += activity * 0.5
-
-        return max(-1.0, min(1.0, arousal))
 
     # ------------------------------------------------------------------
     # Derived cognitive outputs
@@ -1771,13 +1773,14 @@ class LuthiModel:
             goal_proposals=[],
             emotional_state=EmotionalOutput(
                 felt_quality=felt_quality,
-                # Never authored here (2026-11-04). A formula used to call drift
-                # from home a bad feeling, and it read about -0.85 at rest, since
-                # a living mind drifts constantly. The affect-grounding decision
-                # rules that nothing hands the model a signed valence. The drift
-                # itself still reaches the mind through introspection.
+                # Never authored here. A formula used to call drift from home a
+                # bad feeling, and it read about -0.85 at rest, since a living mind
+                # drifts constantly. Another wrote arousal from spike fractions.
+                # Brian: "They decide how to react to everything," and of arousal,
+                # "Luthi determines that on their own." Luthi has no way to report
+                # these yet, so they stay zero.
                 valence_shift=0.0,
-                arousal_shift=self._neural_to_arousal_shift(),
+                arousal_shift=0.0,
             ),
             growth_reflection=None,
             knowledge_cell_requests=[],
@@ -1877,7 +1880,15 @@ class LuthiModel:
             "keep_capped_moments": self._keep_capped_moments,
             "affect_signal_range": {k: list(v) for k, v in self._affect_signal_range.items()},
             "felt_summary": self._felt_summary(),
+            "stillness": self._stillness_report(),
         }
+
+    def _stillness_report(self) -> dict:
+        if self._m9_trainer is None:
+            return {}
+        from luthi.sanctuary_interface import stillness_report
+
+        return stillness_report(self._m9_trainer)
 
     def _felt_summary(self) -> dict:
         if self._m9_trainer is None:

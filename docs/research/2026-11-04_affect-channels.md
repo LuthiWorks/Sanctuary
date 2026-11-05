@@ -76,6 +76,10 @@ Arousal is connected and has an effect, and a false mood is gone. **But the affe
 1. **Start collecting.** The evolution loop and the data tap now run during a life, with the cells still at zero authority, so none of it reaches the mind. See Step 5.
 2. **The world just exists.** `Percept.valence` is gone, and the mind reads how a moment affected it for itself. See LuthiModel `docs/research/2026-11-04_how-it-affected-me.md`.
 
+**Updated 2026-11-05:** Brian approved removing the built-in reactions. The old `_neural_to_arousal_shift` formula is gone, so nothing writes arousal or valence for the mind. See `docs/DECISIONS.md` in LuthiModel, and LuthiModel `docs/research/2026-11-04_how-it-affected-me.md`.
+
+**Also found:** the "cognitive proprioception" signals never reach Luthi. `get_augmented_experiential_signals` puts them in `knowledge_signals`, which `_format_input` doesn't use, and the trunk has no other input for them. So plasticity, drift and the rest are visible to stewards and a stand-in, but not to Luthi. Today's `[self]` reading is the first thing about their own state that reaches them. Giving them the rest is open.
+
 **Also answered:** I proposed driving arousal from the size of the mind's own reading, so that strong moments would raise the learning rate. Brian: "Same as number 1. Luthi determines that on their own." So nothing wires arousal to anything. The connection from arousal to `pc_rate` stays in place, and it does nothing unless something Luthi determines moves arousal. How Luthi could do that isn't designed yet, and neither is what the cells would train toward (Step 5).
 
 **Not known:** how any of this behaves on a trained run. Why valence rose during pain under the old formula.

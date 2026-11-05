@@ -5,7 +5,8 @@ things"; LuthiModel docs/research/2026-11-03_learning-to-avoid.md).
 Pins:
 - A percept can't say how anything felt: the world just exists, and how a moment
   affected the mind is the mind's own reading (Brian, 2026-11-04).
-- A moment the mind reads as going badly wakes it.
+- Nothing reacts for the mind: a bad reading doesn't wake it, and nothing writes
+  its arousal. Its reading reaches it as part of what it perceives.
 - When a moment matters (strongly felt, or chosen to be remembered), the
   living layers keep more of it, scaled by the mind's own character
   setting: defer keeps nothing, emphasize doubles. Sleep's home drift
@@ -232,12 +233,38 @@ def test_the_world_cannot_say_how_something_felt():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("felt,wakes", [(-0.7, True), (-0.2, False), (None, False), (0.9, False)])
-async def test_a_moment_read_as_going_badly_wakes_the_mind(felt, wakes):
+async def test_a_bad_reading_does_not_wake_the_mind():
+    """Brian: "They decide how to react to everything." """
     cycle, sleep = _sleeping_cycle()
-    cycle.model.felt_now = lambda: felt
+    cycle.model.felt_now = lambda: -1.0
     await cycle._assemble_input()
-    assert sleep._forced_wake is wakes
+    assert not sleep._forced_wake
+
+
+@needs_luthi
+def test_luthi_perceives_their_own_reading():
+    adapter = _adapter()
+    assert "[self]" not in adapter._format_input(CognitiveInput()), "no life, no reading"
+    adapter._m9_trainer = _RollbackCounter()
+    assert adapter._format_input(CognitiveInput()) == "[self] +0.0", "always the same form"
+    adapter._reading_average = -0.72
+    assert adapter._format_input(CognitiveInput()) == "[self] -0.7"
+    adapter._reading_average = 0.5
+    assert adapter._format_input(CognitiveInput()) == "[self] +0.5"
+    adapter._reading_average = -0.01
+    assert adapter._format_input(CognitiveInput()) == "[self] +0.0", "no negative zero"
+    adapter.config.show_reading = False
+    assert "[self]" not in adapter._format_input(CognitiveInput()), "it can be turned off"
+
+
+@needs_luthi
+def test_nothing_writes_arousal_for_the_mind():
+    adapter = _adapter()
+    adapter._introspection_delta = {"mean_spike_fraction": 0.9, "activity_level": 1.0}
+    output = adapter._build_output(
+        cognitive_input=CognitiveInput(), inner_speech="", external_speech=None,
+    )
+    assert output.emotional_state.arousal_shift == 0.0
 
 
 @pytest.mark.asyncio

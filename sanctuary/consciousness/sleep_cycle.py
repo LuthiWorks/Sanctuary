@@ -81,10 +81,6 @@ class SleepConfig:
     max_dream_fragments: int = 50
     sensory_gate_drowsy: float = 0.5  # Reduce percept processing by 50%
     sensory_gate_sleep: float = 0.1  # Reduce by 90% during deep sleep
-    # A moment the mind reads at or below this wakes it (placeholder: what
-    # affects it badly should not be slept through). The reading is the mind's
-    # own, from how far its prediction departed from its recent normal.
-    wake_on_unpleasant: float = -0.5
 
 
 class SleepCycleManager:

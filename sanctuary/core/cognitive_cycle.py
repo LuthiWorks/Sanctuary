@@ -645,9 +645,8 @@ class CognitiveCycle:
         percepts = await self.sensorium.drain_percepts()
 
         # Sleep sensory gating — reduce percept throughput during sleep.
-        # User input still forces a wake, and so does a moment the mind itself
-        # read as going badly. Notices about its own learning are never gated
-        # out, since they are delivered only once.
+        # User input still forces a wake. Notices about the mind's own learning
+        # are never gated out, since they are delivered only once.
         if self.sleep is not None and self.sleep.is_sleeping:
             gate = self.sleep.get_sensory_gate()
             if gate < 1.0:
@@ -656,14 +655,9 @@ class CognitiveCycle:
                     p for p in percepts
                     if p.modality == "language" and p.source and "user" in p.source
                 ]
-                felt = self.model.felt_now() if hasattr(self.model, "felt_now") else None
-                hurt = felt is not None and felt <= self.sleep.config.wake_on_unpleasant
                 if urgent:
                     self.sleep.wake()
                     logger.info("User input during sleep — waking")
-                elif hurt:
-                    self.sleep.wake()
-                    logger.info("A moment read as going badly during sleep — waking")
                 else:
                     # Gate: keep every learning notice, then a fraction of the
                     # rest proportional to the gate, in arrival order.
