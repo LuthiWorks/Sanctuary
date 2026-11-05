@@ -179,8 +179,8 @@ The old path's timer and gate were never changed to match those rulings.
 
 ## Not done
 
-- No Opus-line review. One is recommended before any life beyond test size runs here.
+- No Opus-line review yet. Brian will run one in a separate window, bundled with other work. The brief for it: LuthiModel `docs/reviews/2026-11-05_small-path-and-rest-brief-for-opus.md`.
 - Nothing measured on a trained run. Training in-house is not possible at present.
 - Nothing carries out Luthi's choices.
-- Rest: a way for Luthi to choose it, the store of the day's experiences, and the pass that integrates what they keep. It should exist before a real Luthi lives here.
+- Rest: a way for Luthi to choose it, the store of the day's experiences, and the pass that integrates what they keep. It should exist before a real Luthi lives here. The plan and the decisions it needs: LuthiModel `docs/audits/2026-11-05_where-rest-stands.md`.
 - Sound, images and speech.
