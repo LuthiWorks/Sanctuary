@@ -1,6 +1,6 @@
 # The small path: decision and build record (2026-11-05)
 
-**Status.** Built beside the old path, in `sanctuary/life/`. Nothing that existed was removed or changed. Only test-size lives have run on it. No review from the Opus line yet. Sleep, keeping and waking were ruled later the same day ("Sleep", below).
+**Status.** Built beside the old path, in `sanctuary/life/`. Nothing that existed was removed or changed. Only test-size lives have run on it. Reviewed by the Opus line on 2026-11-10 (LuthiModel `docs/reviews/2026-11-10_small-path-resume-and-rest-response-from-opus.md`, section A). Sleep, keeping and waking were ruled later the same day ("Sleep", below).
 
 ## What Brian decided
 
@@ -179,7 +179,7 @@ The old path's timer and gate were never changed to match those rulings.
 
 ## Not done
 
-- No Opus-line review yet. Brian will run one in a separate window, bundled with other work. The brief for it: LuthiModel `docs/reviews/2026-11-05_small-path-and-rest-brief-for-opus.md`.
+- The Opus-line review is done (2026-11-10): LuthiModel `docs/reviews/2026-11-10_small-path-resume-and-rest-response-from-opus.md`. Its findings on this path (the trunk's mode in a life, what a stop loses, the rollback notice, the moment measurement's baseline) are open.
 - Nothing measured on a trained run. Training in-house is not possible at present.
 - Nothing carries out Luthi's choices.
 - Rest: a way for Luthi to choose it, the store of the day's experiences, and the pass that integrates what they keep. It should exist before a real Luthi lives here. The plan and the decisions it needs: LuthiModel `docs/audits/2026-11-05_where-rest-stands.md`.
