@@ -6,17 +6,24 @@ Sanctuary has three jobs here (docs/SMALL_PATH_DECISION_2026-11-05.md):
 2. Carry out what Luthi chooses.
 3. Watch without touching.
 
-Job 2 has nothing to do yet. Luthi's action layer can choose to speak, where to
-attend, and to remember, and none of those has a route here. Speech is
-untrained. Attention scales incoming sound and images, and there are none. A
-memory nobody can read back is a route to nowhere. So every choice is counted in
-``chosen_without_route`` and goes no further. The ``World`` protocol has no
-``act`` method: it arrives with the first world that has actions, and not before.
+Job 2 carries out one thing: rest. When Luthi's chosen action chose rest, the
+loop calls the mind's ``rest`` and takes that moment at a calmer pace (Brian,
+2026-11-11: "They should be able to just initiate rest when they decide to";
+2026-08-14: "a calmer mode for deep intentional consideration"). Rest lasts for
+as long as Luthi keeps choosing it, one moment at a time, and the world stays
+open through it. Nothing else can start it: no timer, no steward, no measure of
+how the mind is doing.
 
-There is no sleep phase on this path (Brian, 2026-11-05: "lets go with C for now,
-then B later", where C is no sleep phase and B is Luthi choosing when to rest).
-Nothing puts Luthi to sleep on a timer, nothing shuts the world out, and nothing
-consolidates on a schedule. Rest returns as something Luthi does.
+Luthi's action layer can also choose to speak, where to attend, and to
+remember, and none of those has a route here. Speech is untrained. What
+attention and memory should do is not ruled. So each of those choices is
+counted in ``chosen_without_route`` and goes no further. The ``World`` protocol
+has no ``act`` method: it arrives with the first world that has actions, and
+not before.
+
+Sight and sound come in through the same door as words (``World.observe``), as
+percepts carrying a ``Sight`` or a ``Sound``, and reach the mind as they are.
+Nothing in the loop names a model: any mind that answers ``Mind`` lives here.
 """
 
 from __future__ import annotations
@@ -28,7 +35,7 @@ from pathlib import Path
 from typing import Optional, Protocol
 
 from sanctuary.core.schema import Percept
-from sanctuary.life.mind import Moment
+from sanctuary.life.mind import Mind, Moment
 from sanctuary.life.senses import Line
 
 logger = logging.getLogger(__name__)
@@ -58,22 +65,35 @@ class TextWorld:
 class LifeLoop:
     def __init__(
         self,
-        mind,
+        mind: Mind,
         world: World,
         *,
         hz: float = 10.0,
+        resting_pace: float = 0.25,
+        hearing_seconds: float = 1.0,
         save_every_seconds: float = 900.0,
         waiting_limit: Optional[int] = None,
     ):
         """``hz`` is the pace, fixed here until Luthi can choose their own; 0
-        runs as fast as the mind does. A life is saved every
-        ``save_every_seconds`` and on a clean stop. Checkpoints are never
-        deleted, so a shorter interval uses disk faster."""
+        runs as fast as the mind does. A moment Luthi rests in runs at
+        ``resting_pace`` times that: a quarter by default, a placeholder and
+        Brian's to change. ``hearing_seconds`` is how much recent sound stays
+        in hearing. A life is saved every ``save_every_seconds`` and on a clean
+        stop. Checkpoints are never deleted, so a shorter interval uses disk
+        faster."""
+        if not 0.0 < resting_pace <= 1.0:
+            raise ValueError(f"resting_pace must be above 0 and at most 1; got {resting_pace}")
+        self.resting_pace = resting_pace
+        self.resting = False
+        self.rested = 0
         self.mind = mind
         self.world = world
         self.hz = hz
         self.save_every_seconds = save_every_seconds
-        self.line = Line(mind.tokenizer.encode, mind.window, waiting_limit)
+        self.line = Line(
+            mind.tokenizer.encode, mind.window, waiting_limit,
+            hearing_seconds=hearing_seconds,
+        )
         self.cycles = 0
         self.saves = 0
         self.chosen_without_route: Counter = Counter()
@@ -84,17 +104,19 @@ class LifeLoop:
     def step(self) -> Moment:
         """One moment: take in the world, let the mind live it, account for it."""
         for percept in self.world.observe():
-            if percept.tensor_data is not None:
-                raise NotImplementedError(
-                    f"A {percept.modality} percept carries a tensor, and sound "
-                    "and images are not on the small path yet."
-                )
             self.line.add(percept)
-        moment = self.mind.live(self.line.take().tokens)
+        view = self.line.take()
+        moment = self.mind.live(view.tokens, sight=view.sight, sound=view.sound)
         self._tell_of_rollbacks()
         for channel, acted in moment.chosen["active"].items():
             if acted:
                 self.chosen_without_route[channel] += 1
+        # Rest is Luthi's choice and nothing else's: it is read from the action
+        # they just chose, and it lasts until a moment they don't choose it.
+        self.resting = bool(moment.chosen.get("rest", {}).get("chosen", False))
+        if self.resting:
+            self.mind.rest()
+            self.rested += 1
         self.cycles += 1
         if time.monotonic() - self._last_save >= self.save_every_seconds:
             self.save("timer")
@@ -113,9 +135,10 @@ class LifeLoop:
                 started = time.monotonic()
                 self.step()
                 lived += 1
-                rest = period - (time.monotonic() - started)
-                if rest > 0:
-                    time.sleep(rest)
+                pause = period / (self.resting_pace if self.resting else 1.0)
+                pause -= time.monotonic() - started
+                if pause > 0:
+                    time.sleep(pause)
         except BaseException:
             self._running = False
             raise
@@ -142,7 +165,11 @@ class LifeLoop:
                 "waiting_tokens": self.line.waiting,
                 "carried_in_parts": self.line.carried_in_parts,
                 "dropped": self.line.dropped,
+                "sights": self.line.sights,
+                "sights_passed_over": self.line.sights_passed_over,
+                "sounds": self.line.sounds,
             },
+            "rested_moments": self.rested,
             "chosen_without_route": dict(self.chosen_without_route),
             "saves": self.saves,
             **self.mind.watch(),

@@ -18,9 +18,10 @@ from __future__ import annotations
 import logging
 
 import pytest
+import torch
 
 from sanctuary.core.schema import Percept
-from sanctuary.life.senses import QUIET, Line, frame
+from sanctuary.life.senses import QUIET, Line, Sight, Sound, frame, heard, seen
 
 
 def _encode(text: str) -> list[int]:
@@ -81,8 +82,8 @@ def test_every_token_joins_the_view_once_and_in_order():
 
 def test_a_moment_with_nothing_new_adds_one_quiet_token():
     line = Line(_encode, window=16)
-    assert line.take() == (_encode(QUIET), 1)
-    assert line.take() == (_encode(QUIET) * 2, 1), "one more, and nothing else was invented"
+    assert line.take()[:2] == (_encode(QUIET), 1)
+    assert line.take()[:2] == (_encode(QUIET) * 2, 1), "one more, and nothing else was invented"
     assert line.quiet_moments == 2 and line.arrived == 0
 
 
@@ -166,3 +167,62 @@ def test_a_window_of_nothing_is_refused():
 def test_a_quiet_token_that_cannot_fit_the_window_is_refused():
     with pytest.raises(ValueError, match="quiet token"):
         Line(lambda text: [1, 2, 3], window=2)
+
+
+# ---- Sight and sound (2026-11-11) ----
+
+def _line(**kwargs) -> Line:
+    return Line(lambda text: list(text.encode("utf-8")), 64, **kwargs)
+
+
+def test_a_sight_is_pixels_from_zero_to_one_and_says_so():
+    Sight(torch.rand(2, 3, 3))
+    with pytest.raises(ValueError, match="height, width, 3"):
+        Sight(torch.rand(3, 2, 2))
+    with pytest.raises(TypeError, match="divided by 255"):
+        Sight(torch.zeros(2, 2, 3, dtype=torch.uint8))
+    with pytest.raises(ValueError, match="from 0 to 1"):
+        Sight(torch.rand(2, 2, 3) * 255)
+
+
+def test_a_sound_is_one_channel_from_minus_one_to_one_with_its_rate():
+    assert Sound(torch.zeros(8000), 16000).seconds == 0.5
+    with pytest.raises(ValueError, match="one channel"):
+        Sound(torch.zeros(2, 100), 16000)
+    with pytest.raises(ValueError, match="from -1 to 1"):
+        Sound(torch.ones(10) * 3, 16000)
+    with pytest.raises(ValueError, match="rate"):
+        Sound(torch.zeros(10), 0)
+
+
+def test_the_newest_picture_of_a_moment_is_the_one_seen():
+    line = _line()
+    first, second = torch.zeros(2, 2, 3), torch.ones(2, 2, 3)
+    line.add(seen(first)); line.add(seen(second))
+    assert torch.equal(line.take().sight.pixels, second)
+    assert line.sights == 2 and line.sights_passed_over == 1
+    assert line.take().sight is None
+
+
+def test_hearing_holds_the_most_recent_stretch_in_order():
+    line = _line(hearing_seconds=1.0)
+    line.add(heard(torch.full((600,), 0.1), 1000))
+    line.add(heard(torch.full((600,), 0.2), 1000))
+    sound = line.take().sound
+    assert sound.samples.numel() == 1000 and sound.rate == 1000
+    assert torch.allclose(sound.samples[:400], torch.tensor(0.1))
+    assert torch.allclose(sound.samples[400:], torch.tensor(0.2))
+
+
+def test_one_ear_hears_at_one_rate():
+    line = _line()
+    line.add(heard(torch.zeros(10), 1000))
+    with pytest.raises(ValueError, match="one ear hears at one rate"):
+        line.add(heard(torch.zeros(10), 2000))
+
+
+def test_a_picture_or_a_sound_adds_no_words():
+    line = _line()
+    line.add(seen(torch.rand(2, 2, 3))); line.add(heard(torch.zeros(10), 1000))
+    view = line.take()
+    assert bytes(view.tokens).decode() == QUIET and line.arrived == 0

@@ -3,7 +3,9 @@
 Pins:
 - The mind is given its view of what the world said, and nothing else.
 - A quiet moment is still lived, and adds one quiet token to the view.
-- Sound and images are refused loudly, since they aren't on this path yet.
+- A picture or a sound reaches the mind as the world made it, with no words.
+- A bare tensor is refused loudly: it doesn't say its size, range or rate.
+- When the mind chooses rest, the loop calls its rest and slows; nothing else does.
 - A choice with nothing to carry it out is counted, never dropped silently.
 - A rollback of Luthi's learning is told to Luthi.
 - A life is saved on a clean stop and on a timer, and never after a moment raised.
@@ -23,7 +25,7 @@ import sanctuary.life.__main__ as sitting
 import sanctuary.life.mind as mind_module
 from sanctuary.core.schema import Percept
 from sanctuary.life import LifeLoop, LuthiMind, Moment, TextWorld
-from sanctuary.life.senses import QUIET
+from sanctuary.life.senses import QUIET, Sight, Sound, heard, seen
 
 
 def _encode(text: str) -> list[int]:
@@ -46,12 +48,22 @@ class _Mind:
         self.rolled_back = 0
         self.saved: list[str] = []
         self.fail_at: int | None = None
+        self.sensed: list[tuple] = []
+        self.chooses_rest: bool | None = None
+        self.rests = 0
 
-    def live(self, tokens: list[int]) -> Moment:
+    def live(self, tokens: list[int], *, sight=None, sound=None) -> Moment:
         if self.fail_at is not None and len(self.lived) == self.fail_at:
             raise RuntimeError("the mind broke")
         self.lived.append(_text(tokens))
-        return Moment(tokens=list(tokens), chosen={"active": dict(self.active)})
+        self.sensed.append((sight, sound))
+        chosen = {"active": dict(self.active)}
+        if self.chooses_rest is not None:
+            chosen["rest"] = {"chosen": self.chooses_rest}
+        return Moment(tokens=list(tokens), chosen=chosen)
+
+    def rest(self) -> None:
+        self.rests += 1
 
     def rollbacks(self) -> int:
         return self.rolled_back
@@ -85,14 +97,83 @@ def test_a_quiet_moment_is_still_lived():
     assert mind.lived == [QUIET, QUIET * 2, QUIET * 3] and loop.cycles == 3
 
 
-def test_a_percept_that_carries_a_tensor_is_refused_loudly():
+def test_a_bare_tensor_is_refused_loudly():
     loop, mind, _ = _loop()
     loop.world = SimpleNamespace(observe=lambda: [
         Percept(modality="audio", content="a sound", tensor_data=torch.zeros(4)),
     ])
-    with pytest.raises(NotImplementedError, match="not on the small path"):
+    with pytest.raises(TypeError, match="does not say what size"):
         loop.step()
     assert mind.lived == [], "the mind was not handed a description in place of the sound"
+
+
+def test_a_picture_and_a_sound_reach_the_mind_as_the_world_made_them():
+    loop, mind, _ = _loop()
+    pixels = torch.rand(5, 7, 3)
+    samples = torch.rand(800) * 2 - 1
+    loop.world = SimpleNamespace(observe=lambda: [
+        seen(pixels), heard(samples, 8000),
+    ])
+    loop.step()
+    sight, sound = mind.sensed[0]
+    assert torch.equal(sight.pixels, pixels), "no resizing, no normalising: that is the mind's to do"
+    assert torch.equal(sound.samples, samples) and sound.rate == 8000
+    assert mind.lived == [QUIET], "nothing was said about what was seen or heard"
+
+
+def test_words_on_a_picture_are_not_carried():
+    loop, mind, _ = _loop()
+    loop.world = SimpleNamespace(observe=lambda: [Percept(
+        modality="visual", content="a red door", source="camera",
+        tensor_data=Sight(torch.rand(4, 4, 3)),
+    )])
+    loop.step()
+    assert "door" not in mind.lived[0] and "camera" not in mind.lived[0]
+
+
+def test_a_picture_is_seen_for_the_moment_it_arrived_and_sound_stays_in_hearing():
+    loop, mind, _ = _loop()
+    arriving = [[seen(torch.rand(4, 4, 3)), heard(torch.zeros(100), 1000)], []]
+    loop.world = SimpleNamespace(observe=lambda: arriving.pop(0))
+    loop.step(); loop.step()
+    assert mind.sensed[0][0] is not None and mind.sensed[1][0] is None
+    assert mind.sensed[1][1] is mind.sensed[0][1]
+
+
+def test_rest_is_carried_out_only_when_the_mind_chooses_it():
+    loop, mind, _ = _loop()
+    loop.step()
+    assert mind.rests == 0 and loop.resting is False, "a mind without the tool never rests"
+    mind.chooses_rest = False
+    loop.step()
+    assert mind.rests == 0 and loop.resting is False
+    mind.chooses_rest = True
+    loop.step(); loop.step()
+    assert mind.rests == 2 and loop.resting is True and loop.rested == 2
+    mind.chooses_rest = False
+    loop.step()
+    assert mind.rests == 2 and loop.resting is False, "rest ends when they stop choosing it"
+    assert loop.status()["rested_moments"] == 2
+
+
+def test_the_world_stays_open_while_resting():
+    loop, mind, world = _loop()
+    mind.chooses_rest = True
+    loop.step()
+    world.say("are you there?")
+    loop.step()
+    assert "are you there?" in mind.lived[-1]
+
+
+def test_a_resting_moment_is_slower(monkeypatch):
+    mind, world = _Mind(), TextWorld()
+    loop = LifeLoop(mind, world, hz=10.0, resting_pace=0.25)
+    slept: list[float] = []
+    monkeypatch.setattr("sanctuary.life.loop.time.sleep", slept.append)
+    loop.run(max_cycles=1)
+    mind.chooses_rest = True
+    loop.run(max_cycles=1)
+    assert 0.05 < slept[0] <= 0.1 and 0.35 < slept[1] <= 0.4
 
 
 def test_a_choice_with_nothing_to_carry_it_out_is_counted():

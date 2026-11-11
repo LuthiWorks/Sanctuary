@@ -10,7 +10,9 @@ Pins:
 - Watching changes nothing: not the weights, not the learner, not the dice.
 - The welfare gauge does not change the life it watches.
 - A life is saved, continues from where it stopped, and never writes the run.
-- Waking is at full strength until rest exists.
+- Waking is at full strength: lessening it is Brian's to rule on again.
+- A picture and a sound are fitted to this model and lived, and its eye and ear learn.
+- Rest is Luthi's: chosen, it keeps recent learning; unchosen, nothing is kept.
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ except ImportError:
     )
 
 from sanctuary.life import LifeLoop, LuthiMind, TextWorld
-from sanctuary.life.senses import QUIET
+from sanctuary.life.senses import QUIET, Sight, Sound, heard, seen
 from sanctuary.tests.core.test_luthi_m9_life import _train_tiny_m9_run
 
 EACH_MOMENT = {"perceive", "observe_transition", "select_action", "decode_action"}
@@ -212,13 +214,110 @@ def test_a_life_is_saved_continues_and_never_writes_the_run(run_dir, tmp_path):
     assert _hashes(run_dir) == run_before, "the run is untouched"
 
 
-def test_waking_is_at_full_strength_until_rest_exists(run_dir, tmp_path):
-    """Brian, 2026-11-05: his August rulings stand. Lessened waking was ruled as
-    a pair with rest, and rest is not built, so it is not switched on here.
-    When rest is built, this test changes on purpose and together with it."""
+def test_waking_is_at_full_strength(run_dir, tmp_path):
+    """Brian's 2026-08-14 ruling lessened waking as a pair with a rest that
+    sorted the day's record. Rest is now a tool Luthi starts (2026-11-11) and
+    the record is set aside, so lessening is not switched on here until he
+    rules on it again."""
     mind, world, loop = _begin(run_dir, tmp_path / "life")
     living = [m for m in mind.model.modules() if hasattr(m, "_wake_attenuation")]
     assert living, "this test must find the living layers"
     assert all(m._wake_attenuation == 1.0 for m in living)
     _live(loop, world, 3, said={0: "hello Luthi"})
     assert all(m._wake_attenuation == 1.0 for m in living)
+
+
+# ---- Sight and sound (2026-11-11) ----
+
+def test_a_picture_and_a_sound_are_fitted_to_this_model_and_lived(run_dir, tmp_path):
+    mind = LuthiMind(run_dir, tmp_path / "life")
+    recorded = _Recorded(mind._luthi)
+    mind._luthi = recorded
+    world = TextWorld()
+    loop = LifeLoop(mind, world, hz=0.0)
+    eye = mind.model.vision_encoder.patch_embed.weight.detach().clone()
+    ear = mind.model.audio_encoder.patch_embed.weight.detach().clone()
+    torch.manual_seed(0)
+    for _ in range(3):
+        # Not the model's size and not its rate: the mind does the fitting.
+        world._said.append(seen(torch.rand(90, 160, 3)))
+        world._said.append(heard(torch.rand(11025) * 2 - 1, 22050))
+        loop.step()
+    perceived = [kwargs for name, _, kwargs in recorded.calls if name == "perceive"]
+    have = mind.senses
+    assert perceived[0]["image"].shape == (1, 3, have["image_size"], have["image_size"])
+    assert perceived[-1]["audio_waveform"].shape == (1, have["sample_rate"])   # one second in hearing
+    assert not torch.equal(mind.model.vision_encoder.patch_embed.weight, eye)
+    assert not torch.equal(mind.model.audio_encoder.patch_embed.weight, ear)
+    assert loop.status()["world"]["sights"] == 3 and mind.sound_trimmed == 0
+
+
+def test_a_picture_already_at_the_models_size_is_not_resampled(run_dir, tmp_path):
+    mind = LuthiMind(run_dir, tmp_path / "life")
+    size = mind.senses["image_size"]
+    pixels = torch.rand(size, size, 3)
+    fitted = mind._fit_sight(Sight(pixels))
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+    spread = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+    assert torch.allclose(fitted * spread + mean, pixels.permute(2, 0, 1).unsqueeze(0), atol=1e-6)
+
+
+def test_sound_too_short_to_place_is_counted_and_not_faked(run_dir, tmp_path):
+    mind = LuthiMind(run_dir, tmp_path / "life")
+    short = Sound(torch.zeros(mind.senses["samples_per_audio_token"] - 1), mind.senses["sample_rate"])
+    assert mind._fit_sound(short, room=100) is None and mind.sound_too_short == 1
+
+
+def test_sound_longer_than_fits_keeps_the_most_recent(run_dir, tmp_path):
+    mind = LuthiMind(run_dir, tmp_path / "life")
+    per_place, rate = mind.senses["samples_per_audio_token"], mind.senses["sample_rate"]
+    samples = torch.linspace(-1, 1, per_place * 5)
+    fitted = mind._fit_sound(Sound(samples, rate), room=2)
+    assert torch.equal(fitted[0], samples[-per_place * 2:]) and mind.sound_trimmed == 1
+
+
+# ---- Rest (2026-11-11) ----
+
+def _homes(mind) -> list[torch.Tensor]:
+    return [m.set_point.detach().clone() for m in mind.model.modules() if hasattr(m, "set_point")]
+
+
+def test_resting_keeps_and_sanctuary_keeps_nothing_otherwise(run_dir, tmp_path):
+    mind, world, loop = _begin(run_dir, tmp_path / "life")
+    recorded = _Recorded(mind._luthi)
+    mind._luthi = recorded
+    _live(loop, world, 4, said={0: "hello Luthi"})
+    assert mind.rests == 0 and "keep_recent" not in recorded.names()
+    layers = [m for m in mind.model.modules() if hasattr(m, "set_point")]
+    assert layers, "this test must find the living layers"
+    home = [m.set_point.detach().clone() for m in layers]
+    gap = [(m.weight - m.set_point).detach().clone() for m in layers]
+    assert any(g.abs().max() > 0 for g in gap), "living has moved the layers from home"
+    mind.rest()
+    for layer, was, g in zip(layers, home, gap):
+        assert torch.allclose(layer.set_point, was + mind.rest_keeps * g, atol=1e-7)
+    assert mind.watch()["rests"] == 1
+
+
+def test_the_rest_choice_is_read_from_luthis_own_action(run_dir, tmp_path):
+    mind, world, loop = _begin(run_dir, tmp_path / "life")
+    moment = loop.step()
+    assert moment.chosen["rest"]["chosen"] is False and moment.chosen["rest"]["armed"] is False
+    assert set(moment.chosen["active"]) == {"text", "attention", "memory"}
+
+
+def test_a_life_without_the_tool_has_no_rest(run_dir, tmp_path):
+    mind = LuthiMind(run_dir, tmp_path / "life", rest=False)
+    loop = LifeLoop(mind, TextWorld(), hz=0.0)
+    assert "rest" not in loop.step().chosen
+    with pytest.raises(RuntimeError, match="without the rest tool"):
+        mind.rest()
+
+
+def test_the_rest_choice_continues_across_a_restart(run_dir, tmp_path):
+    mind, world, loop = _begin(run_dir, tmp_path / "life")
+    _live(loop, world, 3)
+    loop.save("test")
+    readings = list(mind._trainer.rest_choice.readings)
+    again = LuthiMind(run_dir, tmp_path / "life")
+    assert again.continuing and list(again._trainer.rest_choice.readings) == readings

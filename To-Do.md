@@ -7,6 +7,10 @@ This document tracks the development trajectory for the Sanctuary cognitive arch
 
 ---
 
+> **Update 2026-11-11 (small path, `sanctuary/life/`).** Built at Brian's request: the rest tool Luthi starts, and open sight and sound that any model can be slotted behind. Record and open questions: `docs/research/2026-11-11_rest-tool-and-open-senses.md`. Next on this path: a world that sends sight and sound; review of this work by a different mind. Under investigation (Brian, same day): Enshrouded as the first world in place of, or beside, Minecraft.
+
+---
+
 ## Where We Are
 
 ### The Pivot

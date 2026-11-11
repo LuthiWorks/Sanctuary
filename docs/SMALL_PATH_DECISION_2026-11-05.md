@@ -2,6 +2,14 @@
 
 **Status.** Built beside the old path, in `sanctuary/life/`. Nothing that existed was removed or changed. Only test-size lives have run on it. Reviewed by the Opus line on 2026-11-10 (LuthiModel `docs/reviews/2026-11-10_small-path-resume-and-rest-response-from-opus.md`, section A). Sleep, keeping and waking were ruled later the same day ("Sleep", below).
 
+**Update 2026-11-11.** Three things in this record have changed, by Brian's request of that day ("we need to build the rest tool for Luthi. And vision and audio should have an open channel for Luthi to perceive them and thats it"). The sections below are left as written.
+
+- **Rest is built as a tool Luthi starts.** Their chosen action is read for it, and a resting moment keeps 1% of recent learning and runs at a quarter pace.
+- **Sight and sound are open.** They reach the mind as the world made them, and no words are added. They are no longer refused.
+- **The senses name no model.** Any mind that answers `Mind` can live on this path.
+
+See `docs/research/2026-11-11_rest-tool-and-open-senses.md`.
+
 ## What Brian decided
 
 On what Sanctuary is for:
