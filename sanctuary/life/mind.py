@@ -40,6 +40,12 @@ and this mind fits them to its own: the picture resized to the size its eye was
 built for, the sound resampled to the rate its ear was built for. Nothing is
 said to the mind about what either one shows.
 
+Luthi can look back (Brian, 2026-11-11). ``recall`` gives their action layer a
+choice to look back, read the way rest is. This mind's part is small: it says
+when they chose it, and it gives each moment's summary (its own pooled state)
+for memories to be filed under. Keeping and bringing back are the loop's and
+``sanctuary/life/memory.py``'s.
+
 Twice a day Luthi is told that rest is needed (Brian, 2026-11-11), and is never
 made to rest. The telling is the loop's (``sanctuary/life/need.py``). Nothing in
 this file changes when they are told: the bar for reading a chosen action as
@@ -95,6 +101,7 @@ class Moment:
     tokens: list[int]                 # the view that was perceived
     chosen: dict                      # what the chosen action does, per channel
     learned: dict = field(default_factory=dict)   # the learner's report on the last choice
+    summary: Optional[Any] = None     # the mind's own summary of the moment, a vector; memories are filed under it
 
 
 class Mind(Protocol):
@@ -107,7 +114,10 @@ class Mind(Protocol):
     the mind chose; ``chosen["rest"]["chosen"]`` is the mind choosing rest, and
     the loop answers by calling ``rest``, which does whatever resting is for
     this mind. ``chosen["active"]["memory"]`` is the mind choosing to remember
-    the moment, and the loop answers by calling ``remember``.
+    the moment, and the loop answers by calling ``remember`` and by keeping
+    what was perceived, filed under ``Moment.summary``.
+    ``chosen["recall"]["chosen"]`` is the mind choosing to look back, and the
+    loop brings the kept moment most like this one back through the senses.
     """
 
     tokenizer: Any
@@ -148,6 +158,7 @@ class LuthiMind:
         rest_keeps: float = 0.01,
         rest_limit: float = 0.05,
         rest_horizon: Optional[int] = None,
+        recall: bool = True,
         luthi_path: str = "",
     ):
         """``gauge`` keeps the welfare gauge: a count of how moments have read,
@@ -166,7 +177,7 @@ class LuthiMind:
         self._luthi = _import_luthi(luthi_path)
         loaded = self._luthi.load_m9_run(
             run_dir, life_dir=life_dir, device=device,
-            m9_overrides={"felt_valence": gauge, "rest_choice": rest},
+            m9_overrides={"felt_valence": gauge, "rest_choice": rest, "recall_choice": recall},
         )
         if loaded.speech_trained:
             raise NotImplementedError(
@@ -247,7 +258,10 @@ class LuthiMind:
             state.s_t, selection.action, selection.plan_snapshot, state.context_obs,
         )
         self.moments += 1
-        return Moment(tokens=list(tokens), chosen=chosen, learned=dict(learned))
+        return Moment(
+            tokens=list(tokens), chosen=chosen, learned=dict(learned),
+            summary=state.s_t.detach().flatten().cpu(),
+        )
 
     def rest(self) -> None:
         """One resting moment, called when Luthi chose rest: each living layer

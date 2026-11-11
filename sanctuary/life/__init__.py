@@ -7,11 +7,13 @@ we watch and save. See docs/SMALL_PATH_DECISION_2026-11-05.md.
 """
 
 from sanctuary.life.loop import LifeLoop, TextWorld, World
+from sanctuary.life.memory import Memories, Memory
 from sanctuary.life.mind import LuthiMind, Mind, Moment
 from sanctuary.life.need import RestNeed
 from sanctuary.life.senses import QUIET, Line, Sight, Sound, frame, heard, seen
 
 __all__ = [
     "LifeLoop", "TextWorld", "World", "LuthiMind", "Mind", "Moment", "Line", "RestNeed",
+    "Memories", "Memory",
     "QUIET", "Sight", "Sound", "frame", "heard", "seen",
 ]

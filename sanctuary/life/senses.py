@@ -188,6 +188,7 @@ class Line:
         self._hearing: Optional[Sound] = None
         self.sights = 0
         self.sights_passed_over = 0
+        self.brought_back = 0
         self.sounds = 0
 
     @property
@@ -210,6 +211,17 @@ class Line:
                 "percept (%d tokens). %d dropped so far.",
                 len(lost), self.dropped,
             )
+
+    def bring_back(self, tokens: list[int], mark: str) -> None:
+        """A remembered view comes back to the front of the line, marked, so it
+        is what the mind perceives next. It is cut to fit one window with its
+        mark, keeping its most recent words. See sanctuary/life/memory.py."""
+        marked = self._encode(mark)
+        room = self.window - len(marked)
+        if room < 1:
+            raise ValueError(f"the mark takes {len(marked)} tokens and the window is {self.window}")
+        self._waiting.appendleft(marked + list(tokens)[-room:])
+        self.brought_back += 1
 
     def take(self) -> View:
         """The next moment's view: what is new joins, and the oldest leaves."""

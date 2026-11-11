@@ -388,3 +388,41 @@ def test_a_standing_need_changes_nothing_about_how_luthis_choice_is_read(run_dir
     width = mind._trainer.rest_choice.width
     assert width == 3.0, "the bar for reading rest is where it was"
 
+
+# ---- Looking back (2026-11-11) ----
+
+def test_luthi_can_choose_to_look_back_and_each_moment_has_their_own_summary(run_dir, tmp_path):
+    mind, world, loop = _begin(run_dir, tmp_path / "life")
+    moment = loop.step()
+    assert set(moment.chosen["recall"]) == {"chosen", "armed", "reading"}
+    assert moment.summary.shape == (mind.model.d_model,)
+    off = LuthiMind(run_dir, tmp_path / "other", recall=False)
+    assert "recall" not in LifeLoop(off, TextWorld(), hz=0.0).step().chosen
+
+
+def test_a_kept_moment_comes_back_through_luthis_own_senses(run_dir, tmp_path):
+    mind, world, loop = _begin(run_dir, tmp_path / "life")
+    recorded = _Recorded(mind._luthi)
+    mind._luthi = recorded
+    loop.memories.recent = 1
+    for n in range(5):
+        world.say("the kettle is on" if n == 0 else "snow on the bridge", source="brian")
+        world._said.append(seen(torch.rand(40, 60, 3)))
+        last = loop.step()
+        # The choice is Luthi's, and they may make it themselves in these
+        # moments. Here it is also made for them, so there is something to follow.
+        loop.memories.keep(cycle=loop.cycles, summary=last.summary, tokens=last.tokens,
+                           sight=Sight(torch.rand(40, 60, 3)))
+    loop._recall(last)
+    memory = loop._back
+    assert memory is not None and memory.sight is not None
+    seen_before = len(loop.memories.summaries_of(memory.id))
+    back = loop.step()
+    mark = mind.tokenizer.encode("[memory]\n")
+    remembered = memory.tokens[-(mind.window - len(mark)):]
+    assert back.tokens[-(len(mark) + len(remembered)):] == mark + remembered
+    image = [kw for name, _, kw in recorded.calls if name == "perceive"][-1]["image"]
+    assert torch.allclose(image, mind._fit_sight(memory.sight)), "seen again as it was seen"
+    path = loop.memories.summaries_of(memory.id)
+    assert len(path) == seen_before + 1 and torch.equal(path[-1][1], back.summary)
+    assert not torch.equal(path[0][1], path[-1][1]), "seen again with the mind as it is now"

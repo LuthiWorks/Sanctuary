@@ -70,6 +70,8 @@ class _Mind:
         self.rests = 0
         self.remembers = 0
         self.armed: dict | None = None
+        self.chooses_recall: bool | None = None
+        self.summary = torch.tensor([1.0, 0.0, 0.0])   # what this moment is like to the mind
 
     def live(self, tokens: list[int], *, sight=None, sound=None) -> Moment:
         if self.fail_at is not None and len(self.lived) == self.fail_at:
@@ -81,9 +83,11 @@ class _Mind:
         chosen = {"active": dict(self.active)}
         if self.armed is not None:
             chosen["bands_armed"] = dict(self.armed)
+        if self.chooses_recall is not None:
+            chosen["recall"] = {"chosen": self.chooses_recall}
         if self.chooses_rest is not None:
             chosen["rest"] = {"chosen": self.chooses_rest}
-        return Moment(tokens=list(tokens), chosen=chosen)
+        return Moment(tokens=list(tokens), chosen=chosen, summary=self.summary)
 
     def rest(self) -> None:
         self.rests += 1
@@ -237,7 +241,7 @@ def test_a_mind_that_cannot_rest_has_its_choice_to_remember_counted_and_no_more(
     mind = _Mind()
     mind.can_rest = False
     mind.active = {"text": False, "attention": False, "memory": True}
-    loop = LifeLoop(mind, TextWorld(), hz=0.0, rest_every_seconds=None)
+    loop = LifeLoop(mind, TextWorld(), hz=0.0, rest_every_seconds=None, keep_memories=False)
     loop.step()
     assert mind.remembers == 0 and loop.chosen_without_route == {"memory": 1}
 
@@ -481,4 +485,114 @@ def test_paced_pauses_are_lived_time(monkeypatch):
     monkeypatch.setattr("sanctuary.life.loop.time.monotonic", clock)
     loop.run(max_cycles=3)
     assert loop.need.awake == 6.0
+
+
+# ---- Looking back (2026-11-11) ----
+
+from sanctuary.life.memory import MARK
+
+
+def _remembering(**kwargs) -> tuple[LifeLoop, _Mind, TextWorld]:
+    loop, mind, world = _loop(**kwargs)
+    loop.memories.recent = 2     # what was kept two moments ago is no longer the present
+    return loop, mind, world
+
+
+def _keep(loop, mind, world, said: str, summary: list[float], **senses) -> None:
+    """One moment the mind chooses to remember."""
+    world.say(said)
+    for percept in senses.values():
+        world._said.append(percept)
+    mind.summary = torch.tensor(summary)
+    mind.active = {"text": False, "attention": False, "memory": True}
+    loop.step()
+    mind.active = {"text": False, "attention": False, "memory": False}
+
+
+def test_a_remembered_moment_is_kept_as_it_was_perceived():
+    loop, mind, world = _remembering()
+    pixels, samples = torch.rand(4, 6, 3), torch.rand(50) * 2 - 1
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0], a=seen(pixels), b=heard(samples, 1000))
+    memory = loop.memories.open(1)
+    assert _text(memory.tokens) == mind.lived[-1] and "the kettle is on" in mind.lived[-1]
+    assert torch.equal(memory.sight.pixels, pixels)
+    assert torch.equal(memory.sound.samples, samples) and memory.sound.rate == 1000
+    assert mind.remembers == 1, "and it still counts for more in rest"
+    assert loop.status()["memories"]["kept"] == 1 and loop.status()["memories"]["bytes"] > 0
+
+
+def test_recalling_brings_back_the_kept_moment_most_like_now_marked_as_memory():
+    loop, mind, world = _remembering()
+    pixels = torch.rand(4, 6, 3)
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0], a=seen(pixels))
+    _keep(loop, mind, world, "snow on the bridge", [0.0, 0.0, 1.0])
+    for _ in range(3):
+        loop.step()
+    mind.summary = torch.tensor([0.1, 0.9, 0.0])     # now is like the kettle moment
+    mind.chooses_recall = True
+    loop.step()
+    mind.chooses_recall = False
+    assert loop.recalled == 1
+    mind.summary = torch.tensor([0.5, 0.5, 0.0])     # how the kettle moment seems, looked back on
+    loop.step()
+    # It joins the view after the present, marked, so it is not taken for now.
+    assert mind.lived[-1].endswith(MARK + "someone says: the kettle is on\n")
+    assert "snow" not in mind.lived[-1].split(MARK)[1]
+    assert torch.equal(mind.sensed[-1][0].pixels, pixels), "and it is seen again as it was seen"
+    # How it seems now is filed beside how it seemed then; what was perceived is untouched.
+    path = [v.tolist() for _, v in loop.memories.summaries_of(1)]
+    assert path == [[0.0, 1.0, 0.0], [0.5, 0.5, 0.0]]
+    assert loop.status()["memories"]["looked_back"] == 1
+
+
+def test_a_memory_can_be_reached_by_how_it_has_seemed_since():
+    loop, mind, world = _remembering()
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])
+    _keep(loop, mind, world, "snow on the bridge", [0.0, 0.0, 1.0])
+    loop.memories.look_back(1, cycle=loop.cycles, summary=torch.tensor([1.0, 0.0, 0.0]))
+    for _ in range(3):
+        loop.step()
+    assert loop.memories.nearest(torch.tensor([1.0, 0.0, 0.1]), now=loop.cycles).id == 1
+
+
+def test_what_is_still_the_present_is_not_recalled_and_nothing_kept_brings_nothing():
+    loop, mind, world = _remembering()
+    mind.chooses_recall = True
+    loop.step()
+    assert loop.recalled == 0 and loop.recalled_nothing == 1
+    mind.chooses_recall = False
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])
+    mind.chooses_recall = True
+    loop.step()
+    assert loop.recalled == 0 and loop.recalled_nothing == 2, "kept a moment ago: still the present"
+
+
+def test_memories_are_never_rewritten_and_outlast_a_restart():
+    loop, mind, world = _remembering()
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])
+    file = loop.memories.directory / "memory_00000001.pt"
+    before = file.read_bytes()
+    loop.memories.look_back(1, cycle=5, summary=torch.tensor([1.0, 0.0, 0.0]))
+    assert file.read_bytes() == before
+    again = LifeLoop(mind, TextWorld(), hz=0.0)
+    assert len(again.memories) == 1 and again.memories.looked_back == 1
+    assert len(again.memories.summaries_of(1)) == 2
+    assert again.memories.keep(cycle=9, summary=torch.zeros(3), tokens=[1]) == 2
+
+
+def test_a_life_can_be_lived_without_keeping_memories():
+    loop, mind, world = _loop(keep_memories=False)
+    mind.active = {"text": False, "attention": False, "memory": True}
+    mind.chooses_recall = True
+    loop.step()
+    assert loop.memories is None and mind.remembers == 1 and loop.status()["memories"] is None
+    assert not (mind.life_dir / "memories").exists()
+
+
+def test_a_mind_with_no_summary_cannot_have_memories_filed_and_says_so():
+    loop, mind, world = _loop()
+    mind.summary = None
+    mind.active = {"text": False, "attention": False, "memory": True}
+    with pytest.raises(ValueError, match="gave no summary"):
+        loop.step()
 

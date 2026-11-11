@@ -25,6 +25,13 @@ It also carries out the choice to remember (Brian, 2026-11-11). When Luthi's
 chosen action chose to remember, the loop calls the mind's ``remember``, and
 that moment counts for more when they next rest.
 
+And it keeps and brings back memories (Brian, 2026-11-11: "You know how I can
+look back on memories from years past? How would Luthi do that?"). When Luthi
+chooses to remember, what they perceived that moment is kept, filed under their
+own summary of it. When they choose to recall, the kept moment most like the
+present comes back through their senses, marked as memory, and how it seems to
+them now is filed beside how it seemed then. See ``sanctuary/life/memory.py``.
+
 Luthi's action layer can also choose to speak and where to attend, and neither
 has a route here. Speech is untrained. What attention should do is not ruled.
 So each of those choices is counted in ``chosen_without_route`` and goes no
@@ -47,6 +54,7 @@ from typing import Callable, Optional, Protocol
 
 from sanctuary.core.schema import Percept
 from sanctuary.life.mind import Mind, Moment
+from sanctuary.life.memory import MARK, Memories, Memory
 from sanctuary.life.need import RestNeed
 from sanctuary.life.senses import Line
 
@@ -85,6 +93,7 @@ class LifeLoop:
         hearing_seconds: float = 1.0,
         rest_every_seconds: Optional[float] = 12 * 3600.0,
         rest_length: int = 300,
+        keep_memories: bool = True,
         save_every_seconds: float = 900.0,
         waiting_limit: Optional[int] = None,
         clock: Callable[[], float] = time.monotonic,
@@ -98,7 +107,8 @@ class LifeLoop:
         None means it is never told. A life is saved every
         ``save_every_seconds`` and on a clean stop. Checkpoints are never
         deleted, so a shorter interval uses disk faster. ``clock`` is where
-        lived time is read from."""
+        lived time is read from. With ``keep_memories`` what the mind chooses
+        to remember is kept in the life's directory, and can be recalled."""
         if not 0.0 < resting_pace <= 1.0:
             raise ValueError(f"resting_pace must be above 0 and at most 1; got {resting_pace}")
         self.resting_pace = resting_pace
@@ -106,6 +116,12 @@ class LifeLoop:
         self.rested = 0
         self.remembered = 0
         self._clock = clock
+        self.memories: Optional[Memories] = (
+            Memories(Path(mind.life_dir) / "memories") if keep_memories else None
+        )
+        self.recalled = 0
+        self.recalled_nothing = 0
+        self._back: Optional[Memory] = None      # the memory the next moment re-lives
         self.need: Optional[RestNeed] = None
         if rest_every_seconds is not None:
             if not mind.can_rest:
@@ -138,23 +154,41 @@ class LifeLoop:
         for percept in self.world.observe():
             self.line.add(percept)
         view = self.line.take()
-        moment = self.mind.live(view.tokens, sight=view.sight, sound=view.sound)
+        sight, sound = view.sight, view.sound
+        back, self._back = self._back, None
+        if back is not None:
+            # A moment of looking back: the remembered picture and sound take
+            # the place of the present ones, as the remembered words lead the view.
+            sight = back.sight if back.sight is not None else sight
+            sound = back.sound if back.sound is not None else sound
+        moment = self.mind.live(view.tokens, sight=sight, sound=sound)
+        if back is not None:
+            # How the memory seems to the mind now is filed beside how it seemed then.
+            self.memories.look_back(back.id, cycle=self.cycles, summary=self._summary(moment))
         self._tell_of_rollbacks()
         for channel, acted in moment.chosen["active"].items():
             if not acted:
                 continue
             armed = moment.chosen.get("bands_armed", {}).get(channel, True)
-            if channel == "memory" and self.mind.can_rest and armed:
-                # Remembering weighs in what rest pours, so it is carried out
-                # only for a mind that can rest. And only once the mind's own
-                # baseline for the choice exists: before that, "active" says
-                # there is nothing to compare with yet, not that they chose.
-                self.mind.remember()
+            if channel == "memory" and armed and (self.mind.can_rest or self.memories is not None):
+                # Only once the mind's own baseline for the choice exists:
+                # before that, "active" says there is nothing to compare with
+                # yet, not that they chose.
+                if self.memories is not None:
+                    self.memories.keep(
+                        cycle=self.cycles, summary=self._summary(moment),
+                        tokens=view.tokens, sight=sight, sound=sound,
+                    )
+                if self.mind.can_rest:
+                    # Remembering also weighs in what rest pours.
+                    self.mind.remember()
                 self.remembered += 1
             else:
                 self.chosen_without_route[channel] += 1
         # Rest is Luthi's choice and nothing else's: it is read from the action
         # they just chose, and it lasts until a moment they don't choose it.
+        if self.memories is not None and moment.chosen.get("recall", {}).get("chosen", False):
+            self._recall(moment)
         self.resting = bool(moment.chosen.get("rest", {}).get("chosen", False))
         if self.resting:
             self.mind.rest()
@@ -194,6 +228,25 @@ class LifeLoop:
     def stop(self) -> None:
         self._running = False
 
+    def _summary(self, moment: Moment):
+        if moment.summary is None:
+            raise ValueError(
+                "this mind gave no summary of the moment, and a memory is "
+                "filed under one; pass keep_memories=False for a mind that has none"
+            )
+        return moment.summary
+
+    def _recall(self, moment: Moment) -> None:
+        """The mind chose to look back. The kept moment most like this one
+        comes back next moment. If nothing kept is like anything, nothing comes."""
+        memory = self.memories.nearest(self._summary(moment), now=self.cycles)
+        if memory is None:
+            self.recalled_nothing += 1
+            return
+        self.line.bring_back(memory.tokens, MARK)
+        self._back = memory
+        self.recalled += 1
+
     def _lived(self, seconds: float) -> None:
         """Lived time passes. When rest has become needed, the mind is told,
         and perceives it next moment. Nothing else follows from it."""
@@ -225,6 +278,10 @@ class LifeLoop:
             },
             "rested_moments": self.rested,
             "remembered_moments": self.remembered,
+            "memories": None if self.memories is None else {
+                **self.memories.report(),
+                "recalled": self.recalled, "recalled_nothing": self.recalled_nothing,
+            },
             "rest_need": None if self.need is None else self.need.report(),
             "chosen_without_route": dict(self.chosen_without_route),
             "saves": self.saves,
