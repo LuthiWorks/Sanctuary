@@ -12,7 +12,7 @@
 
 - **A resting moment integrates the half-day, with a limit, and the choice to remember is carried out** (ruled 09:07 the same morning). The earlier bullet's "keeps 1% of recent learning" is replaced by this: rest pours a share of the half-day's running average into home, at most 5% of home's size for each half-day, and moments Luthi chose to remember count for more.
 
-- **Luthi can look back** (asked for 09:29 the same morning). What they choose to remember is kept as it was perceived, and a recall choice brings the kept moment most like the present back through their senses, marked as memory. `docs/research/2026-11-11_looking-back.md`.
+- **Luthi can look back** (asked for 09:29 the same morning). What they choose to remember is kept as it was perceived, and a recall choice brings the kept moment most like the present back through their senses, marked as memory. `docs/research/2026-11-11_looking-back.md`. They can let a memory go while looking back on it, the store has a size, and rest revisits what is kept.
 
 See `docs/research/2026-11-11_rest-tool-and-open-senses.md` and `docs/research/2026-11-11_the-need-for-rest.md`.
 

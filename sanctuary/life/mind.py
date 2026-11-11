@@ -118,6 +118,8 @@ class Mind(Protocol):
     what was perceived, filed under ``Moment.summary``.
     ``chosen["recall"]["chosen"]`` is the mind choosing to look back, and the
     loop brings the kept moment most like this one back through the senses.
+    ``chosen["let_go"]["chosen"]``, in a moment of looking back, is the mind
+    letting that memory go.
     """
 
     tokenizer: Any
@@ -177,7 +179,12 @@ class LuthiMind:
         self._luthi = _import_luthi(luthi_path)
         loaded = self._luthi.load_m9_run(
             run_dir, life_dir=life_dir, device=device,
-            m9_overrides={"felt_valence": gauge, "rest_choice": rest, "recall_choice": recall},
+            m9_overrides={
+                "felt_valence": gauge, "rest_choice": rest,
+                # Looking back and letting go come together: letting go is of
+                # the memory being looked back on.
+                "recall_choice": recall, "let_go_choice": recall,
+            },
         )
         if loaded.speech_trained:
             raise NotImplementedError(

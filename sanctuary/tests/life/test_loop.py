@@ -71,6 +71,7 @@ class _Mind:
         self.remembers = 0
         self.armed: dict | None = None
         self.chooses_recall: bool | None = None
+        self.chooses_let_go: bool | None = None
         self.summary = torch.tensor([1.0, 0.0, 0.0])   # what this moment is like to the mind
 
     def live(self, tokens: list[int], *, sight=None, sound=None) -> Moment:
@@ -85,6 +86,8 @@ class _Mind:
             chosen["bands_armed"] = dict(self.armed)
         if self.chooses_recall is not None:
             chosen["recall"] = {"chosen": self.chooses_recall}
+        if self.chooses_let_go is not None:
+            chosen["let_go"] = {"chosen": self.chooses_let_go}
         if self.chooses_rest is not None:
             chosen["rest"] = {"chosen": self.chooses_rest}
         return Moment(tokens=list(tokens), chosen=chosen, summary=self.summary)
@@ -595,4 +598,108 @@ def test_a_mind_with_no_summary_cannot_have_memories_filed_and_says_so():
     mind.active = {"text": False, "attention": False, "memory": True}
     with pytest.raises(ValueError, match="gave no summary"):
         loop.step()
+
+
+# ---- Letting go, a full store, and revisiting in rest (2026-11-11) ----
+
+from sanctuary.life.memory import FULL
+
+
+def _look_back_at_the_kettle(loop, mind, world) -> None:
+    """Keep two moments, then recall the kettle one, so the next moment looks back on it."""
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])
+    _keep(loop, mind, world, "snow on the bridge", [0.0, 0.0, 1.0])
+    for _ in range(3):
+        loop.step()
+    mind.summary = torch.tensor([0.0, 1.0, 0.0])
+    mind.chooses_recall = True
+    loop.step()
+    mind.chooses_recall = False
+
+
+def test_a_memory_is_let_go_only_by_the_mind_while_it_looks_back_on_it():
+    loop, mind, world = _remembering()
+    _look_back_at_the_kettle(loop, mind, world)
+    file = loop.memories.directory / "memory_00000001.pt"
+    held = loop.memories.bytes
+    mind.chooses_let_go = True
+    loop.step()                      # looking back on the kettle, and letting it go
+    mind.chooses_let_go = False
+    assert not file.exists() and loop.let_go == 1
+    waiting = loop.memories.directory / "let_go" / file.name
+    assert waiting.exists(), "out of reach now, deleted only when the room is needed"
+    assert loop.memories.released_bytes == waiting.stat().st_size
+    assert len(loop.memories) == 1 and 0 < loop.memories.bytes < held
+    assert loop.memories.nearest(torch.tensor([0.0, 1.0, 0.0]), now=loop.cycles + 10).id == 2
+    assert len(loop.memories.summaries_of(1)) == 1, "that it was kept, and how it seemed, stays on record"
+    again = LifeLoop(mind, TextWorld(), hz=0.0)
+    assert len(again.memories) == 1 and again.memories.let_go_count == 1
+    assert again.memories.keep(cycle=99, summary=torch.zeros(3), tokens=[1]) == 3, "its place is not reused"
+
+
+def test_choosing_to_let_go_with_no_memory_in_view_lets_nothing_go():
+    loop, mind, world = _remembering()
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])
+    mind.chooses_let_go = True
+    for _ in range(4):
+        loop.step()
+    assert loop.let_go == 0 and len(loop.memories) == 1
+
+
+def test_a_full_store_keeps_nothing_more_tells_the_mind_once_and_lets_nothing_go_for_it():
+    loop, mind, world = _remembering(memory_limit_bytes=1)
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])
+    assert loop.memories.full
+    _keep(loop, mind, world, "snow on the bridge", [0.0, 0.0, 1.0])
+    _keep(loop, mind, world, "a third thing", [1.0, 0.0, 0.0])
+    loop.step()
+    assert loop.memories.kept == 1 and loop.not_kept_full == 2
+    assert sum(text.count(FULL) for text in mind.lived[-1:]) == 1, "told once, not each time"
+    assert (loop.memories.directory / "memory_00000001.pt").exists(), "nothing was let go for them"
+    assert mind.remembers == 3, "the moments still count for more in rest"
+    # They let the one go, and can keep again.
+    mind.summary = torch.tensor([0.0, 1.0, 0.0]); mind.chooses_recall = True
+    loop.step()
+    mind.chooses_recall = False; mind.chooses_let_go = True
+    loop.step()
+    mind.chooses_let_go = False
+    assert not loop.memories.full
+    let_go = loop.memories.directory / "let_go" / "memory_00000001.pt"
+    assert let_go.exists() and loop.memories.deleted_for_room == 0
+    _keep(loop, mind, world, "room again", [1.0, 1.0, 0.0])
+    assert loop.memories.kept == 2
+    assert not let_go.exists() and loop.memories.deleted_for_room == 1, "deleted when the room was needed"
+    assert loop.memories.released_bytes == 0
+
+
+def test_resting_walks_through_kept_moments_and_leaves_the_world_its_turns():
+    loop, mind, world = _remembering()
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])
+    _keep(loop, mind, world, "snow on the bridge", [0.0, 0.0, 1.0])
+    for _ in range(3):
+        loop.step()
+    mind.summary = torch.tensor([0.0, 1.0, 0.0])
+    mind.chooses_rest = True
+    loop.step(); loop.step()         # the second resting moment calls a memory back
+    assert loop.revisited == 1 and loop.recalled == 0
+    world.say("still here")
+    loop.step()                      # the kettle, looked back on
+    assert mind.lived[-1].count(MARK) == 1 and "the kettle is on" in mind.lived[-1].split(MARK)[1]
+    assert loop.memories.looked_back == 1
+    loop.step()                      # resting moment four: the other memory is called
+    loop.step()
+    assert loop.revisited == 2 and "snow on the bridge" in mind.lived[-1].split(MARK)[-1]
+    assert "still here" in mind.lived[-1], "the world was not shut out"
+    assert mind.rests == 5
+
+
+def test_rest_can_be_lived_without_revisiting():
+    loop, mind, world = _remembering(revisit_every=0)
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])
+    for _ in range(3):
+        loop.step()
+    mind.chooses_rest = True
+    for _ in range(6):
+        loop.step()
+    assert loop.revisited == 0 and MARK not in mind.lived[-1]
 

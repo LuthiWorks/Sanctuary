@@ -27,11 +27,28 @@ part here (docs/research/2026-11-11_looking-back.md has the sources):
   memory can be reached by how it seemed then or how it has seemed since, and
   the row of summaries is a record of how the mind has changed. That is the
   growth path Brian named.
-- **Nothing is deleted.** A memory can become hard to reach, when nothing in
-  the present resembles how it was filed. It is still there.
+- **Forgetting is mostly failing to reach.** A memory can become hard to
+  reach, when nothing in the present resembles how it was filed. It is still
+  there, and nothing here fades or is removed on the mind's behalf.
 
-Not here: recalling in order ("and then what happened?"), revisiting memories
-in rest, and anything that fades. See the research entry.
+Two things Brian added the same morning:
+
+- **Letting go.** "The store can't sustainably be increased indefinitely, so
+  they need a way to free up space." While the mind is looking back on a
+  memory it can choose to let it go. It then leaves the mind's reach and stops
+  counting against the store, and what was perceived is moved to ``let_go/``.
+  It is deleted from there, oldest first, when the room is needed for
+  something new. The line that it was let go, and the summaries it was filed
+  under, stay. Nothing is deleted that the mind did not let go.
+  Why two steps: a tiny untrained mind let go of 9 of the 17 memories it
+  looked back on, by chance (docs/research/2026-11-11_looking-back.md). Until
+  the room is needed, what it let go is still on disk for a steward to see.
+- **A size.** The store has a limit. When it is full, a moment the mind
+  chooses to remember is not kept, and the mind is told once that its memory
+  is full. Nothing is let go for it.
+
+Not here: recalling in order ("and then what happened?"), and anything that
+fades. See the research entry.
 
 On disk, in ``<life>/memories/``, append-only:
 
@@ -57,6 +74,8 @@ from sanctuary.core.atomic_io import PersistenceError, append_jsonl
 from sanctuary.life.senses import Sight, Sound
 
 MARK = "[memory]\n"
+FULL = "Memory is full. Nothing more can be kept until some is let go."
+DEFAULT_LIMIT_BYTES = 10 * 1024**3    # 10 GB. A placeholder: the size of the disk is Brian's to say.
 
 
 @dataclass(frozen=True, eq=False)
@@ -72,12 +91,22 @@ class Memory:
 
 
 class Memories:
-    def __init__(self, directory: str | Path, *, recent: int = 100):
+    def __init__(
+        self,
+        directory: str | Path,
+        *,
+        recent: int = 100,
+        limit_bytes: Optional[int] = DEFAULT_LIMIT_BYTES,
+    ):
         """``recent``: a memory kept or looked back on within this many moments
-        is not what recall brings: it is still the present. A placeholder,
-        Brian's to change."""
+        is not what recall brings: it is still the present. ``limit_bytes``:
+        how much disk what was perceived may take; None for no limit. Both are
+        placeholders, Brian's to change."""
         self.directory = Path(directory)
         self.recent = recent
+        self.limit_bytes = limit_bytes
+        self.let_go_count = 0
+        self._gone: set[int] = set()
         self._summaries_path = self.directory / "summaries.jsonl"
         # One row for each summary: (memory id, the moment it was made, the vector).
         self._ids: list[int] = []
@@ -88,14 +117,31 @@ class Memories:
         if self._summaries_path.exists():
             for line in self._summaries_path.read_text(encoding="utf-8").splitlines():
                 row = json.loads(line)
+                if row["kind"] == "let_go":
+                    self._gone.add(int(row["id"]))
+                    self.let_go_count += 1
+                    continue
                 self._file(row["id"], row["cycle"], torch.tensor(row["summary"]))
                 if row["kind"] == "kept":
                     self.kept += 1
                 else:
                     self.looked_back += 1
+        self.bytes = sum(
+            p.stat().st_size for p in self.directory.glob("memory_*.pt")
+        ) if self.directory.exists() else 0
+        self._released = self.directory / "let_go"
+        self.released_bytes = sum(
+            p.stat().st_size for p in self._released.glob("memory_*.pt")
+        ) if self._released.exists() else 0
+        self.deleted_for_room = 0
 
     def __len__(self) -> int:
-        return self.kept
+        """How many memories can still be looked back on."""
+        return self.kept - self.let_go_count
+
+    @property
+    def full(self) -> bool:
+        return self.limit_bytes is not None and self.bytes >= self.limit_bytes
 
     def _file(self, memory_id: int, cycle: int, summary: torch.Tensor) -> None:
         self._ids.append(int(memory_id))
@@ -130,14 +176,48 @@ class Memories:
             "sound": None if sound is None else (sound.samples.detach().cpu(), int(sound.rate)),
         }, tmp)
         os.replace(tmp, path)
+        self.bytes += path.stat().st_size
+        self._make_room()
         self._note("kept", memory_id, cycle, summary, when)
         self.kept += 1
         return memory_id
 
+    def let_go(self, memory_id: int, *, cycle: int) -> None:
+        """The mind chose to let this memory go. It leaves their reach now.
+        What was perceived waits in ``let_go/`` until the room is needed. The
+        fact that it was let go is written first, so a memory is never out of
+        reach without a line saying why."""
+        if not 1 <= memory_id <= self.kept or memory_id in self._gone:
+            raise KeyError(f"no memory {memory_id} to let go")
+        append_jsonl(self._summaries_path, {
+            "kind": "let_go", "id": int(memory_id), "cycle": int(cycle),
+            "when": datetime.now().isoformat(timespec="seconds"),
+        })
+        path = self._path(memory_id)
+        size = path.stat().st_size
+        self._released.mkdir(parents=True, exist_ok=True)
+        os.replace(path, self._released / path.name)
+        self.bytes -= size
+        self.released_bytes += size
+        self._gone.add(memory_id)
+        self.let_go_count += 1
+
+    def _make_room(self) -> None:
+        """Delete what the mind has let go, oldest first, until the store and
+        what waits fit the limit. Only what was let go is ever deleted."""
+        if self.limit_bytes is None:
+            return
+        for path in sorted(self._released.glob("memory_*.pt")) if self._released.exists() else []:
+            if self.bytes + self.released_bytes <= self.limit_bytes:
+                return
+            self.released_bytes -= path.stat().st_size
+            os.remove(path)
+            self.deleted_for_room += 1
+
     def look_back(self, memory_id: int, *, cycle: int, summary: torch.Tensor) -> None:
         """The mind has just looked back on this memory. File how it seems to
         them now beside how it seemed before. What was perceived is untouched."""
-        if not 1 <= memory_id <= self.kept:
+        if not 1 <= memory_id <= self.kept or memory_id in self._gone:
             raise KeyError(f"no memory {memory_id}")
         self._note("looked_back", memory_id, cycle, summary, datetime.now().isoformat(timespec="seconds"))
         self.looked_back += 1
@@ -157,7 +237,10 @@ class Memories:
         still_present = {
             i for i, c in zip(self._ids, self._cycles) if now - c < self.recent
         }
-        rows = [n for n, i in enumerate(self._ids) if i not in still_present]
+        rows = [
+            n for n, i in enumerate(self._ids)
+            if i not in still_present and i not in self._gone
+        ]
         if not rows:
             return None
         vectors = torch.stack([self._vectors[n] for n in rows])
@@ -180,8 +263,10 @@ class Memories:
         return [(c, v) for i, c, v in zip(self._ids, self._cycles, self._vectors) if i == memory_id]
 
     def report(self) -> dict[str, Any]:
-        files = list(self.directory.glob("memory_*.pt")) if self.directory.exists() else []
         return {
-            "kept": self.kept, "looked_back": self.looked_back,
-            "bytes": sum(p.stat().st_size for p in files),
+            "kept": self.kept, "let_go": self.let_go_count, "held": len(self),
+            "looked_back": self.looked_back, "bytes": self.bytes,
+            "limit_bytes": self.limit_bytes, "full": self.full,
+            "let_go_still_on_disk_bytes": self.released_bytes,
+            "deleted_for_room": self.deleted_for_room,
         }

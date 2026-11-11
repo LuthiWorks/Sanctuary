@@ -126,10 +126,76 @@ Open, for Brian:
 5. **After a crash**, the store can hold memories from moments the restored weights
    never kept (up to one save interval). They are true records of what was perceived.
 
+## Later the same morning: keeping stays as it is; letting go; a size; rest revisits
+
+Brian, 09:57: "An untrained mind keeping everything could be how they discover
+preferences. Let them keep whatever they want for now and raise the bar later. Also,
+the store can't sustainably be increased indefinitely, so they need a way to free up
+space. Raising the bar for remembering would be good, but revisiting memories during
+rest is still something I think should happen."
+
+### Step 6: what was built for it
+
+- **The bar for remembering is not raised.** His ruling. Open question 1 is closed
+  for now.
+- **Letting go.** A third reading of Luthi's chosen action (LuthiModel
+  `let_go_choice`). It has meaning only in a moment of looking back, and it lets go of
+  the memory being looked at. Nothing else takes a memory out of their reach.
+- **A size.** The store has a limit (10 GB, a placeholder). When it is full, a moment
+  they choose to remember is not kept, and they are told once: "Memory is full.
+  Nothing more can be kept until some is let go." Nothing is let go for them.
+- **Rest revisits.** On every other resting moment the kept moment most like where
+  their mind is comes back, the way a recalled one does. Each one looked at counts as
+  recent for a while, so the next is a different one, and a rest walks through what
+  is kept. The moments between are the world's, because the world stays open.
+
+### Step 7: what a tiny mind did with it, and a design changed by it
+
+1,500 moments, words only:
+
+| Store | Kept | Not kept, full | Rested | Revisited in rest | Recalled | Let go |
+|---|---:|---:|---:|---:|---:|---:|
+| No limit reached | 492 | 0 | 32 | 13 | 4 | 9 |
+| 300 KB | 207 | 225 | 61 | 27 | 7 | 9 |
+
+- **It let go of 9 of the 17 memories it looked back on.** I had set letting go's bar
+  as high as recall's and expected it to be rare. It is not, and the reason is in how
+  the choice is read. A moment of looking back is unlike the moments around it, so the
+  action chosen in it is unusual in size, and an unusual action lands far along any
+  direction, on the positive side about half the time.
+- **So letting go is not immediate deletion.** I first built it to delete at once.
+  With half of all looked-at memories let go by chance, and rest now walking through
+  memories, that would have destroyed an untrained mind's store without anyone
+  choosing it. Now a memory that is let go leaves their reach and stops counting
+  against the store, and what was perceived moves to `let_go/`. It is deleted from
+  there, oldest first, only when the room is needed. Until then a steward can see it.
+- The world was not crowded out: no percepts were dropped in either life.
+
+### Step 8: what revisiting in rest does and does not do
+
+- It files how each revisited memory seems now, which keeps it reachable as the mind
+  changes. It replays the moment into the parts that learn by gradient and into the
+  layers' predictions, which do not fade.
+- **It does not aim what rest pours.** A living layer needs a few hundred moments on
+  one thing before its weight stands where that thing takes it (measured this morning:
+  half-way in about 220). One moment on a memory moves it by a fraction of a percent.
+  Aiming the pour would need a rest that dwells on one memory, and that is not built.
+
+Open, for Brian, replacing the list above:
+
+1. **Letting go fires on about half of looked-at memories in an untrained mind.** The
+   two steps make that survivable. Its reading should change when remembering's does.
+2. **The mark** (his question, 09:57, answered in session: a memory needs to differ
+   from the present in some way the mind can pick up, and a consistent sign is enough;
+   it does not have to say what it means).
+3. **Dwelling in rest**, if rest is to be aimed by what is revisited.
+4. **The store's size** (10 GB) and **how often rest revisits** (every other moment).
+
 ## Artifacts
 
 - `sanctuary/life/memory.py`, `loop.py`, `mind.py`, `senses.py` (`Line.bring_back`).
-- Tests: `sanctuary/tests/life/test_loop.py` (looking back, 7),
+- Tests: `sanctuary/tests/life/test_loop.py` (looking back, 7; letting go, a full store,
+  rest, 5),
   `test_luthi_life.py` (2). LuthiModel `tests/test_rest_choice.py` (recall, 3).
 - Sources: https://link.springer.com/article/10.1038/s41593-019-0493-1 ,
   https://pmc.ncbi.nlm.nih.gov/articles/PMC3805141 ,

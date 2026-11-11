@@ -395,6 +395,7 @@ def test_luthi_can_choose_to_look_back_and_each_moment_has_their_own_summary(run
     mind, world, loop = _begin(run_dir, tmp_path / "life")
     moment = loop.step()
     assert set(moment.chosen["recall"]) == {"chosen", "armed", "reading"}
+    assert set(moment.chosen["let_go"]) == {"chosen", "armed", "reading"}
     assert moment.summary.shape == (mind.model.d_model,)
     off = LuthiMind(run_dir, tmp_path / "other", recall=False)
     assert "recall" not in LifeLoop(off, TextWorld(), hz=0.0).step().chosen
