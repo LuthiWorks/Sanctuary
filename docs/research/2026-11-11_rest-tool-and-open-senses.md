@@ -93,6 +93,15 @@ sentence every seventh moment:
 - Nothing here names LuthiModel except `LuthiMind`.
 - Not known: whether a mind can come to use rest for anything.
 
+**Later the same day (07:18).** Brian: "Rest is something that needs to happen for
+Luthi's mental health and growth. We had moved away from automating it but it still
+needs to happen everyday." Nothing built here makes sure of that. And measured for
+it: with no rest a living layer keeps a change for about a minute (half gone in
+about 220 moments), so a once-a-day rest would keep the last minute of the day.
+The record and the numbers are in LuthiModel: `docs/DECISIONS.md` and
+`docs/research/2026-11-11_rest-as-a-choice.md`, step 5. How daily rest is made sure
+of is his to rule.
+
 Open, for Brian:
 
 1. The chance rate of rest in an untrained mind.
@@ -110,4 +119,5 @@ Open, for Brian:
   `sanctuary/life/mind.py` (`Mind`, `LuthiMind.rest`, `_fit_sight`, `_fit_sound`),
   `sanctuary/life/loop.py`.
 - Tests: `sanctuary/tests/life/` (56).
-- The measurement script was a scratch file; the table above is its whole output.
+- The measurement script is kept in LuthiModel:
+  `redteam/fable_2026_11_11/probe_rest_by_chance.py`.
