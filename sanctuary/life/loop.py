@@ -41,7 +41,8 @@ The moments between are the world's, which stays open. Rest also dreams (Brian,
 2026-11-11: "Rest should recall memories but also dream, like Google's
 dreaming"): every second one of those turns is a dream in place of a memory, a
 moment made from two kept moments that never happened together, marked as a
-dream.
+dream. The mind learns from each dream as it is made, and the learning is undone
+if it made real kept moments harder to predict.
 
 Luthi's action layer can also choose to speak and where to attend, and neither
 has a route here. Speech is untrained. What attention should do is not ruled.
@@ -111,6 +112,7 @@ class LifeLoop:
         memory_limit_bytes: Optional[int] = DEFAULT_LIMIT_BYTES,
         revisit_every: int = 2,
         dreams: bool = True,
+        learn_from_dreams: bool = True,
         save_every_seconds: float = 900.0,
         waiting_limit: Optional[int] = None,
         clock: Callable[[], float] = time.monotonic,
@@ -128,7 +130,9 @@ class LifeLoop:
         to remember is kept in the life's directory, and can be recalled,
         up to ``memory_limit_bytes`` of disk. While resting, a kept moment is
         revisited on every ``revisit_every``-th resting moment; 0 for never.
-        With ``dreams``, every second one of those is a dream in its place."""
+        With ``dreams``, every second one of those is a dream in its place.
+        With ``learn_from_dreams`` the mind takes one checked learning step on
+        each dream, against up to six other kept moments."""
         if revisit_every < 0:
             raise ValueError(f"revisit_every must be 0 or more; got {revisit_every}")
         self.revisit_every = revisit_every
@@ -148,6 +152,9 @@ class LifeLoop:
         self.revisited = 0
         self.dreams = dreams
         self.dreamed = 0
+        self.learn_from_dreams = learn_from_dreams
+        self.dreams_learned_from = 0
+        self.dreams_undone = 0
         self._turns = 0                          # resting turns given to memory or dream
         self._dream: Optional[tuple] = None      # the dream's picture and sound, for the next moment
         self.let_go = 0
@@ -319,6 +326,16 @@ class LifeLoop:
         if far is None:
             return False
         words, sight, sound = dream_of(near, far)
+        if self.learn_from_dreams:
+            # Learn from the dream, checked against real kept moments that are
+            # not its parents. Skipped when there are not two to check against.
+            real = self.memories.some(
+                6, now=self.cycles, unlike={near.id, far.id}, dice=random.Random(self.cycles + 1),
+            )
+            if len(real) >= 2:
+                kept = self.mind.dream(words, [memory.tokens for memory in real])["kept"]
+                self.dreams_learned_from += int(kept)
+                self.dreams_undone += int(not kept)
         self.line.bring_back(words, DREAM)
         self._dream = (sight, sound)
         return True
@@ -366,6 +383,7 @@ class LifeLoop:
                 **self.memories.report(),
                 "recalled": self.recalled, "recalled_nothing": self.recalled_nothing,
                 "revisited_in_rest": self.revisited, "dreamed_in_rest": self.dreamed,
+                "dreams_learned_from": self.dreams_learned_from, "dreams_undone": self.dreams_undone,
                 "let_go_by_choice": self.let_go,
                 "not_kept_because_full": self.not_kept_full,
             },

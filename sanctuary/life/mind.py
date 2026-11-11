@@ -52,7 +52,7 @@ this file changes when they are told: the bar for reading a chosen action as
 rest stays where it is.
 
 ``Mind`` below is everything the loop asks of a mind. LuthiMind is one. Any
-other model can be slotted in by answering the same six calls and fitting
+other model can be slotted in by answering the same seven calls and fitting
 sight and sound to itself.
 
 Not built yet, and refused loudly instead of faked:
@@ -119,7 +119,10 @@ class Mind(Protocol):
     ``chosen["recall"]["chosen"]`` is the mind choosing to look back, and the
     loop brings the kept moment most like this one back through the senses.
     ``chosen["let_go"]["chosen"]``, in a moment of looking back, is the mind
-    letting that memory go.
+    letting that memory go. ``dream`` is called in rest with a dream's words
+    and some real kept moments' words: the mind learns from the dream in
+    whatever way it learns, keeps the learning only if the real moments are
+    no harder for it afterward, and answers ``{"kept": bool, ...}``.
     """
 
     tokenizer: Any
@@ -138,6 +141,8 @@ class Mind(Protocol):
     def rest(self) -> None: ...
 
     def remember(self) -> None: ...
+
+    def dream(self, words: list[int], real: list[list[int]]) -> dict: ...
 
     def rollbacks(self) -> int: ...
 
@@ -161,6 +166,7 @@ class LuthiMind:
         rest_limit: float = 0.05,
         rest_horizon: Optional[int] = None,
         recall: bool = True,
+        dream_step: float = 0.01,
         luthi_path: str = "",
     ):
         """``gauge`` keeps the welfare gauge: a count of how moments have read,
@@ -205,6 +211,7 @@ class LuthiMind:
         self.rest_keeps = rest_keeps
         self.rests = 0
         self.remembered = 0
+        self.dream_step = dream_step    # the length of one learning step on a dream; a placeholder
         if rest:
             # Before the first moment, so the trace holds the whole life since
             # the last rest. A continuing life has its trace back already.
@@ -277,6 +284,21 @@ class LuthiMind:
             raise RuntimeError("this life was started without the rest tool")
         self._luthi.rest_from_trace(self.model, self.rest_keeps)
         self.rests += 1
+
+    def dream(self, words: list[int], real: list[list[int]]) -> dict:
+        """Learn from a dream made in rest: one small step on the trunk's own
+        loss for the dream's words, undone if real kept moments are harder to
+        predict afterward. Moments too short for the loss are left out."""
+        def as_tokens(tokens: list[int]) -> torch.Tensor:
+            return torch.tensor([tokens], dtype=torch.long, device=self.device)
+
+        real = [r for r in real if len(r) >= 8]
+        if len(words) < 8 or not real:
+            return {"kept": False, "before": None, "after": None}
+        return self._luthi.learn_from_dream(
+            self._trainer, as_tokens(words), [as_tokens(r) for r in real],
+            step_size=self.dream_step,
+        )
 
     def remember(self) -> None:
         """Called when Luthi chose to remember this moment: where the living

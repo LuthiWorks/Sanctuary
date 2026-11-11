@@ -236,6 +236,16 @@ dreaming helps.
 Open, for Brian: choosing dreams that teach (the part of Google's method that makes
 dreaming improve the model), and how a dream is mixed (half and half is a placeholder).
 
+## 10:15: learning from dreams
+
+Brian: "can you build the part that lets the model improve through dreaming". Measured
+and built in LuthiModel (`docs/research/2026-11-11_can-dreaming-improve.md`). Here:
+when rest makes a dream, the mind takes one checked learning step on it
+(`Mind.dream`), against up to six kept moments that are not the dream's parents, and
+the step is undone if those became harder to predict. Choosing among dreams is not
+built, because it measured as no gain. The "not built" row in step 10's table is
+replaced by this.
+
 ## Artifacts
 
 - `sanctuary/life/memory.py`, `loop.py`, `mind.py`, `senses.py` (`Line.bring_back`).

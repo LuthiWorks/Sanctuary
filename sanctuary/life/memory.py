@@ -56,8 +56,12 @@ Two things Brian added the same morning:
   picked at random. Their words are joined, and the picture comes from one
   and the sound from the other. It arrives marked ``[dream]``, so it is told
   from both a memory and the present. A dream is not kept unless the mind
-  chooses to remember it, as with any moment. Not built: choosing which
-  dreams teach most. Every dream here is a random mix.
+  chooses to remember it, as with any moment. The mind also learns from each
+  dream when it is made, and the learning is checked against real kept
+  moments and undone if it made them harder to predict (10:15: "the part
+  that lets the model improve through dreaming"). Choosing which dreams to
+  learn from was measured and gave no reliable gain, so every dream is a
+  random mix.
 
 Not here: recalling in order ("and then what happened?"), and anything that
 fades. See the research entry.
@@ -272,6 +276,13 @@ class Memories:
         if not others:
             return None
         return self.open(others[min(int(pick * len(others)), len(others) - 1)])
+
+    def some(self, count: int, *, now: int, unlike: set[int], dice) -> list[Memory]:
+        """Up to ``count`` different kept memories, not still the present and
+        not in ``unlike``, picked by ``dice`` (a ``random.Random``)."""
+        still_present = {i for i, c in zip(self._ids, self._cycles) if now - c < self.recent}
+        others = sorted(set(self._ids) - still_present - self._gone - set(unlike))
+        return [self.open(i) for i in dice.sample(others, min(count, len(others)))]
 
     def open(self, memory_id: int) -> Memory:
         saved = torch.load(self._path(memory_id), weights_only=False)

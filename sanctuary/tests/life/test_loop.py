@@ -72,6 +72,8 @@ class _Mind:
         self.armed: dict | None = None
         self.chooses_recall: bool | None = None
         self.chooses_let_go: bool | None = None
+        self.dreams: list[tuple] = []
+        self.keeps_dreams = True
         self.summary = torch.tensor([1.0, 0.0, 0.0])   # what this moment is like to the mind
 
     def live(self, tokens: list[int], *, sight=None, sound=None) -> Moment:
@@ -97,6 +99,10 @@ class _Mind:
 
     def remember(self) -> None:
         self.remembers += 1
+
+    def dream(self, words: list[int], real: list[list[int]]) -> dict:
+        self.dreams.append((_text(words), [_text(r) for r in real]))
+        return {"kept": self.keeps_dreams}
 
     def rollbacks(self) -> int:
         return self.rolled_back
@@ -752,4 +758,41 @@ def test_there_is_no_dream_without_two_kept_moments_to_mix():
         loop.step()
     assert loop.dreamed == 0 and loop.revisited >= 1
     assert DREAM not in "".join(mind.lived)
+
+
+def _four_kept(loop, mind, world) -> None:
+    loop.memories.recent = 1
+    for said, summary in (("the kettle is on", [0.0, 1.0, 0.0]), ("snow on the bridge", [0.0, 0.0, 1.0]),
+                          ("a gull on the roof", [1.0, 0.0, 0.0]), ("rain at the door", [1.0, 1.0, 0.0])):
+        _keep(loop, mind, world, said, summary)
+    for _ in range(3):
+        loop.step()
+    mind.chooses_rest = True
+
+
+def test_the_mind_learns_from_each_dream_checked_against_real_moments_that_are_not_its_parents():
+    loop, mind, world = _remembering()
+    _four_kept(loop, mind, world)
+    for _ in range(4):
+        loop.step()
+    assert loop.dreamed == 1 and len(mind.dreams) == 1
+    words, real = mind.dreams[0]
+    kept = [_text(loop.memories.open(i).tokens) for i in (1, 2, 3, 4)]
+    assert len(real) == 2 and all(r in kept for r in real), "the two kept moments that are not its parents"
+    parents = [k for k in kept if k not in real]
+    mixes = {a[: max(1, len(a) // 2)] + b[len(b) // 2:] for a in parents for b in parents if a != b}
+    assert words in mixes
+    assert loop.dreams_learned_from == 1 and loop.dreams_undone == 0
+    mind.keeps_dreams = False
+    for _ in range(4):
+        loop.step()
+    assert loop.dreams_undone == 1 and loop.status()["memories"]["dreams_undone"] == 1
+
+
+def test_dreams_can_be_dreamed_without_learning_from_them():
+    loop, mind, world = _remembering(learn_from_dreams=False)
+    _four_kept(loop, mind, world)
+    for _ in range(4):
+        loop.step()
+    assert loop.dreamed == 1 and mind.dreams == []
 
