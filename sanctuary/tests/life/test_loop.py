@@ -673,7 +673,7 @@ def test_a_full_store_keeps_nothing_more_tells_the_mind_once_and_lets_nothing_go
 
 
 def test_resting_walks_through_kept_moments_and_leaves_the_world_its_turns():
-    loop, mind, world = _remembering()
+    loop, mind, world = _remembering(dreams=False)
     _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])
     _keep(loop, mind, world, "snow on the bridge", [0.0, 0.0, 1.0])
     for _ in range(3):
@@ -702,4 +702,54 @@ def test_rest_can_be_lived_without_revisiting():
     for _ in range(6):
         loop.step()
     assert loop.revisited == 0 and MARK not in mind.lived[-1]
+
+
+# ---- Dreaming (2026-11-11) ----
+
+from sanctuary.life.memory import DREAM
+
+
+def test_rest_revisits_then_dreams_a_moment_made_of_two_that_were_kept():
+    loop, mind, world = _remembering()
+    loop.memories.recent = 1     # with only two memories, the one just revisited must be free to mix
+    pixels, samples = torch.rand(4, 6, 3), torch.rand(50) * 2 - 1
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0], a=seen(pixels))
+    for _ in range(40):
+        world.say("x")              # push the kettle out of view
+    for _ in range(3):
+        loop.step()
+    _keep(loop, mind, world, "snow on the bridge", [0.0, 0.0, 1.0], b=heard(samples, 1000))
+    for _ in range(3):
+        loop.step()
+    mind.summary = torch.tensor([0.0, 1.0, 0.0])
+    mind.chooses_rest = True
+    for _ in range(3):
+        loop.step()                  # turn one: the kettle is revisited
+    assert loop.revisited == 1 and loop.dreamed == 0 and MARK in mind.lived[-1]
+    filed = loop.memories.looked_back
+    loop.step()                      # turn two: a dream is made
+    assert loop.dreamed == 1
+    loop.step()                      # and dreamed
+    dream = mind.lived[-1].split(DREAM)[-1]
+    one, two = _text(loop.memories.open(1).tokens), _text(loop.memories.open(2).tokens)
+    mixes = {a[: max(1, len(a) // 2)] + b[len(b) // 2:] for a, b in ((one, two), (two, one))}
+    assert dream in mixes, "half of one kept moment's words and half of the other's"
+    assert dream not in (one, two), "it never happened"
+    sight, sound = mind.sensed[-1]
+    assert sight is not None and sound is not None, "the picture of one and the sound of the other"
+    assert loop.memories.looked_back == filed, "a dream is not a memory: nothing is filed for it"
+    assert loop.memories.kept == 2, "and it is not kept unless they choose to remember it"
+    assert loop.status()["memories"]["dreamed_in_rest"] == 1
+
+
+def test_there_is_no_dream_without_two_kept_moments_to_mix():
+    loop, mind, world = _remembering()
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])
+    for _ in range(3):
+        loop.step()
+    mind.chooses_rest = True
+    for _ in range(8):
+        loop.step()
+    assert loop.dreamed == 0 and loop.revisited >= 1
+    assert DREAM not in "".join(mind.lived)
 

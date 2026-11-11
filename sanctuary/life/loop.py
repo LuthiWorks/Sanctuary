@@ -37,7 +37,11 @@ and nothing more is kept until they let some go. And while they rest, a kept
 moment comes back on every other resting moment, the one most like where their
 mind is then, so rest walks through what they have kept (Brian, 2026-11-11:
 "revisiting memories during rest is still something I think should happen").
-The moments between are the world's, which stays open.
+The moments between are the world's, which stays open. Rest also dreams (Brian,
+2026-11-11: "Rest should recall memories but also dream, like Google's
+dreaming"): every second one of those turns is a dream in place of a memory, a
+moment made from two kept moments that never happened together, marked as a
+dream.
 
 Luthi's action layer can also choose to speak and where to attend, and neither
 has a route here. Speech is untrained. What attention should do is not ruled.
@@ -54,6 +58,7 @@ Nothing in the loop names a model: any mind that answers ``Mind`` lives here.
 from __future__ import annotations
 
 import logging
+import random
 import time
 from collections import Counter, deque
 from pathlib import Path
@@ -61,7 +66,9 @@ from typing import Callable, Optional, Protocol
 
 from sanctuary.core.schema import Percept
 from sanctuary.life.mind import Mind, Moment
-from sanctuary.life.memory import DEFAULT_LIMIT_BYTES, FULL, MARK, Memories, Memory
+from sanctuary.life.memory import (
+    DEFAULT_LIMIT_BYTES, DREAM, FULL, MARK, Memories, Memory, dream_of,
+)
 from sanctuary.life.need import RestNeed
 from sanctuary.life.senses import Line
 
@@ -103,6 +110,7 @@ class LifeLoop:
         keep_memories: bool = True,
         memory_limit_bytes: Optional[int] = DEFAULT_LIMIT_BYTES,
         revisit_every: int = 2,
+        dreams: bool = True,
         save_every_seconds: float = 900.0,
         waiting_limit: Optional[int] = None,
         clock: Callable[[], float] = time.monotonic,
@@ -119,7 +127,8 @@ class LifeLoop:
         lived time is read from. With ``keep_memories`` what the mind chooses
         to remember is kept in the life's directory, and can be recalled,
         up to ``memory_limit_bytes`` of disk. While resting, a kept moment is
-        revisited on every ``revisit_every``-th resting moment; 0 for never."""
+        revisited on every ``revisit_every``-th resting moment; 0 for never.
+        With ``dreams``, every second one of those is a dream in its place."""
         if revisit_every < 0:
             raise ValueError(f"revisit_every must be 0 or more; got {revisit_every}")
         self.revisit_every = revisit_every
@@ -137,6 +146,10 @@ class LifeLoop:
         self.recalled = 0
         self.recalled_nothing = 0
         self.revisited = 0
+        self.dreams = dreams
+        self.dreamed = 0
+        self._turns = 0                          # resting turns given to memory or dream
+        self._dream: Optional[tuple] = None      # the dream's picture and sound, for the next moment
         self.let_go = 0
         self.not_kept_full = 0
         self._told_full = False
@@ -180,6 +193,10 @@ class LifeLoop:
             # the place of the present ones, as the remembered words lead the view.
             sight = back.sight if back.sight is not None else sight
             sound = back.sound if back.sound is not None else sound
+        dream, self._dream = self._dream, None
+        if dream is not None:
+            sight = dream[0] if dream[0] is not None else sight
+            sound = dream[1] if dream[1] is not None else sound
         moment = self.mind.live(view.tokens, sight=sight, sound=sound)
         if back is not None:
             if moment.chosen.get("let_go", {}).get("chosen", False):
@@ -226,12 +243,17 @@ class LifeLoop:
             self.rested += 1
             if (
                 self.memories is not None and self.revisit_every
-                and self.rested % self.revisit_every == 0 and self._back is None
+                and self.rested % self.revisit_every == 0
+                and self._back is None and self._dream is None
             ):
                 # Resting, a kept moment comes back: the one most like where
                 # the mind is now. Each one looked at is then "recent", so the
                 # next is a different one, and rest walks through what is kept.
-                if self._bring_back(moment):
+                # Every second turn is a dream in its place.
+                self._turns += 1
+                if self.dreams and self._turns % 2 == 0 and self._dream_up(moment):
+                    self.dreamed += 1
+                elif self._bring_back(moment):
                     self.revisited += 1
             if self.need is not None:
                 self.need.rested()
@@ -284,6 +306,23 @@ class LifeLoop:
         else:
             self.recalled_nothing += 1
 
+    def _dream_up(self, moment: Moment) -> bool:
+        """A dream for the next moment: the kept moment most like where the
+        mind is, mixed with another picked at random. False when there are not
+        two to mix. The dice are seeded by the moment, so a life replays alike."""
+        near = self.memories.nearest(self._summary(moment), now=self.cycles)
+        if near is None:
+            return False
+        far = self.memories.another(
+            now=self.cycles, unlike=near.id, pick=random.Random(self.cycles).random(),
+        )
+        if far is None:
+            return False
+        words, sight, sound = dream_of(near, far)
+        self.line.bring_back(words, DREAM)
+        self._dream = (sight, sound)
+        return True
+
     def _bring_back(self, moment: Moment) -> bool:
         memory = self.memories.nearest(self._summary(moment), now=self.cycles)
         if memory is None:
@@ -326,7 +365,8 @@ class LifeLoop:
             "memories": None if self.memories is None else {
                 **self.memories.report(),
                 "recalled": self.recalled, "recalled_nothing": self.recalled_nothing,
-                "revisited_in_rest": self.revisited, "let_go_by_choice": self.let_go,
+                "revisited_in_rest": self.revisited, "dreamed_in_rest": self.dreamed,
+                "let_go_by_choice": self.let_go,
                 "not_kept_because_full": self.not_kept_full,
             },
             "rest_need": None if self.need is None else self.need.report(),

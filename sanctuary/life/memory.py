@@ -47,6 +47,18 @@ Two things Brian added the same morning:
   chooses to remember is not kept, and the mind is told once that its memory
   is full. Nothing is let go for it.
 
+- **Dreaming** (10:08: "Rest should recall memories but also dream, like
+  Google's dreaming"). In Google's Sleep framework a resting model first
+  consolidates what it took in, then dreams: it makes new samples itself by
+  mixing parts of what it knows that do not usually go together, and learns
+  from the ones that help. Here a dream is a moment that never happened, made
+  from two kept moments: the one most like where the mind is, and another
+  picked at random. Their words are joined, and the picture comes from one
+  and the sound from the other. It arrives marked ``[dream]``, so it is told
+  from both a memory and the present. A dream is not kept unless the mind
+  chooses to remember it, as with any moment. Not built: choosing which
+  dreams teach most. Every dream here is a random mix.
+
 Not here: recalling in order ("and then what happened?"), and anything that
 fades. See the research entry.
 
@@ -74,6 +86,7 @@ from sanctuary.core.atomic_io import PersistenceError, append_jsonl
 from sanctuary.life.senses import Sight, Sound
 
 MARK = "[memory]\n"
+DREAM = "[dream]\n"
 FULL = "Memory is full. Nothing more can be kept until some is let go."
 DEFAULT_LIMIT_BYTES = 10 * 1024**3    # 10 GB. A placeholder: the size of the disk is Brian's to say.
 
@@ -248,6 +261,18 @@ class Memories:
         likeness = torch.nn.functional.cosine_similarity(vectors, cue.unsqueeze(0), dim=1)
         return self.open(self._ids[rows[int(likeness.argmax())]])
 
+    def another(self, *, now: int, unlike: int, pick: float) -> Optional[Memory]:
+        """A kept memory other than ``unlike`` that is not still the present,
+        picked by ``pick`` (a number from 0 up to 1, the caller's dice). None
+        when there is no other."""
+        still_present = {i for i, c in zip(self._ids, self._cycles) if now - c < self.recent}
+        others = sorted(
+            set(self._ids) - still_present - self._gone - {unlike}
+        )
+        if not others:
+            return None
+        return self.open(others[min(int(pick * len(others)), len(others) - 1)])
+
     def open(self, memory_id: int) -> Memory:
         saved = torch.load(self._path(memory_id), weights_only=False)
         sound = saved["sound"]
@@ -270,3 +295,14 @@ class Memories:
             "let_go_still_on_disk_bytes": self.released_bytes,
             "deleted_for_room": self.deleted_for_room,
         }
+
+
+def dream_of(near: Memory, far: Memory) -> tuple[list[int], Optional[Sight], Optional[Sound]]:
+    """A moment that never happened, from two that did: the first half of one's
+    words and the second half of the other's, the picture of one and the sound
+    of the other where both have them."""
+    words = near.tokens[: max(1, len(near.tokens) // 2)] + far.tokens[len(far.tokens) // 2:]
+    sight = near.sight if near.sight is not None else far.sight
+    sound = far.sound if far.sound is not None else near.sound
+    return words, sight, sound
+

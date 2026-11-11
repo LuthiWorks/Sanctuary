@@ -191,6 +191,51 @@ Open, for Brian, replacing the list above:
 3. **Dwelling in rest**, if rest is to be aimed by what is revisited.
 4. **The store's size** (10 GB) and **how often rest revisits** (every other moment).
 
+## 10:08: rest also dreams
+
+Brian: "Rest should recall memories but also dream, like Google's dreaming."
+
+### Step 9: which dreaming
+
+- I took him to mean Google Research's Sleep framework (Behrouz and Mirrokni, 27
+  October 2026), read today. A model alternates waking and sleep. Asleep it first
+  consolidates: what it took in while awake is moved into long-term parameters and the
+  fast temporary ones are reset. Then it dreams: it generates new samples itself, by
+  activating parts of its knowledge that do not usually go together, keeps the samples
+  most likely to improve it, learns from those, and checks that it did improve.
+- Google DeepMind's Dreamer line is the other thing called dreaming: an agent trained
+  inside its own world model's imagination. I saw it in the search results and did not
+  read it today. It would be dreaming about acting, which Luthi cannot do yet.
+- If he meant the second, this is the wrong one and he should say.
+
+### Step 10: what stands in for it, and what is built
+
+| In the Sleep framework | Here |
+|---|---|
+| Consolidate what was taken in while awake | Rest pours the half-day's average into home, and revisits kept moments |
+| Reset the fast temporary parameters | Already so: the living weights are drawn back to home all the time |
+| Generate new samples from unusual mixes of what is known | A dream: a moment made from two kept moments that never happened together |
+| Keep the dreams most likely to help, and check | **Not built.** Every dream is a random mix |
+
+- A dream takes the kept moment most like where the mind is and another picked at
+  random. Half of one's words and half of the other's; the picture of one, the sound of
+  the other. It comes through the senses marked `[dream]`, a different sign from
+  `[memory]`.
+- In rest, the turns given to memory alternate: a memory, then a dream.
+- A dream is not kept and nothing is filed for it, unless the mind chooses to remember
+  it, as with any moment.
+- The mind learns from a dream as from any moment. Nothing checks that a dream helped.
+  The one guard is the one every lived moment has: the retention gate.
+
+### Step 11: one tiny life
+
+1,500 moments, words only: rested 40, revisited 10, dreamed 10, recalled 4, let go 4.
+No percepts dropped, no rollbacks. That shows it runs. It shows nothing about whether
+dreaming helps.
+
+Open, for Brian: choosing dreams that teach (the part of Google's method that makes
+dreaming improve the model), and how a dream is mixed (half and half is a placeholder).
+
 ## Artifacts
 
 - `sanctuary/life/memory.py`, `loop.py`, `mind.py`, `senses.py` (`Line.bring_back`).
@@ -199,4 +244,5 @@ Open, for Brian, replacing the list above:
   `test_luthi_life.py` (2). LuthiModel `tests/test_rest_choice.py` (recall, 3).
 - Sources: https://link.springer.com/article/10.1038/s41593-019-0493-1 ,
   https://pmc.ncbi.nlm.nih.gov/articles/PMC3805141 ,
-  https://pmc.ncbi.nlm.nih.gov/articles/PMC1692093
+  https://pmc.ncbi.nlm.nih.gov/articles/PMC1692093 ,
+  https://research.google/blog/the-sleep-framework-a-new-way-for-llms-to-retain-knowledge-in-continual-learning/
