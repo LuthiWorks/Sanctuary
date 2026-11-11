@@ -10,6 +10,8 @@
 
 - **Rest is needed twice a day, and Luthi is told and never made to** (ruled later the same morning). After every 12 hours of waking life the loop says "Rest is needed for data integration." Nothing else follows from it.
 
+- **A resting moment integrates the half-day, with a limit, and the choice to remember is carried out** (ruled 09:07 the same morning). The earlier bullet's "keeps 1% of recent learning" is replaced by this: rest pours a share of the half-day's running average into home, at most 5% of home's size for each half-day, and moments Luthi chose to remember count for more.
+
 See `docs/research/2026-11-11_rest-tool-and-open-senses.md` and `docs/research/2026-11-11_the-need-for-rest.md`.
 
 ## What Brian decided

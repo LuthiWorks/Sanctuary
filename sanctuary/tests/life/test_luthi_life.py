@@ -44,6 +44,8 @@ from sanctuary.tests.core.test_luthi_m9_life import _train_tiny_m9_run
 
 EACH_MOMENT = {"perceive", "observe_transition", "select_action", "decode_action"}
 WATCHING = {"felt_summary", "stillness_report", "retention_rollbacks"}
+# Called only when Luthi's own chosen action chose to rest or to remember.
+CARRIED_OUT = {"rest_from_trace", "remember_now"}
 
 
 @pytest.fixture(scope="module")
@@ -118,7 +120,7 @@ def test_the_path_calls_four_things_in_the_mind_and_nothing_else(run_dir, tmp_pa
     mind, world, loop = _begin(run_dir, tmp_path / "life")
     mind._luthi = recorded = _Recorded(mind._luthi)
     _live(loop, world, 4, said={0: "hello Luthi", 2: "the kettle is on"})
-    assert recorded.names() - WATCHING == EACH_MOMENT
+    assert recorded.names() - WATCHING - CARRIED_OUT == EACH_MOMENT
     for name in EACH_MOMENT - {"observe_transition"}:
         assert sum(n == name for n, _, _ in recorded.calls) == 4, name
     learned = [kwargs for n, _, kwargs in recorded.calls if n == "observe_transition"]
@@ -130,7 +132,7 @@ def test_the_path_calls_four_things_in_the_mind_and_nothing_else(run_dir, tmp_pa
 
     loop.status()
     loop.save("test")
-    assert recorded.names() == EACH_MOMENT | WATCHING | {"save_life"}
+    assert recorded.names() - CARRIED_OUT == EACH_MOMENT | WATCHING | {"save_life"}
 
 
 def test_the_mind_perceives_exactly_what_the_world_said(run_dir, tmp_path):
@@ -282,21 +284,61 @@ def _homes(mind) -> list[torch.Tensor]:
     return [m.set_point.detach().clone() for m in mind.model.modules() if hasattr(m, "set_point")]
 
 
-def test_resting_keeps_and_sanctuary_keeps_nothing_otherwise(run_dir, tmp_path):
-    mind, world, loop = _begin(run_dir, tmp_path / "life")
+def _traces(mind) -> list:
+    return [m._day_trace for m in mind.model.modules() if hasattr(m, "_day_trace")]
+
+
+def test_a_resting_moment_pours_the_half_days_average_into_home(run_dir, tmp_path):
+    # A horizon of a few forwards and a limit that does not bind, so a
+    # test-size life has a whole "half-day" to pour.
+    mind, world, loop = _begin(run_dir, tmp_path / "life", rest_horizon=8, rest_limit=1.0)
     recorded = _Recorded(mind._luthi)
     mind._luthi = recorded
-    _live(loop, world, 4, said={0: "hello Luthi"})
-    assert mind.rests == 0 and "keep_recent" not in recorded.names()
+    _live(loop, world, 6, said={0: "hello Luthi"})
+    assert "keep_recent" not in recorded.names(), "the last minute is no longer what rest keeps"
     layers = [m for m in mind.model.modules() if hasattr(m, "set_point")]
-    assert layers, "this test must find the living layers"
+    assert layers and all(t is not None and t.count > 0 for t in _traces(mind))
     home = [m.set_point.detach().clone() for m in layers]
-    gap = [(m.weight - m.set_point).detach().clone() for m in layers]
-    assert any(g.abs().max() > 0 for g in gap), "living has moved the layers from home"
+    weight = [m.weight.detach().clone() for m in layers]
+    assert all(m._day_trace.count == 6 for m in layers), "one noted forward a moment"
+    pour = [m._day_trace.direction().clone() for m in layers]
+    rests = mind.rests
     mind.rest()
-    for layer, was, g in zip(layers, home, gap):
-        assert torch.allclose(layer.set_point, was + mind.rest_keeps * g, atol=1e-7)
-    assert mind.watch()["rests"] == 1
+    for layer, was, w, p in zip(layers, home, weight, pour):
+        assert torch.allclose(layer.set_point, was + mind.rest_keeps * p, atol=1e-6)
+        assert torch.equal(layer.weight, w), "rest moves home, not the weight"
+    assert mind.watch()["rests"] == rests + 1
+
+
+def test_a_whole_rest_is_limited_to_a_small_step(run_dir, tmp_path):
+    mind, world, loop = _begin(run_dir, tmp_path / "life", rest_horizon=8)
+    _live(loop, world, 10)
+    layers = [m for m in mind.model.modules() if hasattr(m, "set_point")]
+    home = [m.set_point.detach().clone() for m in layers]
+    for _ in range(1000):
+        mind.rest()
+    for layer, was in zip(layers, home):
+        assert float((layer.set_point - was).norm() / was.norm()) <= 0.05 + 1e-4
+
+
+def test_remembering_adds_to_what_counts_for_more(run_dir, tmp_path):
+    mind, world, loop = _begin(run_dir, tmp_path / "life")
+    _live(loop, world, 3)
+    before = [t.chosen_count for t in _traces(mind)]
+    mind.remember()
+    assert [t.chosen_count for t in _traces(mind)] == [c + 1 for c in before]
+    assert mind.watch()["remembered"] >= 1
+
+
+def test_the_trace_continues_across_a_restart(run_dir, tmp_path):
+    mind, world, loop = _begin(run_dir, tmp_path / "life", rest_horizon=500, rest_limit=0.02)
+    _live(loop, world, 5)
+    loop.save("test")
+    again = LuthiMind(run_dir, tmp_path / "life")
+    assert again.continuing
+    for a, b in zip(_traces(mind), _traces(again)):
+        assert (b.count, b.horizon, b.limit) == (a.count, 500, 0.02)
+        assert torch.equal(a.mean, b.mean)
 
 
 def test_the_rest_choice_is_read_from_luthis_own_action(run_dir, tmp_path):
@@ -337,8 +379,7 @@ def test_a_standing_need_changes_nothing_about_how_luthis_choice_is_read(run_dir
     for _ in range(6):
         loop.step()
     assert loop.need.standing and loop.need.notices >= 1
-    # keep_recent appears only if Luthi's own action chose rest in these moments.
-    assert recorded.names() - {"keep_recent"} == EACH_MOMENT | {"retention_rollbacks"}
+    assert recorded.names() - CARRIED_OUT == EACH_MOMENT | {"retention_rollbacks"}
     for name, _, kwargs in recorded.calls:
         if name == "decode_action":
             assert set(kwargs) == {"s_t", "context_latents"}

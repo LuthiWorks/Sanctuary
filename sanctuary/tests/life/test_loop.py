@@ -6,6 +6,7 @@ Pins:
 - A picture or a sound reaches the mind as the world made it, with no words.
 - A bare tensor is refused loudly: it doesn't say its size, range or rate.
 - When the mind chooses rest, the loop calls its rest and slows; nothing else does.
+- When the mind chooses to remember, the loop calls its remember.
 - Twice a day the mind is told rest is needed, and it is never made to rest.
 - A choice with nothing to carry it out is counted, never dropped silently.
 - A rollback of Luthi's learning is told to Luthi.
@@ -67,6 +68,8 @@ class _Mind:
         self.takes = 1.0
         self.chooses_rest: bool | None = None
         self.rests = 0
+        self.remembers = 0
+        self.armed: dict | None = None
 
     def live(self, tokens: list[int], *, sight=None, sound=None) -> Moment:
         if self.fail_at is not None and len(self.lived) == self.fail_at:
@@ -76,12 +79,17 @@ class _Mind:
         if self.clock is not None:
             self.clock.now += self.takes
         chosen = {"active": dict(self.active)}
+        if self.armed is not None:
+            chosen["bands_armed"] = dict(self.armed)
         if self.chooses_rest is not None:
             chosen["rest"] = {"chosen": self.chooses_rest}
         return Moment(tokens=list(tokens), chosen=chosen)
 
     def rest(self) -> None:
         self.rests += 1
+
+    def remember(self) -> None:
+        self.remembers += 1
 
     def rollbacks(self) -> int:
         return self.rolled_back
@@ -197,10 +205,41 @@ def test_a_resting_moment_is_slower(monkeypatch):
 def test_a_choice_with_nothing_to_carry_it_out_is_counted():
     loop, mind, _ = _loop()
     loop.step()
-    mind.active = {"text": False, "attention": True, "memory": True}
+    mind.active = {"text": True, "attention": True, "memory": False}
     loop.step()
-    assert loop.chosen_without_route == {"attention": 2, "memory": 1}
-    assert loop.status()["chosen_without_route"] == {"attention": 2, "memory": 1}
+    assert loop.chosen_without_route == {"attention": 2, "text": 1}
+    assert loop.status()["chosen_without_route"] == {"attention": 2, "text": 1}
+
+
+def test_the_choice_to_remember_is_carried_out():
+    loop, mind, _ = _loop()
+    mind.active = {"text": False, "attention": False, "memory": True}
+    loop.step(); loop.step()
+    assert mind.remembers == 2 and loop.remembered == 2
+    assert loop.chosen_without_route == {} and loop.status()["remembered_moments"] == 2
+    mind.active["memory"] = False
+    loop.step()
+    assert mind.remembers == 2, "only when they choose it"
+
+
+def test_remembering_is_not_carried_out_before_the_minds_own_baseline_exists():
+    loop, mind, _ = _loop()
+    mind.active = {"text": False, "attention": False, "memory": True}
+    mind.armed = {"text": True, "attention": True, "memory": False}
+    loop.step()
+    assert mind.remembers == 0 and loop.chosen_without_route == {"memory": 1}
+    mind.armed["memory"] = True
+    loop.step()
+    assert mind.remembers == 1
+
+
+def test_a_mind_that_cannot_rest_has_its_choice_to_remember_counted_and_no_more():
+    mind = _Mind()
+    mind.can_rest = False
+    mind.active = {"text": False, "attention": False, "memory": True}
+    loop = LifeLoop(mind, TextWorld(), hz=0.0, rest_every_seconds=None)
+    loop.step()
+    assert mind.remembers == 0 and loop.chosen_without_route == {"memory": 1}
 
 
 def test_a_rollback_is_told_to_luthi_the_next_moment():

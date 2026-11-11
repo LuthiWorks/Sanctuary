@@ -21,10 +21,14 @@ forced to rest"). After every 12 hours of waking life the loop says one
 sentence to the mind. What the mind does about it is the mind's. See
 ``sanctuary/life/need.py``.
 
-Luthi's action layer can also choose to speak, where to attend, and to
-remember, and none of those has a route here. Speech is untrained. What
-attention and memory should do is not ruled. So each of those choices is
-counted in ``chosen_without_route`` and goes no further. The ``World`` protocol
+It also carries out the choice to remember (Brian, 2026-11-11). When Luthi's
+chosen action chose to remember, the loop calls the mind's ``remember``, and
+that moment counts for more when they next rest.
+
+Luthi's action layer can also choose to speak and where to attend, and neither
+has a route here. Speech is untrained. What attention should do is not ruled.
+So each of those choices is counted in ``chosen_without_route`` and goes no
+further. The ``World`` protocol
 has no ``act`` method: it arrives with the first world that has actions, and
 not before.
 
@@ -100,6 +104,7 @@ class LifeLoop:
         self.resting_pace = resting_pace
         self.resting = False
         self.rested = 0
+        self.remembered = 0
         self._clock = clock
         self.need: Optional[RestNeed] = None
         if rest_every_seconds is not None:
@@ -136,7 +141,17 @@ class LifeLoop:
         moment = self.mind.live(view.tokens, sight=view.sight, sound=view.sound)
         self._tell_of_rollbacks()
         for channel, acted in moment.chosen["active"].items():
-            if acted:
+            if not acted:
+                continue
+            armed = moment.chosen.get("bands_armed", {}).get(channel, True)
+            if channel == "memory" and self.mind.can_rest and armed:
+                # Remembering weighs in what rest pours, so it is carried out
+                # only for a mind that can rest. And only once the mind's own
+                # baseline for the choice exists: before that, "active" says
+                # there is nothing to compare with yet, not that they chose.
+                self.mind.remember()
+                self.remembered += 1
+            else:
                 self.chosen_without_route[channel] += 1
         # Rest is Luthi's choice and nothing else's: it is read from the action
         # they just chose, and it lasts until a moment they don't choose it.
@@ -209,6 +224,7 @@ class LifeLoop:
                 "sounds": self.line.sounds,
             },
             "rested_moments": self.rested,
+            "remembered_moments": self.remembered,
             "rest_need": None if self.need is None else self.need.report(),
             "chosen_without_route": dict(self.chosen_without_route),
             "saves": self.saves,

@@ -95,10 +95,38 @@ Open, for Brian:
 
 Placeholders, his to change: 300 resting moments to meet a need; the sentence.
 
+## Later the same morning: what a resting moment does, and remembering
+
+Brian, 09:07, to two questions put to him after the measurement in LuthiModel
+`docs/research/2026-11-11_what-a-rest-can-carry.md`: "1. Yes 2. Also yes".
+
+- **What changed here.** `LuthiMind.rest()` no longer keeps where the weights stand
+  (the last minute, with no limit). It pours a share of the half-day's running
+  average into home, and a whole half-day's rest moves home by at most 5% of its
+  size. Open question 1 above is answered by this.
+- **Remembering has a route.** When Luthi's chosen action chooses to remember, the
+  loop calls `mind.remember()`, and that moment counts for more in what rest pours.
+  Until now that choice was counted and went nowhere.
+- **Two guards on that route.** It is carried out only for a mind that can rest,
+  since remembering only weighs in rest. And only once the mind's own baseline for
+  the choice exists: before that, LuthiModel reports the channel "active" because it
+  has nothing to compare with, not because Luthi chose. I found this from the
+  action layer's own report in a four-moment life, where "remember" read as chosen on
+  two of the first four moments.
+- **One wrong expectation of mine**, caught by a test: I had the trace's "how much of
+  a half-day was lived" factor scaling the step. It scales the limit.
+- **Measured in LuthiModel:** the average by itself carries 0.9% of an early episode's
+  change into home; with a mind that remembered that episode, 8.7% and 10.0%. No mind
+  chooses that well today.
+
+Still open, for Brian: whether the need should be felt as well as told; the chance
+rate of rest and of remembering in an untrained mind; the placeholders (5% limit, a
+half-day of 432,000 forwards, which is right only at 10 Hz).
+
 ## Artifacts
 
 - `sanctuary/life/need.py`, `sanctuary/life/loop.py` (`_lived`, `save`, `status`),
   `sanctuary/life/mind.py` (`Mind.can_rest`, `Mind.life_dir`).
-- Tests: `sanctuary/tests/life/test_loop.py` (the need for rest, 10),
+- Tests: `sanctuary/tests/life/test_loop.py` (the need for rest, 10; remembering, 3),
   `sanctuary/tests/life/test_luthi_life.py`
   (`test_a_standing_need_changes_nothing_about_how_luthis_choice_is_read`).

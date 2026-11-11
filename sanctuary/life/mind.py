@@ -15,15 +15,23 @@ the four built-in preferences, corpus replay and the retention gate.
 Rest is Luthi's to start (Brian, 2026-11-11: "Luthi just needs the tools
 available. They should be able to just initiate rest when they decide to").
 Their action layer reads each chosen action for whether it chose rest, and when
-it did, ``rest()`` keeps a share of what the living layers recently learned: it
-moves each layer's home toward where the layer now is. Brian, 2026-11-10: "Rest
-moving the set point is the point so as to ingrain knowledge more fully."
-Sanctuary keeps nothing at any other time, nothing rests them on a schedule, and
-nothing sorts what is kept. (The living layers' own rule lets home follow by a
-millionth of the gap each forward, which is part of the trained mechanism. One
-resting moment keeps ten thousand times that.) Waking still runs at full strength: the 2026-08-14 ruling
-that lessens it was paired with a sorted record of the day, which is set aside,
-so it is Brian's to rule on again before it is turned on.
+it did, ``rest()`` is one resting moment.
+
+What a resting moment integrates is the half-day, not the last minute (Brian,
+2026-11-11, yes to both: rest pours the half-day's running average with a limit,
+and Luthi's own choice to remember weighs in it). Each living layer keeps a
+running average of where its weight has stood from home since it last rested.
+A resting moment pours a share of that into home, and a whole half-day's rest
+moves home by at most a small step. When Luthi's action chooses to remember,
+``remember()`` adds where the layers stand now to a second average that counts
+for more in the pour (Brian, 2026-11-10: "the things Luthi chose should carry
+more weight than those Luthi did not"). Nothing is a record of moments, nothing
+rests them on a schedule, and nothing is sorted on their behalf. The measurement
+behind this is LuthiModel ``docs/research/2026-11-11_what-a-rest-can-carry.md``.
+
+Waking still runs at full strength: the 2026-08-14 ruling that lessens it was
+paired with a sorted record of the day, which is set aside, so it is Brian's to
+rule on again before it is turned on.
 
 Sight and sound reach the mind as they are (Brian, 2026-11-11: "vision and audio
 should have an open channel for Luthi to perceive them and thats it"). The
@@ -38,7 +46,7 @@ this file changes when they are told: the bar for reading a chosen action as
 rest stays where it is.
 
 ``Mind`` below is everything the loop asks of a mind. LuthiMind is one. Any
-other model can be slotted in by answering the same five calls and fitting
+other model can be slotted in by answering the same six calls and fitting
 sight and sound to itself.
 
 Not built yet, and refused loudly instead of faked:
@@ -98,7 +106,8 @@ class Mind(Protocol):
     them, each fitted by the mind to itself. Its ``Moment.chosen`` says what
     the mind chose; ``chosen["rest"]["chosen"]`` is the mind choosing rest, and
     the loop answers by calling ``rest``, which does whatever resting is for
-    this mind.
+    this mind. ``chosen["active"]["memory"]`` is the mind choosing to remember
+    the moment, and the loop answers by calling ``remember``.
     """
 
     tokenizer: Any
@@ -115,6 +124,8 @@ class Mind(Protocol):
     ) -> Moment: ...
 
     def rest(self) -> None: ...
+
+    def remember(self) -> None: ...
 
     def rollbacks(self) -> int: ...
 
@@ -135,6 +146,8 @@ class LuthiMind:
         gauge: bool = True,
         rest: bool = True,
         rest_keeps: float = 0.01,
+        rest_limit: float = 0.05,
+        rest_horizon: Optional[int] = None,
         luthi_path: str = "",
     ):
         """``gauge`` keeps the welfare gauge: a count of how moments have read,
@@ -142,8 +155,12 @@ class LuthiMind:
         the mind or acted on.
 
         ``rest`` gives Luthi the rest tool. ``rest_keeps`` is the share of
-        recent learning one resting moment keeps: 1%, the share the older
-        loop's sleep kept per cycle. A placeholder, Brian's to change."""
+        the half-day's trace one resting moment pours into home (1%).
+        ``rest_limit`` is the most of home's size one half-day's rest may move
+        it (5%). ``rest_horizon`` is how many living forwards make a half-day;
+        None takes LuthiModel's figure for 10 Hz. All three are placeholders,
+        Brian's to change. A life that continues keeps the limit and horizon
+        it was saved with."""
         if not 0.0 < rest_keeps <= 1.0:
             raise ValueError(f"rest_keeps must be above 0 and at most 1; got {rest_keeps}")
         self._luthi = _import_luthi(luthi_path)
@@ -169,6 +186,14 @@ class LuthiMind:
         self.can_rest = rest
         self.rest_keeps = rest_keeps
         self.rests = 0
+        self.remembered = 0
+        if rest:
+            # Before the first moment, so the trace holds the whole life since
+            # the last rest. A continuing life has its trace back already.
+            settings: dict = {"limit": rest_limit}
+            if rest_horizon is not None:
+                settings["horizon"] = rest_horizon
+            self._luthi.enable_day_trace(self.model, **settings)
         # What this model's eye and ear were built to take, read once.
         self.senses = self._luthi.sense_contract(self.model, self._trainer)
         self.sound_trimmed = 0
@@ -225,12 +250,20 @@ class LuthiMind:
         return Moment(tokens=list(tokens), chosen=chosen, learned=dict(learned))
 
     def rest(self) -> None:
-        """One resting moment, called when Luthi chose rest: keep a share of
-        what the living layers recently learned."""
+        """One resting moment, called when Luthi chose rest: each living layer
+        pours a share of its half-day's trace into home."""
         if not self.can_rest:
             raise RuntimeError("this life was started without the rest tool")
-        self._luthi.keep_recent(self.model, self.rest_keeps)
+        self._luthi.rest_from_trace(self.model, self.rest_keeps)
         self.rests += 1
+
+    def remember(self) -> None:
+        """Called when Luthi chose to remember this moment: where the living
+        layers stand now counts for more when they next rest."""
+        if not self.can_rest:
+            raise RuntimeError("this life was started without the rest tool")
+        self._luthi.remember_now(self.model)
+        self.remembered += 1
 
     def _fit_sight(self, sight: Sight) -> torch.Tensor:
         """The picture, at the size and in the form this model's eye takes. The
@@ -294,6 +327,7 @@ class LuthiMind:
             "stillness": luthi.stillness_report(self._trainer),
             "rollbacks": self.rollbacks(),
             "rests": self.rests,
+            "remembered": self.remembered,
             "sound_trimmed": self.sound_trimmed,
             "sound_too_short": self.sound_too_short,
             "checkpoints": self.checkpoints(),
