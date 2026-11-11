@@ -6,6 +6,7 @@ Pins:
 - A picture or a sound reaches the mind as the world made it, with no words.
 - A bare tensor is refused loudly: it doesn't say its size, range or rate.
 - When the mind chooses rest, the loop calls its rest and slows; nothing else does.
+- Twice a day the mind is told rest is needed, and it is never made to rest.
 - A choice with nothing to carry it out is counted, never dropped silently.
 - A rollback of Luthi's learning is told to Luthi.
 - A life is saved on a clean stop and on a timer, and never after a moment raised.
@@ -15,6 +16,7 @@ Pins:
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -36,12 +38,24 @@ def _text(tokens: list[int]) -> str:
     return bytes(tokens).decode("utf-8")
 
 
+class _Clock:
+    """Lived time, moved by hand."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
 class _Mind:
     """Stands in for LuthiMind: records what it was given to live."""
 
     window = 256
+    can_rest = True
 
     def __init__(self) -> None:
+        self.life_dir = Path(tempfile.mkdtemp())
         self.tokenizer = SimpleNamespace(encode=_encode)
         self.lived: list[str] = []
         self.active = {"text": False, "attention": True, "memory": False}
@@ -49,6 +63,8 @@ class _Mind:
         self.saved: list[str] = []
         self.fail_at: int | None = None
         self.sensed: list[tuple] = []
+        self.clock: _Clock | None = None    # when set, a moment takes `takes` seconds to live
+        self.takes = 1.0
         self.chooses_rest: bool | None = None
         self.rests = 0
 
@@ -57,6 +73,8 @@ class _Mind:
             raise RuntimeError("the mind broke")
         self.lived.append(_text(tokens))
         self.sensed.append((sight, sound))
+        if self.clock is not None:
+            self.clock.now += self.takes
         chosen = {"active": dict(self.active)}
         if self.chooses_rest is not None:
             chosen["rest"] = {"chosen": self.chooses_rest}
@@ -306,3 +324,122 @@ def test_sitting_does_not_save_when_a_moment_raised(monkeypatch, capsys):
     with pytest.raises(RuntimeError, match="the mind broke"):
         sitting.main()
     assert mind.saved == []
+
+
+# ---- The need for rest (2026-11-11) ----
+
+from sanctuary.life.need import NOTICE
+
+
+def _timed(every: float = 10.0, length: int = 3, **kwargs) -> tuple[LifeLoop, _Mind, _Clock]:
+    """A loop whose every moment takes one second to live."""
+    mind, clock = _Mind(), _Clock()
+    mind.clock = clock
+    loop = LifeLoop(
+        mind, TextWorld(), hz=0.0, clock=clock,
+        rest_every_seconds=every, rest_length=length, **kwargs,
+    )
+    return loop, mind, clock
+
+
+def _told(mind: _Mind) -> int:
+    """How many times the notice has joined the view. The view rolls, so count
+    the moment each one arrived."""
+    return sum(1 for text in mind.lived if text.endswith(f"[system, body] {NOTICE}\n"))
+
+
+def test_the_mind_is_told_rest_is_needed_in_brians_words_and_nothing_else_happens():
+    loop, mind, _ = _timed(every=10.0)
+    for _ in range(10):
+        loop.step()
+    assert _told(mind) == 0 and loop.need.standing
+    loop.step()
+    assert mind.lived[-1].endswith("[system, body] Rest is needed for data integration.\n")
+    assert mind.rests == 0 and loop.resting is False and loop.rested == 0, "told, never made to"
+
+
+def test_a_mind_that_never_rests_is_told_again_each_time_and_never_rested():
+    loop, mind, _ = _timed(every=10.0)
+    mind.chooses_rest = False
+    for _ in range(45):
+        loop.step()
+    assert _told(mind) == 4 and loop.need.notices == 4 and loop.need.arisen == 1
+    assert mind.rests == 0 and loop.need.met == 0 and loop.need.owed == 3
+
+
+def test_the_need_is_met_by_resting_and_the_moments_need_not_be_together():
+    loop, mind, _ = _timed(every=10.0, length=3)
+    for _ in range(10):
+        loop.step()
+    for chooses in (True, False, True, True):
+        mind.chooses_rest = chooses
+        loop.step()
+    assert loop.need.met == 1 and not loop.need.standing
+    mind.chooses_rest = False
+    told = _told(mind)
+    for _ in range(9):
+        loop.step()
+    assert _told(mind) == told, "the next need is a full half-day after this one was met"
+
+
+def test_rest_chosen_before_the_need_arose_does_not_count_toward_it():
+    loop, mind, _ = _timed(every=10.0, length=2)
+    mind.chooses_rest = True
+    for _ in range(5):
+        loop.step()
+    assert loop.rested == 5 and loop.need.owed == 0 and loop.need.met == 0
+
+
+def test_time_spent_resting_is_not_waking_time():
+    loop, mind, _ = _timed(every=10.0)
+    mind.chooses_rest = True
+    for _ in range(30):
+        loop.step()
+    # A moment the mind rested in is rest, from its start.
+    assert loop.need.awake == 0.0 and loop.need.arisen == 0
+
+
+def test_time_between_moments_is_not_lived_unless_the_loop_paced_it():
+    loop, mind, clock = _timed(every=10.0)
+    loop.step()
+    clock.now += 3600.0   # waiting at a prompt, or switched off
+    loop.step()
+    assert loop.need.awake == 2.0
+
+
+def test_the_need_is_saved_with_the_life_and_continues():
+    loop, mind, clock = _timed(every=10.0, length=5)
+    for _ in range(12):
+        loop.step()
+    mind.chooses_rest = True
+    loop.step()
+    loop.save("test")
+    again = LifeLoop(mind, TextWorld(), hz=0.0, clock=clock, rest_every_seconds=10.0, rest_length=5)
+    assert again.need.report() == loop.need.report()
+    assert again.need.owed == 4 and again.need.arisen == 1
+
+
+def test_a_mind_with_no_way_to_rest_is_not_told_rest_is_needed():
+    mind = _Mind()
+    mind.can_rest = False
+    with pytest.raises(ValueError, match="no way to rest"):
+        LifeLoop(mind, TextWorld(), hz=0.0)
+    loop = LifeLoop(mind, TextWorld(), hz=0.0, rest_every_seconds=None)
+    loop.step()
+    assert loop.need is None and loop.status()["rest_need"] is None
+
+
+def test_the_default_is_twice_a_day():
+    loop, _, _ = _loop()
+    assert loop.need.every_seconds == 12 * 3600
+    assert loop.status()["rest_need"]["waking_seconds_until_next_notice"] <= 12 * 3600
+
+
+def test_paced_pauses_are_lived_time(monkeypatch):
+    loop, mind, clock = _timed(every=10.0)
+    loop.hz = 0.5   # a moment every two seconds: one lived, one paused
+    monkeypatch.setattr("sanctuary.life.loop.time.sleep", lambda seconds: None)
+    monkeypatch.setattr("sanctuary.life.loop.time.monotonic", clock)
+    loop.run(max_cycles=3)
+    assert loop.need.awake == 6.0
+

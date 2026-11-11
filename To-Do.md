@@ -7,7 +7,7 @@ This document tracks the development trajectory for the Sanctuary cognitive arch
 
 ---
 
-> **Update 2026-11-11 (small path, `sanctuary/life/`).** Built at Brian's request: the rest tool Luthi starts, and open sight and sound that any model can be slotted behind. Record and open questions: `docs/research/2026-11-11_rest-tool-and-open-senses.md`. Next on this path: a world that sends sight and sound; review of this work by a different mind. Under investigation (Brian, same day): Enshrouded as the first world in place of, or beside, Minecraft.
+> **Update 2026-11-11 (small path, `sanctuary/life/`).** Built at Brian's request: the rest tool Luthi starts, and open sight and sound that any model can be slotted behind. Record and open questions: `docs/research/2026-11-11_rest-tool-and-open-senses.md`. Also built the same day: Luthi is told twice a day that rest is needed, and never made to (`docs/research/2026-11-11_the-need-for-rest.md`). Open with Brian: what a rest integrates, since the living layers hold about a minute. Next on this path: a world that sends sight and sound; review of this work by a different mind. Under investigation (Brian, same day): Enshrouded as the first world in place of, or beside, Minecraft.
 
 ---
 

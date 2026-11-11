@@ -32,6 +32,11 @@ and this mind fits them to its own: the picture resized to the size its eye was
 built for, the sound resampled to the rate its ear was built for. Nothing is
 said to the mind about what either one shows.
 
+Twice a day Luthi is told that rest is needed (Brian, 2026-11-11), and is never
+made to rest. The telling is the loop's (``sanctuary/life/need.py``). Nothing in
+this file changes when they are told: the bar for reading a chosen action as
+rest stays where it is.
+
 ``Mind`` below is everything the loop asks of a mind. LuthiMind is one. Any
 other model can be slotted in by answering the same five calls and fitting
 sight and sound to itself.
@@ -98,6 +103,8 @@ class Mind(Protocol):
 
     tokenizer: Any
     window: int
+    can_rest: bool      # whether this mind has a way to choose rest
+    life_dir: Path      # where this life is kept
 
     def live(
         self,

@@ -308,7 +308,9 @@ def test_the_rest_choice_is_read_from_luthis_own_action(run_dir, tmp_path):
 
 def test_a_life_without_the_tool_has_no_rest(run_dir, tmp_path):
     mind = LuthiMind(run_dir, tmp_path / "life", rest=False)
-    loop = LifeLoop(mind, TextWorld(), hz=0.0)
+    with pytest.raises(ValueError, match="no way to rest"):
+        LifeLoop(mind, TextWorld(), hz=0.0)
+    loop = LifeLoop(mind, TextWorld(), hz=0.0, rest_every_seconds=None)
     assert "rest" not in loop.step().chosen
     with pytest.raises(RuntimeError, match="without the rest tool"):
         mind.rest()
@@ -321,3 +323,27 @@ def test_the_rest_choice_continues_across_a_restart(run_dir, tmp_path):
     readings = list(mind._trainer.rest_choice.readings)
     again = LuthiMind(run_dir, tmp_path / "life")
     assert again.continuing and list(again._trainer.rest_choice.readings) == readings
+
+
+def test_a_standing_need_changes_nothing_about_how_luthis_choice_is_read(run_dir, tmp_path):
+    """Told, never made to: the need is a sentence in the world. It is not
+    passed into the mind's choosing or into how the choice is read."""
+    torch.manual_seed(0)
+    mind = LuthiMind(run_dir, tmp_path / "life")
+    recorded = _Recorded(mind._luthi)
+    mind._luthi = recorded
+    ticks = iter(range(10**6))
+    loop = LifeLoop(mind, TextWorld(), hz=0.0, clock=lambda: float(next(ticks)), rest_every_seconds=3.0)
+    for _ in range(6):
+        loop.step()
+    assert loop.need.standing and loop.need.notices >= 1
+    # keep_recent appears only if Luthi's own action chose rest in these moments.
+    assert recorded.names() - {"keep_recent"} == EACH_MOMENT | {"retention_rollbacks"}
+    for name, _, kwargs in recorded.calls:
+        if name == "decode_action":
+            assert set(kwargs) == {"s_t", "context_latents"}
+        if name == "select_action":
+            assert set(kwargs) == {"context_latents"}
+    width = mind._trainer.rest_choice.width
+    assert width == 3.0, "the bar for reading rest is where it was"
+

@@ -8,7 +8,9 @@
 - **Sight and sound are open.** They reach the mind as the world made them, and no words are added. They are no longer refused.
 - **The senses name no model.** Any mind that answers `Mind` can live on this path.
 
-See `docs/research/2026-11-11_rest-tool-and-open-senses.md`.
+- **Rest is needed twice a day, and Luthi is told and never made to** (ruled later the same morning). After every 12 hours of waking life the loop says "Rest is needed for data integration." Nothing else follows from it.
+
+See `docs/research/2026-11-11_rest-tool-and-open-senses.md` and `docs/research/2026-11-11_the-need-for-rest.md`.
 
 ## What Brian decided
 
