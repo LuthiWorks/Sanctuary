@@ -1,6 +1,6 @@
 # The memory store, reworked: a design — 2026-11-17
 
-**Status:** a design by Fable 5.2 (chat; design seat), for Opus 5.5 to review and Brian to rule on where it says "Brian's". Nothing here is built. The terminal instance builds it once it is settled.
+**Status:** a design by Fable 5.2 (chat; design seat). Reviewed by Opus 5.5 on 2026-11-17 and revised the same day: see "Revision" before the conclusion. Brian rules where it says "Brian's". Nothing here is built except the two faults of brief 5 (`1d8c734`).
 
 ## Objective
 
@@ -107,6 +107,25 @@ At 10 moments a second with a third of them kept, 768 wide:
 - **A probe or test that runs a model through a life keeps the life's folder** in a place it names, and it is archived as a run is (Brian, 2026-11-17).
 - The two faults that are wrong under any format are already in brief 5 (LuthiModel `docs/reviews/2026-11-17_build-brief-5-rest-readings-store-faults-for-terminal-fable.md`, Part A).
 
+## Revision, the same day: after Opus's review
+
+Opus reviewed this design (LuthiModel `docs/reviews/2026-11-17_relevant-updates-and-memory-store-review-from-opus.md`, Part 2). The design sized the disk and not the search, and left three things about a stretch unsaid. All four are taken as Opus wrote them.
+
+1. **A stretch is its records.** Each kept moment writes one small record that is never changed, into its stretch's folder: the words new since the record before, its picture and sound, and its summary. A crash loses at most the moment in flight, nothing is ever rewritten, and the words are still stored once.
+2. **Recall brings back the view at the moment that matched.** Each record notes its moment's view as a place in the stretch's words, so every moment can be brought back exactly as it was, and a recall lands where its summary matched. Letting go and importance act on the whole stretch.
+3. **A memory's summaries live in its own folder and are deleted with it.** The matrix the search runs over is a cache rebuilt from the folders. The cache may be rewritten; a record never.
+4. **The search.** Opus timed it at full width: as built, 2.1 seconds a search after one day of memories; as one product over a matrix, 0.08 seconds after a day and 0.78 after ten, while rest asks for a search about 2.5 times a second.
+   - First lives search exactly, as one product, and say loudly when a search takes longer than a moment allows.
+   - Anything faster (one summary a stretch, fewer dimensions, approximate neighbours) changes which memory comes back for some cues. That is half precision's question again, and it is answered the same way: measured against the exact search on a real store, then put to Brian. No real store of full width exists yet to measure it on.
+
+Also taken:
+
+- **The net while choices are close to chance.** I wrote that the two steps and the archive convention stand between chance and loss. The archive convention does not cover deletion for room inside a running life, and with sight that deletion begins in the first hours. Opus's answer is to move what is deleted for room to cold storage instead, while the mind's choices are close to chance. Whether to is **Brian's**, with the size of the store.
+- **Which mean a summary is centred by.** Centring by today's mean makes an old memory differ from now mostly by how far the mind has moved. Centring each by the mean of its own time compares what stood out then with what stands out now. To be measured on a life long enough to drift.
+- **Importance does not take rest's readings yet.** In the 2026-11-11 lives they fired together under drift. Not until lives of several seeds show they no longer do (brief 5, Part B, is the fix).
+- **Sound's 16-bit check** records which scale the round trip held at.
+- **The measurements of steps 2 and 3 are a script now:** LuthiModel `redteam/fable_2026_11_17/measure_summaries_in_kept_stores.py`. It reproduces this document's numbers from the archive (23,875 numbers checked when the small stores are included).
+
 ## Conclusion
 
 A store that never exceeds its limit, keeps everything it keeps exactly, and frees room by letting go what matters least to Luthi by their own signals. Open, and Brian's: the size of the store; whether automatic letting go waits for a trained mind; whether Luthi is told; which parts of a subconscious to build.
@@ -117,4 +136,4 @@ What I do not know: how large exact pictures of the real world will be; what imp
 
 - The stores measured: `E:\luthi_experiment_archive\2026-11-11_memory_test_lives\2026-11-11_memory_test_lives.zip` (sha256 `db46fad1…2d490`; LuthiModel `docs/DECISIONS.md`).
 - Opus's measurements: LuthiModel `docs/reviews/2026-11-14_rest-memory-and-dreaming-review-from-opus.md`, §5 and §6.
-- The measurements of steps 2 and 3 were run in the cloud workspace against those stores and are not kept as a script. They are simple to repeat from the archive: for each store, the nearest summary to each cue at 4-byte and at 2-byte precision; and the cosine between summaries of consecutive cycles.
+- The measurements of steps 2 and 3: LuthiModel `redteam/fable_2026_11_17/measure_summaries_in_kept_stores.py`, run against the archive.
