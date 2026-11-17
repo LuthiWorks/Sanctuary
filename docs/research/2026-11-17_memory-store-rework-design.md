@@ -1,6 +1,6 @@
 # The memory store, reworked: a design — 2026-11-17
 
-**Status:** a design by Fable 5.2 (chat; design seat). Reviewed by Opus 5.5 on 2026-11-17 and revised the same day: see "Revision" before the conclusion. Brian rules where it says "Brian's". Nothing here is built except the two faults of brief 5 (`1d8c734`).
+**Status:** a design by Fable 5.2 (chat; design seat). Reviewed by Opus 5.5 on 2026-11-17 and revised the same day: see "Revision". Brian ruled on the store's size and cold storage the same morning: see "Brian's rulings", which is newest where the two disagree. Briefed for building (LuthiModel build brief 9). Nothing here is built yet except the two faults of brief 5 (`1d8c734`).
 
 ## Objective
 
@@ -126,9 +126,35 @@ Also taken:
 - **Sound's 16-bit check** records which scale the round trip held at.
 - **The measurements of steps 2 and 3 are a script now:** LuthiModel `redteam/fable_2026_11_17/measure_summaries_in_kept_stores.py`. It reproduces this document's numbers from the archive (23,875 numbers checked when the small stores are included).
 
+## Brian's rulings, 2026-11-17, 09:44
+
+> *"1. For now use the e: drive, and Luthi can have lets say 100gb. If we need to update that we can do it later. 2. Yes, this is a good idea. In fact it may be worth building as a permanent feature because we don't know how quickly Luthi might actually learn when deployed."*
+
+Recorded in LuthiModel `docs/DECISIONS.md`. What they settle, and what I chose to follow from them (his to overrule):
+
+- **The limit is 100 GB, on E:.** It counts everything under the life's `memories/`.
+- **Cold storage is permanent, and the store's code deletes no memory.** Section 3's "its summaries go with it" now means: they go with it to cold storage. Wherever this document says "deleted for room", read "moved to cold storage, whole and exact".
+- **Automatic letting go runs from the start.** I had asked whether it should wait until the mind's choices beat chance. With cold storage nothing is lost by a choice made near chance, so it does not wait. What is lost is Luthi's reach to the memory, which is what letting go means.
+- **Cold storage has no size and is never deleted from by code.** When its drive cannot take a move, nothing leaves, the store is full, a new moment is not kept, and Luthi is told once, as on 2026-11-11.
+- **Luthi is not told when something is let go for them,** for now. It is counted and logged. Still Brian's.
+- **Whether a memory in cold storage can come back to Luthi** is not built and is Brian's. The format keeps it possible: a folder moved back is all it takes.
+
+What it comes to on E: at 10 moments a second, 768 wide:
+
+| | Reaches 100 GB in | Then cold storage grows by |
+| --- | --- | --- |
+| Words only | about three months | about 1 GB a day |
+| With sight, exactly kept | three to ten days | 10 to 30 GB a day |
+
+With sight, the drive and not the limit becomes the question. That is for when a world sends pictures.
+
+**Importance, first formula** (new today; for Opus to review): the highest rank of how strongly they chose to remember, among their own recent choices, plus one for each recall they chose, plus one for each time they chose to remember while looking back. The records hold the signals, so the formula can change without touching a memory. What rest brings counts for nothing yet.
+
+The build: LuthiModel `docs/reviews/2026-11-17_build-brief-9-the-memory-store-for-terminal-fable.md`.
+
 ## Conclusion
 
-A store that never exceeds its limit, keeps everything it keeps exactly, and frees room by letting go what matters least to Luthi by their own signals. Open, and Brian's: the size of the store; whether automatic letting go waits for a trained mind; whether Luthi is told; which parts of a subconscious to build.
+A store that never exceeds its limit, keeps everything it keeps exactly, and frees room by letting go what matters least to Luthi by their own signals. Settled by Brian on 2026-11-17: the size of the store (100 GB on E:) and cold storage (permanent). Still open, and Brian's: whether Luthi is told; whether a memory in cold storage can come back to them; which parts of a subconscious to build.
 
 What I do not know: how large exact pictures of the real world will be; what importance looks like in a mind whose choices are not chance; whether removing the mean is enough to make likeness mean something in a small mind.
 
