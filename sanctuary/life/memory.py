@@ -73,11 +73,21 @@ On disk, in ``<life>/memories/``, append-only:
 
 Sight and sound are kept exactly as the world gave them, so a memory with a
 picture is as large as the picture.
+
+A memory's id comes from the files as well as the lines (2026-11-17, from
+Opus's review of 2026-11-14). A memory's file is written before its line, so
+a crash between the two leaves a file with no line. Counting ids from the
+lines alone, the next keep picked that file's id, found the file, and
+refused, at every start from then on. Now the next id is one past the highest
+id seen in a line or a file, here or in ``let_go/``. A file with no line is
+reported (``report()`` and the log) and is never deleted, rewritten or
+reached by recall: it has no summary to be found by.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -88,6 +98,8 @@ import torch
 
 from sanctuary.core.atomic_io import PersistenceError, append_jsonl
 from sanctuary.life.senses import Sight, Sound
+
+logger = logging.getLogger(__name__)
 
 MARK = "[memory]\n"
 DREAM = "[dream]\n"
@@ -131,6 +143,7 @@ class Memories:
         self._vectors: list[torch.Tensor] = []
         self.kept = 0
         self.looked_back = 0
+        self._kept_ids: set[int] = set()     # every id with a "kept" line
         if self._summaries_path.exists():
             for line in self._summaries_path.read_text(encoding="utf-8").splitlines():
                 row = json.loads(line)
@@ -141,6 +154,7 @@ class Memories:
                 self._file(row["id"], row["cycle"], torch.tensor(row["summary"]))
                 if row["kind"] == "kept":
                     self.kept += 1
+                    self._kept_ids.add(int(row["id"]))
                 else:
                     self.looked_back += 1
         self.bytes = sum(
@@ -151,6 +165,32 @@ class Memories:
             p.stat().st_size for p in self._released.glob("memory_*.pt")
         ) if self._released.exists() else 0
         self.deleted_for_room = 0
+        # Files with no line: a keep that was cut off between the two. They
+        # stay where they are. The next id goes past them.
+        on_disk = {
+            self._id_of(p)
+            for folder in (self.directory, self._released) if folder.exists()
+            for p in folder.glob("memory_*.pt")
+        }
+        self.files_with_no_line: list[int] = sorted(on_disk - self._kept_ids)
+        self._next_id = max(self._kept_ids | on_disk, default=0) + 1
+        if self.files_with_no_line:
+            logger.warning(
+                "%d memory file(s) in %s have no line in summaries.jsonl (a keep "
+                "was cut off): ids %s. They are left as they are and cannot be "
+                "recalled. The next memory's id is %d.",
+                len(self.files_with_no_line), self.directory,
+                self.files_with_no_line, self._next_id,
+            )
+
+    @staticmethod
+    def _id_of(path: Path) -> int:
+        return int(path.stem.split("_")[1])
+
+    @property
+    def newest_cycle(self) -> Optional[int]:
+        """The latest moment any summary was filed at; None when there is none."""
+        return max(self._cycles, default=None)
 
     def __len__(self) -> int:
         """How many memories can still be looked back on."""
@@ -180,9 +220,9 @@ class Memories:
         """Keep this moment. Returns the memory's id. The file is written
         before the summary is filed, so a memory is never filed without what
         it points to."""
-        memory_id = self.kept + 1
+        memory_id = self._next_id
         path = self._path(memory_id)
-        if path.exists():
+        if path.exists() or (self._released / path.name).exists():
             raise PersistenceError(f"{path} already exists; a memory is never rewritten")
         self.directory.mkdir(parents=True, exist_ok=True)
         when = datetime.now().isoformat(timespec="seconds")
@@ -193,10 +233,19 @@ class Memories:
             "sound": None if sound is None else (sound.samples.detach().cpu(), int(sound.rate)),
         }, tmp)
         os.replace(tmp, path)
+        # The file is there, so the id is used whether or not its line follows.
+        self._next_id = memory_id + 1
         self.bytes += path.stat().st_size
         self._make_room()
-        self._note("kept", memory_id, cycle, summary, when)
+        try:
+            self._note("kept", memory_id, cycle, summary, when)
+        except BaseException:
+            self.files_with_no_line.append(memory_id)
+            logger.error("memory %d: its file was written and its line was not; "
+                         "the file is left as it is", memory_id)
+            raise
         self.kept += 1
+        self._kept_ids.add(memory_id)
         return memory_id
 
     def let_go(self, memory_id: int, *, cycle: int) -> None:
@@ -204,7 +253,7 @@ class Memories:
         What was perceived waits in ``let_go/`` until the room is needed. The
         fact that it was let go is written first, so a memory is never out of
         reach without a line saying why."""
-        if not 1 <= memory_id <= self.kept or memory_id in self._gone:
+        if memory_id not in self._kept_ids or memory_id in self._gone:
             raise KeyError(f"no memory {memory_id} to let go")
         append_jsonl(self._summaries_path, {
             "kind": "let_go", "id": int(memory_id), "cycle": int(cycle),
@@ -234,7 +283,7 @@ class Memories:
     def look_back(self, memory_id: int, *, cycle: int, summary: torch.Tensor) -> None:
         """The mind has just looked back on this memory. File how it seems to
         them now beside how it seemed before. What was perceived is untouched."""
-        if not 1 <= memory_id <= self.kept or memory_id in self._gone:
+        if memory_id not in self._kept_ids or memory_id in self._gone:
             raise KeyError(f"no memory {memory_id}")
         self._note("looked_back", memory_id, cycle, summary, datetime.now().isoformat(timespec="seconds"))
         self.looked_back += 1
@@ -305,6 +354,7 @@ class Memories:
             "limit_bytes": self.limit_bytes, "full": self.full,
             "let_go_still_on_disk_bytes": self.released_bytes,
             "deleted_for_room": self.deleted_for_room,
+            "files_with_no_line": list(self.files_with_no_line),
         }
 
 

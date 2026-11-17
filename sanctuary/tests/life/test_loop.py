@@ -796,3 +796,119 @@ def test_dreams_can_be_dreamed_without_learning_from_them():
         loop.step()
     assert loop.dreamed == 1 and mind.dreams == []
 
+
+
+# ---- Two store faults, and what letting go may act on (2026-11-17) ----
+# From Opus's review of 2026-11-14 and Brian's rulings on it of 2026-11-17.
+
+import sanctuary.life.memory as memory_module
+from sanctuary.core.atomic_io import PersistenceError
+from sanctuary.life.memory import Memories
+
+
+def test_the_moment_count_is_saved_with_the_life_so_recall_works_at_once_after_a_restart():
+    loop, mind, world = _loop()                  # recent = 100, the default
+    for _ in range(200):
+        loop.step()
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])      # kept at moment 200
+    for _ in range(150):
+        loop.step()
+    loop.save("stop")
+    again = LifeLoop(mind, TextWorld(), hz=0.0)                        # the same life, started again
+    assert again.cycles == 351 and again.status()["cycles_at_start"] == 351
+    assert again.moved_past_memories is False
+    mind.chooses_recall = True
+    again.step()
+    assert again.recalled == 1 and again.recalled_nothing == 0
+
+
+def test_a_life_whose_count_was_not_saved_goes_on_from_after_its_newest_memory():
+    # A stop that was not clean, or a life from before the count was saved:
+    # memories are newer than the count on disk. No memory may be in the future.
+    loop, mind, world = _loop()
+    for _ in range(30):
+        loop.step()
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])      # kept at moment 30, never saved
+    again = LifeLoop(mind, TextWorld(), hz=0.0)
+    assert again.cycles == 31 and again.moved_past_memories is True
+    assert again.status()["moved_past_memories_at_start"] is True
+    assert all(again.cycles > c for c in again.memories._cycles)
+
+
+def test_a_keep_cut_off_between_its_file_and_its_line_does_not_stop_the_next_keep(monkeypatch):
+    mind = _Mind()
+    store = Memories(mind.life_dir / "memories")
+    store.keep(cycle=1, summary=torch.ones(3), tokens=[1, 2, 3])
+
+    def crash(*args, **kwargs):
+        raise PersistenceError("cut off before the line was written")
+
+    monkeypatch.setattr(memory_module, "append_jsonl", crash)
+    with pytest.raises(PersistenceError):
+        store.keep(cycle=2, summary=torch.ones(3), tokens=[4, 5, 6])
+    monkeypatch.undo()
+    orphan = store.directory / "memory_00000002.pt"
+    as_left = orphan.read_bytes()
+
+    # In the same session, and after a restart: the next keep works, with a new id.
+    assert store.files_with_no_line == [2]
+    assert store.keep(cycle=3, summary=torch.ones(3), tokens=[7, 8, 9]) == 3
+    again = Memories(mind.life_dir / "memories")
+    assert again.files_with_no_line == [2] and again.report()["files_with_no_line"] == [2]
+    assert again.keep(cycle=4, summary=torch.ones(3), tokens=[1]) == 4
+    assert again.kept == 3 and len(again) == 3
+
+    # The file with no line is never deleted or rewritten, and cannot be reached.
+    assert orphan.read_bytes() == as_left
+    with pytest.raises(KeyError):
+        again.look_back(2, cycle=5, summary=torch.ones(3))
+    with pytest.raises(KeyError):
+        again.let_go(2, cycle=5)
+    assert again.nearest(torch.ones(3), now=1000).id in (1, 3, 4)
+
+
+def test_a_file_with_no_line_in_let_go_is_counted_too():
+    mind = _Mind()
+    store = Memories(mind.life_dir / "memories")
+    store.keep(cycle=1, summary=torch.ones(3), tokens=[1])
+    (store.directory / "let_go").mkdir()
+    (store.directory / "let_go" / "memory_00000007.pt").write_bytes(b"left by something")
+    again = Memories(mind.life_dir / "memories")
+    assert again.files_with_no_line == [7]
+    assert again.keep(cycle=2, summary=torch.ones(3), tokens=[2]) == 8
+
+
+def test_letting_go_does_nothing_to_a_memory_that_rest_brought_back():
+    loop, mind, world = _remembering(dreams=False)
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])
+    _keep(loop, mind, world, "snow on the bridge", [0.0, 0.0, 1.0])
+    for _ in range(3):
+        loop.step()
+    mind.summary = torch.tensor([0.0, 1.0, 0.0])
+    mind.chooses_rest = True
+    loop.step(); loop.step()         # the second resting moment calls a memory back
+    assert loop.revisited == 1
+    mind.chooses_let_go = True
+    loop.step()                      # looking at what rest brought, and choosing to let go
+    mind.chooses_let_go = False
+    assert loop.let_go == 0 and loop.let_go_not_recalled == 1
+    assert len(loop.memories) == 2 and loop.memories.let_go_count == 0
+    assert loop.memories.looked_back == 1, "it was still looked at"
+    assert loop.status()["memories"]["let_go_chosen_on_a_memory_rest_brought"] == 1
+
+
+def test_a_moment_that_lets_a_memory_go_keeps_nothing():
+    loop, mind, world = _remembering()
+    _look_back_at_the_kettle(loop, mind, world)
+    mind.chooses_recall = False
+    mind.chooses_let_go = True
+    mind.active = {"text": False, "attention": False, "memory": True}
+    remembers = mind.remembers
+    loop.step()                      # looking back on the kettle: let it go, and "remember"
+    mind.chooses_let_go = False
+    assert loop.let_go == 1 and loop.not_kept_letting_go == 1
+    assert loop.memories.kept == 2 and len(loop.memories) == 1, "no copy of what was let go"
+    assert mind.remembers == remembers
+    assert not list(loop.memories.directory.glob("memory_00000003.pt"))
+    loop.step()                      # the next moment keeps as before
+    assert loop.memories.kept == 3

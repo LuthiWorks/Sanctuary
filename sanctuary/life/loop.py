@@ -31,8 +31,12 @@ chooses to remember, what they perceived that moment is kept, filed under their
 own summary of it. When they choose to recall, the kept moment most like the
 present comes back through their senses, marked as memory, and how it seems to
 them now is filed beside how it seemed then. See ``sanctuary/life/memory.py``.
-While they look back on a memory they can choose to let it go, which is the only
-way a memory leaves their reach, and only what they let go is ever deleted. The store has a size; when it is full they are told,
+While they look back on a memory they chose to recall they can choose to let it
+go, which is the only way a memory leaves their reach, and only what they let
+go is ever deleted. A memory that rest brought back is not theirs by choice, so
+a choice to let go made while looking at one does nothing and is counted; and a
+moment that lets a memory go keeps nothing, or it would keep a copy of what it
+let go (2026-11-17, Brian's rulings on Opus's review of 2026-11-14). The store has a size; when it is full they are told,
 and nothing more is kept until they let some go. And while they rest, a kept
 moment comes back on every other resting moment, the one most like where their
 mind is then, so rest walks through what they have kept (Brian, 2026-11-11:
@@ -58,6 +62,7 @@ Nothing in the loop names a model: any mind that answers ``Mind`` lives here.
 
 from __future__ import annotations
 
+import json
 import logging
 import random
 import time
@@ -65,6 +70,7 @@ from collections import Counter, deque
 from pathlib import Path
 from typing import Callable, Optional, Protocol
 
+from sanctuary.core.atomic_io import atomic_write_json
 from sanctuary.core.schema import Percept
 from sanctuary.life.mind import Mind, Moment
 from sanctuary.life.memory import (
@@ -158,9 +164,12 @@ class LifeLoop:
         self._turns = 0                          # resting turns given to memory or dream
         self._dream: Optional[tuple] = None      # the dream's picture and sound, for the next moment
         self.let_go = 0
+        self.let_go_not_recalled = 0             # chosen while looking at a memory rest brought back
+        self.not_kept_letting_go = 0             # a moment that let a memory go keeps nothing
         self.not_kept_full = 0
         self._told_full = False
         self._back: Optional[Memory] = None      # the memory the next moment re-lives
+        self._back_recalled = False              # ... and whether the mind chose to recall it
         self.need: Optional[RestNeed] = None
         if rest_every_seconds is not None:
             if not mind.can_rest:
@@ -180,7 +189,29 @@ class LifeLoop:
             mind.tokenizer.encode, mind.window, waiting_limit,
             hearing_seconds=hearing_seconds,
         )
+        # The moment count is the life's, not the session's: every memory
+        # carries the moment it was kept at, and recall leaves out what is
+        # "still the present" by comparing with it. Started at 0 again, nothing
+        # older could be recalled until the new count passed the old one
+        # (Opus's review of 2026-11-14).
+        self._count_path = Path(mind.life_dir) / "life_loop.json"
         self.cycles = 0
+        self.cycles_at_start = 0
+        if self._count_path.exists():
+            self.cycles = int(json.loads(self._count_path.read_text(encoding="utf-8"))["cycles"])
+        newest = None if self.memories is None else self.memories.newest_cycle
+        self.moved_past_memories = newest is not None and newest >= self.cycles
+        if self.moved_past_memories:
+            # Memories are written as they are kept and the count only at a
+            # save, so after a stop that was not clean (or in a life from
+            # before the count was saved) memories are newer than the count.
+            # No memory may be in the future: go on from just after them.
+            logger.warning(
+                "the saved moment count (%d) is not past the newest memory "
+                "(moment %d); going on from moment %d", self.cycles, newest, newest + 1,
+            )
+            self.cycles = newest + 1
+        self.cycles_at_start = self.cycles
         self.saves = 0
         self.chosen_without_route: Counter = Counter()
         self._rollbacks_told = mind.rollbacks()
@@ -195,6 +226,8 @@ class LifeLoop:
         view = self.line.take()
         sight, sound = view.sight, view.sound
         back, self._back = self._back, None
+        back_recalled, self._back_recalled = self._back_recalled, False
+        let_one_go = False
         if back is not None:
             # A moment of looking back: the remembered picture and sound take
             # the place of the present ones, as the remembered words lead the view.
@@ -206,12 +239,19 @@ class LifeLoop:
             sound = dream[1] if dream[1] is not None else sound
         moment = self.mind.live(view.tokens, sight=sight, sound=sound)
         if back is not None:
-            if moment.chosen.get("let_go", {}).get("chosen", False):
-                # Looking at it, they chose to let it go. Nothing else removes a memory.
+            chose_let_go = moment.chosen.get("let_go", {}).get("chosen", False)
+            if chose_let_go and back_recalled:
+                # Looking at a memory they chose to recall, they chose to let
+                # it go. Nothing else removes a memory.
                 self.memories.let_go(back.id, cycle=self.cycles)
                 self.let_go += 1
+                let_one_go = True
                 self._told_full = self._told_full and self.memories.full
             else:
+                if chose_let_go:
+                    # Rest brought this one back; they did not choose to look
+                    # at it. The choice does nothing, and is counted.
+                    self.let_go_not_recalled += 1
                 # How the memory seems to the mind now is filed beside how it seemed then.
                 self.memories.look_back(back.id, cycle=self.cycles, summary=self._summary(moment))
         self._tell_of_rollbacks()
@@ -219,7 +259,11 @@ class LifeLoop:
             if not acted:
                 continue
             armed = moment.chosen.get("bands_armed", {}).get(channel, True)
-            if channel == "memory" and armed and (self.mind.can_rest or self.memories is not None):
+            if channel == "memory" and armed and let_one_go:
+                # What is in view is the memory just let go. Keeping this
+                # moment would keep a copy of it.
+                self.not_kept_letting_go += 1
+            elif channel == "memory" and armed and (self.mind.can_rest or self.memories is not None):
                 # Only once the mind's own baseline for the choice exists:
                 # before that, "active" says there is nothing to compare with
                 # yet, not that they chose.
@@ -309,6 +353,7 @@ class LifeLoop:
         """The mind chose to look back. The kept moment most like this one
         comes back next moment. If nothing kept is like anything, nothing comes."""
         if self._bring_back(moment):
+            self._back_recalled = True
             self.recalled += 1
         else:
             self.recalled_nothing += 1
@@ -346,6 +391,7 @@ class LifeLoop:
             return False
         self.line.bring_back(memory.tokens, MARK)
         self._back = memory
+        self._back_recalled = False      # the caller says so when the mind chose it
         return True
 
     def _lived(self, seconds: float) -> None:
@@ -356,6 +402,7 @@ class LifeLoop:
 
     def save(self, reason: str) -> Path:
         path = self.mind.save(reason)
+        atomic_write_json(self._count_path, {"cycles": self.cycles})
         if self.need is not None:
             self.need.save(self._need_path)
         self.saves += 1
@@ -367,6 +414,8 @@ class LifeLoop:
         """Read-only. What the world sent, what the mind chose, how it reads."""
         return {
             "cycles": self.cycles,
+            "cycles_at_start": self.cycles_at_start,
+            "moved_past_memories_at_start": self.moved_past_memories,
             "world": {
                 "arrived": self.line.arrived,
                 "quiet_moments": self.line.quiet_moments,
@@ -385,6 +434,8 @@ class LifeLoop:
                 "revisited_in_rest": self.revisited, "dreamed_in_rest": self.dreamed,
                 "dreams_learned_from": self.dreams_learned_from, "dreams_undone": self.dreams_undone,
                 "let_go_by_choice": self.let_go,
+                "let_go_chosen_on_a_memory_rest_brought": self.let_go_not_recalled,
+                "not_kept_in_a_moment_that_let_go": self.not_kept_letting_go,
                 "not_kept_because_full": self.not_kept_full,
             },
             "rest_need": None if self.need is None else self.need.report(),
