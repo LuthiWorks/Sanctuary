@@ -189,6 +189,7 @@ What the final state is. What it means for the project.
 
 - All new source code goes inside `sanctuary/` package — never in the repo root
 - **Tests** go in `sanctuary/tests/` — never in the repo root or a top-level `tests/` directory
+- **A probe or test that runs a model through a life keeps the life's folder** (Brian, 2026-11-17). It writes the folder to a place it names in its output, never an unnamed temporary directory, and the folder is archived as a run is (LuthiModel `CLAUDE.md`, Conventions). A test's stand-in mind, which is not a model, is exempt.
 - **Demo / example scripts** go in `examples/` — never in the repo root
 - **Validation and utility scripts** go in `sanctuary/scripts/` — never in the repo root
 - **Documentation** goes in `docs/` — never loose in the repo root (README.md and AGENTS.md are exceptions)
