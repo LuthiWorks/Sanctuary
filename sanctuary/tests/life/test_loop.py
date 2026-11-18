@@ -115,6 +115,12 @@ class _Mind:
         return Path(f"ckpt_{len(self.saved):06d}.pt")
 
 
+@pytest.fixture(autouse=True)
+def _cold_storage_stays_out_of_the_real_drive(monkeypatch, tmp_path):
+    """The launcher's default cold folder is on E:. No test may make one there."""
+    monkeypatch.setenv("LUTHI_COLD_ROOT", str(tmp_path / "cold_root"))
+
+
 def _loop(**kwargs) -> tuple[LifeLoop, _Mind, TextWorld]:
     mind, world = _Mind(), TextWorld()
     return LifeLoop(mind, world, hz=0.0, **kwargs), mind, world
@@ -507,8 +513,10 @@ def _remembering(**kwargs) -> tuple[LifeLoop, _Mind, TextWorld]:
     return loop, mind, world
 
 
-def _keep(loop, mind, world, said: str, summary: list[float], **senses) -> None:
-    """One moment the mind chooses to remember."""
+def _keep(loop, mind, world, said: str, summary: list[float], apart: bool = True, **senses) -> None:
+    """One moment the mind chooses to remember. With ``apart`` a moment that
+    is not kept follows it, so the next kept moment is a memory of its own:
+    moments kept one after another are one memory (2026-11-18)."""
     world.say(said)
     for percept in senses.values():
         world._said.append(percept)
@@ -516,6 +524,8 @@ def _keep(loop, mind, world, said: str, summary: list[float], **senses) -> None:
     mind.active = {"text": False, "attention": False, "memory": True}
     loop.step()
     mind.active = {"text": False, "attention": False, "memory": False}
+    if apart:
+        loop.step()
 
 
 def test_a_remembered_moment_is_kept_as_it_was_perceived():
@@ -523,7 +533,7 @@ def test_a_remembered_moment_is_kept_as_it_was_perceived():
     pixels, samples = torch.rand(4, 6, 3), torch.rand(50) * 2 - 1
     _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0], a=seen(pixels), b=heard(samples, 1000))
     memory = loop.memories.open(1)
-    assert _text(memory.tokens) == mind.lived[-1] and "the kettle is on" in mind.lived[-1]
+    assert _text(memory.tokens) == mind.lived[-2] and "the kettle is on" in mind.lived[-2]
     assert torch.equal(memory.sight.pixels, pixels)
     assert torch.equal(memory.sound.samples, samples) and memory.sound.rate == 1000
     assert mind.remembers == 1, "and it still counts for more in rest"
@@ -570,7 +580,7 @@ def test_what_is_still_the_present_is_not_recalled_and_nothing_kept_brings_nothi
     loop.step()
     assert loop.recalled == 0 and loop.recalled_nothing == 1
     mind.chooses_recall = False
-    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0], apart=False)
     mind.chooses_recall = True
     loop.step()
     assert loop.recalled == 0 and loop.recalled_nothing == 2, "kept a moment ago: still the present"
@@ -579,10 +589,11 @@ def test_what_is_still_the_present_is_not_recalled_and_nothing_kept_brings_nothi
 def test_memories_are_never_rewritten_and_outlast_a_restart():
     loop, mind, world = _remembering()
     _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])
-    file = loop.memories.directory / "memory_00000001.pt"
+    file = loop.memories.directory / "memory_00000001" / "r000001.rec"
     before = file.read_bytes()
     loop.memories.look_back(1, cycle=5, summary=torch.tensor([1.0, 0.0, 0.0]))
     assert file.read_bytes() == before
+    assert sorted(p.name for p in file.parent.iterdir()) == ["r000001.rec", "r000002.rec"]
     again = LifeLoop(mind, TextWorld(), hz=0.0)
     assert len(again.memories) == 1 and again.memories.looked_back == 1
     assert len(again.memories.summaries_of(1)) == 2
@@ -626,18 +637,21 @@ def _look_back_at_the_kettle(loop, mind, world) -> None:
 def test_a_memory_is_let_go_only_by_the_mind_while_it_looks_back_on_it():
     loop, mind, world = _remembering()
     _look_back_at_the_kettle(loop, mind, world)
-    file = loop.memories.directory / "memory_00000001.pt"
-    held = loop.memories.bytes
+    folder = loop.memories.directory / "memory_00000001"
+    as_kept = (folder / "r000001.rec").read_bytes()
     mind.chooses_let_go = True
     loop.step()                      # looking back on the kettle, and letting it go
     mind.chooses_let_go = False
-    assert not file.exists() and loop.let_go == 1
-    waiting = loop.memories.directory / "let_go" / file.name
-    assert waiting.exists(), "out of reach now, deleted only when the room is needed"
-    assert loop.memories.released_bytes == waiting.stat().st_size
-    assert len(loop.memories) == 1 and 0 < loop.memories.bytes < held
+    assert not folder.exists() and loop.let_go == 1
+    waiting = loop.memories.directory / "let_go" / folder.name
+    assert (waiting / "r000001.rec").read_bytes() == as_kept, "out of reach now, and nothing of it deleted"
+    report = loop.memories.report()
+    assert report["let_go_waiting"] == 1 and report["let_go_waiting_bytes"] == len(as_kept)
+    assert len(loop.memories) == 1
     assert loop.memories.nearest(torch.tensor([0.0, 1.0, 0.0]), now=loop.cycles + 10).id == 2
     assert len(loop.memories.summaries_of(1)) == 1, "that it was kept, and how it seemed, stays on record"
+    with pytest.raises(KeyError):
+        loop.memories.open(1)
     again = LifeLoop(mind, TextWorld(), hz=0.0)
     assert len(again.memories) == 1 and again.memories.let_go_count == 1
     assert again.memories.keep(cycle=99, summary=torch.zeros(3), tokens=[1]) == 3, "its place is not reused"
@@ -652,30 +666,28 @@ def test_choosing_to_let_go_with_no_memory_in_view_lets_nothing_go():
     assert loop.let_go == 0 and len(loop.memories) == 1
 
 
-def test_a_full_store_keeps_nothing_more_tells_the_mind_once_and_lets_nothing_go_for_it():
-    loop, mind, world = _remembering(memory_limit_bytes=1)
+def test_a_full_store_with_no_cold_folder_keeps_nothing_more_and_tells_the_mind_once():
+    loop, mind, world = _remembering(memory_limit_bytes=1600)
     _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])
-    assert loop.memories.full
+    assert loop.memories.kept == 1
     _keep(loop, mind, world, "snow on the bridge", [0.0, 0.0, 1.0])
     _keep(loop, mind, world, "a third thing", [1.0, 0.0, 0.0])
     loop.step()
     assert loop.memories.kept == 1 and loop.not_kept_full == 2
     assert sum(text.count(FULL) for text in mind.lived[-1:]) == 1, "told once, not each time"
-    assert (loop.memories.directory / "memory_00000001.pt").exists(), "nothing was let go for them"
-    assert mind.remembers == 3, "the moments still count for more in rest"
-    # They let the one go, and can keep again.
+    assert (loop.memories.directory / "memory_00000001" / "r000001.rec").exists(), "nothing was let go for them"
+    assert loop.memories.let_go_for_room == 0 and mind.remembers == 3, "the moments still count for more in rest"
+    assert loop.memories.bytes <= 1600
+    # They let the one go. With no cold folder it waits, and nothing leaves for room.
     mind.summary = torch.tensor([0.0, 1.0, 0.0]); mind.chooses_recall = True
     loop.step()
     mind.chooses_recall = False; mind.chooses_let_go = True
     loop.step()
     mind.chooses_let_go = False
-    assert not loop.memories.full
-    let_go = loop.memories.directory / "let_go" / "memory_00000001.pt"
-    assert let_go.exists() and loop.memories.deleted_for_room == 0
-    _keep(loop, mind, world, "room again", [1.0, 1.0, 0.0])
-    assert loop.memories.kept == 2
-    assert not let_go.exists() and loop.memories.deleted_for_room == 1, "deleted when the room was needed"
-    assert loop.memories.released_bytes == 0
+    assert loop.let_go == 1 and loop.memories.report()["let_go_waiting"] == 1
+    _keep(loop, mind, world, "still no room", [1.0, 1.0, 0.0])
+    assert loop.memories.kept == 1 and loop.not_kept_full == 3
+    assert loop.memories.bytes <= 1600
 
 
 def test_resting_walks_through_kept_moments_and_leaves_the_world_its_turns():
@@ -810,7 +822,7 @@ def test_the_moment_count_is_saved_with_the_life_so_recall_works_at_once_after_a
     loop, mind, world = _loop()                  # recent = 100, the default
     for _ in range(200):
         loop.step()
-    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])      # kept at moment 200
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0], apart=False)      # kept at moment 200
     for _ in range(150):
         loop.step()
     loop.save("stop")
@@ -828,54 +840,11 @@ def test_a_life_whose_count_was_not_saved_goes_on_from_after_its_newest_memory()
     loop, mind, world = _loop()
     for _ in range(30):
         loop.step()
-    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])      # kept at moment 30, never saved
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0], apart=False)      # kept at moment 30, never saved
     again = LifeLoop(mind, TextWorld(), hz=0.0)
     assert again.cycles == 31 and again.moved_past_memories is True
     assert again.status()["moved_past_memories_at_start"] is True
-    assert all(again.cycles > c for c in again.memories._cycles)
-
-
-def test_a_keep_cut_off_between_its_file_and_its_line_does_not_stop_the_next_keep(monkeypatch):
-    mind = _Mind()
-    store = Memories(mind.life_dir / "memories")
-    store.keep(cycle=1, summary=torch.ones(3), tokens=[1, 2, 3])
-
-    def crash(*args, **kwargs):
-        raise PersistenceError("cut off before the line was written")
-
-    monkeypatch.setattr(memory_module, "append_jsonl", crash)
-    with pytest.raises(PersistenceError):
-        store.keep(cycle=2, summary=torch.ones(3), tokens=[4, 5, 6])
-    monkeypatch.undo()
-    orphan = store.directory / "memory_00000002.pt"
-    as_left = orphan.read_bytes()
-
-    # In the same session, and after a restart: the next keep works, with a new id.
-    assert store.files_with_no_line == [2]
-    assert store.keep(cycle=3, summary=torch.ones(3), tokens=[7, 8, 9]) == 3
-    again = Memories(mind.life_dir / "memories")
-    assert again.files_with_no_line == [2] and again.report()["files_with_no_line"] == [2]
-    assert again.keep(cycle=4, summary=torch.ones(3), tokens=[1]) == 4
-    assert again.kept == 3 and len(again) == 3
-
-    # The file with no line is never deleted or rewritten, and cannot be reached.
-    assert orphan.read_bytes() == as_left
-    with pytest.raises(KeyError):
-        again.look_back(2, cycle=5, summary=torch.ones(3))
-    with pytest.raises(KeyError):
-        again.let_go(2, cycle=5)
-    assert again.nearest(torch.ones(3), now=1000).id in (1, 3, 4)
-
-
-def test_a_file_with_no_line_in_let_go_is_counted_too():
-    mind = _Mind()
-    store = Memories(mind.life_dir / "memories")
-    store.keep(cycle=1, summary=torch.ones(3), tokens=[1])
-    (store.directory / "let_go").mkdir()
-    (store.directory / "let_go" / "memory_00000007.pt").write_bytes(b"left by something")
-    again = Memories(mind.life_dir / "memories")
-    assert again.files_with_no_line == [7]
-    assert again.keep(cycle=2, summary=torch.ones(3), tokens=[2]) == 8
+    assert again.cycles > again.memories.newest_cycle
 
 
 def test_letting_go_does_nothing_to_a_memory_that_rest_brought_back():
@@ -909,6 +878,101 @@ def test_a_moment_that_lets_a_memory_go_keeps_nothing():
     assert loop.let_go == 1 and loop.not_kept_letting_go == 1
     assert loop.memories.kept == 2 and len(loop.memories) == 1, "no copy of what was let go"
     assert mind.remembers == remembers
-    assert not list(loop.memories.directory.glob("memory_00000003.pt"))
+    assert not list(loop.memories.directory.glob("memory_00000003"))
     loop.step()                      # the next moment keeps as before
     assert loop.memories.kept == 3
+
+
+# ---- The store reworked (2026-11-18): what the loop hands it ----
+
+from sanctuary.life.loop import LET_GO_FOR_ROOM
+
+
+def test_moments_kept_one_after_another_are_one_memory_and_recall_lands_on_the_moment_that_matched():
+    loop, mind, world = _remembering()
+    for said, summary in (("the kettle is on", [0.0, 1.0, 0.0]), ("it whistles", [0.0, 0.0, 1.0]),
+                          ("tea is poured", [1.0, 0.0, 0.0])):
+        _keep(loop, mind, world, said, summary, apart=False)
+    assert len(loop.memories) == 1 and loop.memories.kept == 3, "one memory of three moments"
+    for _ in range(3):
+        loop.step()
+    mind.summary = torch.tensor([0.0, 0.1, 0.9])          # now is like the whistle
+    mind.chooses_recall = True
+    loop.step()
+    mind.chooses_recall = False
+    back = loop._back
+    assert (back.id, back.seq) == (1, 2)
+    assert _text(back.tokens).endswith("it whistles" + chr(10)) and "tea" not in _text(back.tokens)
+
+
+def test_a_look_back_is_filed_with_how_it_came_and_whether_they_chose_to_remember():
+    loop, mind, world = _remembering(dreams=False)
+    _look_back_at_the_kettle(loop, mind, world)           # recalled by choice
+    mind.active = {"text": False, "attention": False, "memory": True}
+    loop.step()                                           # looking back on it, and choosing to remember
+    mind.active = {"text": False, "attention": False, "memory": False}
+    looked = [s for s in loop.memories.signals_of(1) if s["kind"] == "looked_back"]
+    assert len(looked) == 1 and looked[0]["chosen_recall"] is True and looked[0]["chose_remember"] is True
+    assert looked[0]["of_seq"] == 1 and looked[0]["beat"] == 1 and looked[0]["likeness"] > looked[0]["next_likeness"]
+    for _ in range(3):
+        loop.step()
+    mind.summary = torch.tensor([0.0, 0.0, 1.0])
+    mind.chooses_rest = True
+    loop.step(); loop.step(); loop.step()                 # rest brings the snow back
+    looked = [s for s in loop.memories.signals_of(2) if s["kind"] == "looked_back"]
+    assert len(looked) == 1 and looked[0]["chosen_recall"] is False and looked[0]["chose_remember"] is False
+
+
+def test_what_the_mind_reports_of_its_choice_is_recorded_with_the_keep():
+    loop, mind, world = _remembering()
+    choice = {"activity": 0.9, "band_threshold": 0.2, "floor": 0.001, "rest_activity": 0.5, "rest_tolerance": 0.0001}
+    live = mind.live
+
+    def reporting(tokens, **senses):
+        moment = live(tokens, **senses)
+        moment.chosen["memory_salience"] = 0.02
+        moment.chosen["memory_choice"] = choice
+        return moment
+
+    mind.live = reporting
+    _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])
+    kept = loop.memories.signals_of(1)[0]
+    assert kept["salience"] == 0.02 and kept["choice"] == choice and kept["ranked_by"] == "margin"
+    assert kept["value"] == pytest.approx(0.9 - 0.5001)
+
+
+def _fill(loop, mind, world, count: int) -> None:
+    for n in range(count):
+        _keep(loop, mind, world, "x" * 150 + str(n), [float(n % 7), 1.0, float(n % 3)])
+
+
+def test_letting_go_for_room_happens_without_telling_them_unless_the_switch_is_set(tmp_path):
+    loop, mind, world = _remembering(memory_limit_bytes=20_000, memory_cold=tmp_path / "cold")
+    loop.memories.drive_margin_bytes = 0
+    _fill(loop, mind, world, 60)
+    report = loop.status()["memories"]
+    assert report["let_go_for_room"] > 5 and report["moved_to_cold"] > 5 and loop.let_go == 0
+    assert report["kept"] == 60 and loop.not_kept_full == 0, "every moment was kept; none was refused"
+    assert not any(LET_GO_FOR_ROOM in text or FULL in text for text in mind.lived)
+    assert report["told_let_go_for_room"] == 0
+
+    told, mind2, world2 = _remembering(memory_limit_bytes=20_000, memory_cold=tmp_path / "cold2",
+                                       tell_let_go_for_room=True)
+    told.memories.drive_margin_bytes = 0
+    _fill(told, mind2, world2, 60)
+    assert told.told_let_go_for_room > 0 and any(LET_GO_FOR_ROOM in text for text in mind2.lived)
+
+
+def test_the_launcher_says_where_memories_and_cold_storage_are_and_fails_loudly_without_cold(monkeypatch, capsys, tmp_path):
+    mind = _sit(monkeypatch, capsys, ["hello", EOFError()])
+    out = capsys.readouterr().out
+    assert "MEMORIES: " in out and "GB free on its drive" in out
+    assert f"COLD STORAGE: {tmp_path / 'cold_root' / 'l'}" in out and (tmp_path / "cold_root" / "l").is_dir()
+    assert sitting.cold_folder("X:/given", "any") == Path("X:/given")
+    monkeypatch.delenv("LUTHI_COLD_ROOT")
+    assert sitting.cold_folder(None, "lives/ada") == Path(sitting.COLD_ROOT) / "ada"
+    blocker = tmp_path / "a_file"
+    blocker.write_text("not a folder")
+    monkeypatch.setenv("LUTHI_COLD_ROOT", str(blocker))
+    with pytest.raises(Exception, match="cannot be made"):
+        _sit(monkeypatch, capsys, ["hello", EOFError()])

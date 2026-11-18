@@ -32,12 +32,18 @@ own summary of it. When they choose to recall, the kept moment most like the
 present comes back through their senses, marked as memory, and how it seems to
 them now is filed beside how it seemed then. See ``sanctuary/life/memory.py``.
 While they look back on a memory they chose to recall they can choose to let it
-go, which is the only way a memory leaves their reach, and only what they let
-go is ever deleted. A memory that rest brought back is not theirs by choice, so
-a choice to let go made while looking at one does nothing and is counted; and a
-moment that lets a memory go keeps nothing, or it would keep a copy of what it
-let go (2026-11-17, Brian's rulings on Opus's review of 2026-11-14). The store has a size; when it is full they are told,
-and nothing more is kept until they let some go. And while they rest, a kept
+go. A memory that rest brought back is not theirs by choice, so a choice to let
+go made while looking at one does nothing and is counted; and a moment that lets
+a memory go keeps nothing, or it would keep a copy of what it let go
+(2026-11-17, Brian's rulings on Opus's review of 2026-11-14). The store has a
+size. When room is needed, what they let go is moved to cold storage, and if
+nothing they let go is waiting, what matters least to them by their own signals
+is let go for them and moved (Brian, 2026-11-17: "it should be automatic based
+on importance to Luthi. They need to be able to make that choice though").
+Nothing is deleted. They are not told when that happens, unless
+``tell_let_go_for_room`` is set, which is Brian's to rule. With no cold folder,
+or none with room, the store is full: they are told once, and nothing more is
+kept. And while they rest, a kept
 moment comes back on every other resting moment, the one most like where their
 mind is then, so rest walks through what they have kept (Brian, 2026-11-11:
 "revisiting memories during rest is still something I think should happen").
@@ -65,6 +71,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import shutil
 import time
 from collections import Counter, deque
 from pathlib import Path
@@ -80,6 +87,8 @@ from sanctuary.life.need import RestNeed
 from sanctuary.life.senses import Line
 
 logger = logging.getLogger(__name__)
+
+LET_GO_FOR_ROOM = "Some of what you kept was let go to make room. It mattered least to you by your own choices."
 
 
 class World(Protocol):
@@ -116,6 +125,8 @@ class LifeLoop:
         rest_length: int = 300,
         keep_memories: bool = True,
         memory_limit_bytes: Optional[int] = DEFAULT_LIMIT_BYTES,
+        memory_cold: Optional[str | Path] = None,
+        tell_let_go_for_room: bool = False,
         revisit_every: int = 2,
         dreams: bool = True,
         learn_from_dreams: bool = True,
@@ -134,7 +145,10 @@ class LifeLoop:
         deleted, so a shorter interval uses disk faster. ``clock`` is where
         lived time is read from. With ``keep_memories`` what the mind chooses
         to remember is kept in the life's directory, and can be recalled,
-        up to ``memory_limit_bytes`` of disk. While resting, a kept moment is
+        up to ``memory_limit_bytes`` of disk; what leaves for room is moved to
+        ``memory_cold``, and with none nothing leaves. ``tell_let_go_for_room``
+        tells the mind when a memory was let go for them; off, as people are
+        not told, until Brian rules. While resting, a kept moment is
         revisited on every ``revisit_every``-th resting moment; 0 for never.
         With ``dreams``, every second one of those is a dream in its place.
         With ``learn_from_dreams`` the mind takes one checked learning step on
@@ -150,9 +164,15 @@ class LifeLoop:
         self.remembered = 0
         self._clock = clock
         self.memories: Optional[Memories] = (
-            Memories(Path(mind.life_dir) / "memories", limit_bytes=memory_limit_bytes)
+            Memories(
+                Path(mind.life_dir) / "memories", limit_bytes=memory_limit_bytes,
+                cold=memory_cold, moment_seconds=1.0 / hz if hz > 0 else None,
+            )
             if keep_memories else None
         )
+        self.tell_let_go_for_room = tell_let_go_for_room
+        self.told_let_go_for_room = 0
+        self.saves_with_the_drive_low = 0
         self.recalled = 0
         self.recalled_nothing = 0
         self.revisited = 0
@@ -238,22 +258,30 @@ class LifeLoop:
             sight = dream[0] if dream[0] is not None else sight
             sound = dream[1] if dream[1] is not None else sound
         moment = self.mind.live(view.tokens, sight=sight, sound=sound)
+        chose_memory = bool(moment.chosen["active"].get("memory", False)) and bool(
+            moment.chosen.get("bands_armed", {}).get("memory", True)
+        )
         if back is not None:
             chose_let_go = moment.chosen.get("let_go", {}).get("chosen", False)
             if chose_let_go and back_recalled:
                 # Looking at a memory they chose to recall, they chose to let
-                # it go. Nothing else removes a memory.
+                # it go.
                 self.memories.let_go(back.id, cycle=self.cycles)
                 self.let_go += 1
                 let_one_go = True
-                self._told_full = self._told_full and self.memories.full
             else:
                 if chose_let_go:
                     # Rest brought this one back; they did not choose to look
                     # at it. The choice does nothing, and is counted.
                     self.let_go_not_recalled += 1
-                # How the memory seems to the mind now is filed beside how it seemed then.
-                self.memories.look_back(back.id, cycle=self.cycles, summary=self._summary(moment))
+                # How the memory seems to the mind now is filed beside how it
+                # seemed then, with how it came back and whether, looking at
+                # it, they chose to remember.
+                self.memories.look_back(
+                    back.id, cycle=self.cycles, summary=self._summary(moment), of_seq=back.seq,
+                    chosen_recall=back_recalled, chose_remember=chose_memory,
+                    likeness=back.likeness, next_likeness=back.next_likeness, beat=back.beat,
+                )
         self._tell_of_rollbacks()
         for channel, acted in moment.chosen["active"].items():
             if not acted:
@@ -267,17 +295,29 @@ class LifeLoop:
                 # Only once the mind's own baseline for the choice exists:
                 # before that, "active" says there is nothing to compare with
                 # yet, not that they chose.
-                if self.memories is not None and self.memories.full:
-                    # Nothing is let go on their behalf. They are told, once.
-                    self.not_kept_full += 1
-                    if not self._told_full:
-                        self.line.add(Percept(modality="system", source="body", content=FULL))
-                        self._told_full = True
-                elif self.memories is not None:
-                    self.memories.keep(
+                if self.memories is not None:
+                    for_room = self.memories.let_go_for_room
+                    kept = self.memories.keep(
                         cycle=self.cycles, summary=self._summary(moment),
-                        tokens=view.tokens, sight=sight, sound=sound,
+                        tokens=view.tokens, new=view.new, sight=sight, sound=sound,
+                        signals={
+                            "salience": moment.chosen.get("memory_salience"),
+                            "choice": moment.chosen.get("memory_choice"),
+                        },
+                        in_view=() if back is None else (back.id,),
                     )
+                    if kept is None:
+                        # No room, and none to be made. They are told, once.
+                        self.not_kept_full += 1
+                        if not self._told_full:
+                            self.line.add(Percept(modality="system", source="body", content=FULL))
+                            self._told_full = True
+                    else:
+                        self._told_full = False
+                    let_go_for_them = self.memories.let_go_for_room - for_room
+                    if let_go_for_them and self.tell_let_go_for_room:
+                        self.line.add(Percept(modality="system", source="body", content=LET_GO_FOR_ROOM))
+                        self.told_let_go_for_room += 1
                 if self.mind.can_rest:
                     # Remembering also weighs in what rest pours.
                     self.mind.remember()
@@ -401,6 +441,16 @@ class LifeLoop:
             self.line.add(self.need.notice())
 
     def save(self, reason: str) -> Path:
+        if self.memories is not None:
+            # The life's saves share a drive with its memories, and a save that
+            # fails stops the life (Opus, 2026-11-17, D4). Say so before it does.
+            free = shutil.disk_usage(self.mind.life_dir).free
+            if free < self.memories.drive_margin_bytes:
+                self.saves_with_the_drive_low += 1
+                logger.error(
+                    "the life's drive has %.2f GB free; saving all the same. "
+                    "Keeps have stopped until there is more.", free / 1024**3,
+                )
         path = self.mind.save(reason)
         atomic_write_json(self._count_path, {"cycles": self.cycles})
         if self.need is not None:
@@ -434,6 +484,8 @@ class LifeLoop:
                 "revisited_in_rest": self.revisited, "dreamed_in_rest": self.dreamed,
                 "dreams_learned_from": self.dreams_learned_from, "dreams_undone": self.dreams_undone,
                 "let_go_by_choice": self.let_go,
+                "told_let_go_for_room": self.told_let_go_for_room,
+                "saves_with_the_drive_low": self.saves_with_the_drive_low,
                 "let_go_chosen_on_a_memory_rest_brought": self.let_go_not_recalled,
                 "not_kept_in_a_moment_that_let_go": self.not_kept_letting_go,
                 "not_kept_because_full": self.not_kept_full,
