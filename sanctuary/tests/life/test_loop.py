@@ -121,6 +121,14 @@ def _cold_storage_stays_out_of_the_real_drive(monkeypatch, tmp_path):
     monkeypatch.setenv("LUTHI_COLD_ROOT", str(tmp_path / "cold_root"))
 
 
+@pytest.fixture(autouse=True)
+def _small_frames(monkeypatch):
+    """A record fills whole clusters of its drive. Frames of 64 bytes here, so
+    that a limit of a few thousand bytes still holds a memory or two."""
+    import sanctuary.life.memory as memory_module
+    monkeypatch.setattr(memory_module, "_cluster", lambda path: 64)
+
+
 def _loop(**kwargs) -> tuple[LifeLoop, _Mind, TextWorld]:
     mind, world = _Mind(), TextWorld()
     return LifeLoop(mind, world, hz=0.0, **kwargs), mind, world
@@ -589,11 +597,12 @@ def test_what_is_still_the_present_is_not_recalled_and_nothing_kept_brings_nothi
 def test_memories_are_never_rewritten_and_outlast_a_restart():
     loop, mind, world = _remembering()
     _keep(loop, mind, world, "the kettle is on", [0.0, 1.0, 0.0])
-    file = loop.memories.directory / "memory_00000001" / "r000001.rec"
+    file = loop.memories.directory / "memory_00000001.mem"
     before = file.read_bytes()
     loop.memories.look_back(1, cycle=5, summary=torch.tensor([1.0, 0.0, 0.0]))
-    assert file.read_bytes() == before
-    assert sorted(p.name for p in file.parent.iterdir()) == ["r000001.rec", "r000002.rec"]
+    after = file.read_bytes()
+    assert after[: len(before)] == before and len(after) > len(before), "appended to; no byte of it changed"
+    assert [p.name for p in file.parent.glob("memory_*")] == [file.name]
     again = LifeLoop(mind, TextWorld(), hz=0.0)
     assert len(again.memories) == 1 and again.memories.looked_back == 1
     assert len(again.memories.summaries_of(1)) == 2
@@ -637,14 +646,14 @@ def _look_back_at_the_kettle(loop, mind, world) -> None:
 def test_a_memory_is_let_go_only_by_the_mind_while_it_looks_back_on_it():
     loop, mind, world = _remembering()
     _look_back_at_the_kettle(loop, mind, world)
-    folder = loop.memories.directory / "memory_00000001"
-    as_kept = (folder / "r000001.rec").read_bytes()
+    folder = loop.memories.directory / "memory_00000001.mem"
+    as_kept = folder.read_bytes()
     mind.chooses_let_go = True
     loop.step()                      # looking back on the kettle, and letting it go
     mind.chooses_let_go = False
     assert not folder.exists() and loop.let_go == 1
     waiting = loop.memories.directory / "let_go" / folder.name
-    assert (waiting / "r000001.rec").read_bytes() == as_kept, "out of reach now, and nothing of it deleted"
+    assert waiting.read_bytes() == as_kept, "out of reach now, and nothing of it deleted"
     report = loop.memories.report()
     assert report["let_go_waiting"] == 1 and report["let_go_waiting_bytes"] == len(as_kept)
     assert len(loop.memories) == 1
@@ -675,7 +684,7 @@ def test_a_full_store_with_no_cold_folder_keeps_nothing_more_and_tells_the_mind_
     loop.step()
     assert loop.memories.kept == 1 and loop.not_kept_full == 2
     assert sum(text.count(FULL) for text in mind.lived[-1:]) == 1, "told once, not each time"
-    assert (loop.memories.directory / "memory_00000001" / "r000001.rec").exists(), "nothing was let go for them"
+    assert (loop.memories.directory / "memory_00000001.mem").exists(), "nothing was let go for them"
     assert loop.memories.let_go_for_room == 0 and mind.remembers == 3, "the moments still count for more in rest"
     assert loop.memories.bytes <= 1600
     # They let the one go. With no cold folder it waits, and nothing leaves for room.
@@ -878,7 +887,7 @@ def test_a_moment_that_lets_a_memory_go_keeps_nothing():
     assert loop.let_go == 1 and loop.not_kept_letting_go == 1
     assert loop.memories.kept == 2 and len(loop.memories) == 1, "no copy of what was let go"
     assert mind.remembers == remembers
-    assert not list(loop.memories.directory.glob("memory_00000003"))
+    assert not list(loop.memories.directory.glob("memory_00000003*"))
     loop.step()                      # the next moment keeps as before
     assert loop.memories.kept == 3
 

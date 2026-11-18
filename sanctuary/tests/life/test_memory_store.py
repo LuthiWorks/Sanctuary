@@ -1,5 +1,5 @@
-"""The memory store, reworked (2026-11-18; LuthiModel build brief 9, with
-Opus's reviews of 2026-11-17). No luthi needed.
+"""The memory store, reworked (2026-11-18; LuthiModel build briefs 9 and 10,
+with Opus's reviews of 2026-11-17 and 2026-11-18). No luthi needed.
 
 Pins, by the brief's parts:
 
@@ -13,6 +13,13 @@ D. Cold storage: nothing is deleted; every memory is in the life or in cold,
    bit for bit; a failed copy leaves the original; a cold drive with no room
    makes the store full.
 E. Letting go for room by importance, from the records' signals only.
+F. One file a stretch (brief 10): an append changes no byte already in the
+   file; a torn last frame is said, the frames before it are whole, and the
+   stretch is closed.
+
+Most tests here run with frames of 64 bytes, so that limits of a few thousand
+bytes still mean something. The tests of part F run with the drive's own
+cluster size.
 """
 
 from __future__ import annotations
@@ -48,11 +55,39 @@ def _vector(seed: int, width: int = 16) -> torch.Tensor:
     return torch.randn(width, generator=torch.Generator().manual_seed(seed))
 
 
+REAL_CLUSTER = memory_module._cluster
+
+
+@pytest.fixture(autouse=True)
+def small_frames(monkeypatch):
+    monkeypatch.setattr(memory_module, "_cluster", lambda path: 64)
+
+
+def _frames_of(file: Path) -> list[bytes]:
+    """Each whole frame of a stretch's file, padding and all."""
+    raw, frames, at = file.read_bytes(), [], 0
+    with open(file, "rb") as f:
+        while at < len(raw):
+            head = memory_module._frame_head(f, at)
+            if head is None:
+                break
+            size = memory_module._framed(head[0], head[1])
+            frames.append(raw[at: at + size])
+            at += size
+    return frames
+
+
+def _record(file: Path, seq: int = 1) -> dict:
+    """The header of record ``seq`` of a stretch's file."""
+    at = sum(len(frame) for frame in _frames_of(file)[: seq - 1])
+    return memory_module._read(file, at=at)[0]
+
+
 def _hashes(folder: Path) -> dict[str, str]:
-    """Every record under ``folder``, by memory and record name."""
+    """Every record under ``folder``, by its memory's file and its place in it."""
     return {
-        f"{p.parent.name}/{p.name}": hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in folder.rglob("r*.rec")
+        f"{p.name}/{n}": hashlib.sha256(frame).hexdigest()
+        for p in folder.rglob("memory_*.mem") for n, frame in enumerate(_frames_of(p), start=1)
     }
 
 
@@ -106,7 +141,7 @@ def test_a_picture_is_stored_as_8_bit_only_when_that_loses_nothing_and_sound_say
         store.keep(cycle=len(store) * 10, summary=_vector(1), tokens=[1], sight=Sight(PICTURES[name]()))
     for name in ("sixteen_bit_by_32768", "sixteen_bit_by_32767", "not_sixteen_bit"):
         store.keep(cycle=len(store) * 10, summary=_vector(1), tokens=[1], sound=Sound(SOUNDS[name](), 8000))
-    headers = [memory_module._read(store.directory / f"memory_{i:08d}" / "r000001.rec")[0] for i in range(1, 7)]
+    headers = [_record(store.directory / f"memory_{i:08d}.mem") for i in range(1, 7)]
     assert [h["sight"]["stored"] for h in headers[:3]] == ["torch.uint8", "as_given", "as_given"]
     assert [(h["sound"]["stored"], h["sound"].get("scale")) for h in headers[3:]] == [
         ("torch.int16", 32768), ("torch.int16", 32767), ("as_given", None),
@@ -133,7 +168,7 @@ def test_a_record_that_would_not_read_back_is_not_written(tmp_path, monkeypatch)
     monkeypatch.setattr(memory_module, "_unpack_sense", lambda meta, data: torch.zeros(meta["shape"]))
     with pytest.raises(PersistenceError, match="would not read back"):
         store.keep(cycle=1, summary=_vector(1), tokens=[1], sight=Sight(torch.rand(2, 2, 3)))
-    assert not list(store.directory.rglob("*.rec")) if store.directory.exists() else True
+    assert not list(store.directory.rglob("*.mem")) if store.directory.exists() else True
 
 
 # ---- B. A stretch is its records ----
@@ -162,10 +197,11 @@ def test_moments_kept_one_after_another_are_one_memory_with_its_words_stored_onc
     torch.manual_seed(1)
     store = _store(tmp_path)
     given = _live_a_stretch(store, 12, window=200)
-    folder = store.directory / "memory_00000001"
+    file = store.directory / "memory_00000001.mem"
     assert len(store) == 1 and store.kept == 12
-    assert sorted(p.name for p in folder.iterdir()) == [f"r{n:06d}.rec" for n in range(1, 13)]
-    stored = sum(memory_module._read(p)[0]["blobs"]["tokens"][1] // 4 for p in folder.iterdir())
+    assert [p.name for p in store.directory.glob("memory_*")] == [file.name], "one file a stretch"
+    assert len(_frames_of(file)) == 12
+    stored = sum(_record(file, n)["blobs"]["tokens"][1] // 4 for n in range(1, 13))
     assert stored == len(given[0]["tokens"]) + sum(g["new"] for g in given[1:]), "each word once"
     assert stored < sum(len(g["tokens"]) for g in given) // 3
     for memories in (store, _store(tmp_path)):
@@ -219,7 +255,7 @@ def test_likeness_is_taken_after_removing_what_all_the_summaries_share(tmp_path)
     assert found.id == 2 and found.likeness > 0.9 and found.next_likeness < 0.2 and found.beat == 2
 
 
-@pytest.mark.parametrize("cut", ["folder", "write", "flush", "replace", "window"])
+@pytest.mark.parametrize("cut", ["create", "append", "flush", "window"])
 def test_a_keep_cut_off_at_any_step_loses_only_the_moment_in_flight(tmp_path, monkeypatch, cut):
     store = _store(tmp_path)
     store.keep(cycle=1, summary=_vector(1), tokens=[1, 2, 3], new=3, signals={"salience": 0.3})
@@ -228,19 +264,18 @@ def test_a_keep_cut_off_at_any_step_loses_only_the_moment_in_flight(tmp_path, mo
     def crash(*args, **kwargs):
         raise OSError("the power went")
 
-    if cut == "folder":
-        monkeypatch.setattr(Path, "mkdir", crash)
-    elif cut == "write":
-        monkeypatch.setattr(memory_module.Memories, "_write", crash)
+    if cut == "create":
+        monkeypatch.setattr("builtins.open", crash)
+    elif cut == "append":
+        monkeypatch.setattr(memory_module.Memories, "_append", crash)
     elif cut == "flush":
         monkeypatch.setattr(memory_module.os, "fsync", crash)
-    elif cut == "replace":
-        monkeypatch.setattr(memory_module.os, "replace", crash)
     else:
         monkeypatch.setattr(memory_module, "append_jsonl", crash)
     with pytest.raises((OSError, PersistenceError)):
         store.keep(cycle=5, summary=_vector(2), tokens=[7, 8, 9], new=3, signals={"salience": 0.6})
     monkeypatch.undo()
+    monkeypatch.setattr(memory_module, "_cluster", lambda path: 64)
 
     again = _store(tmp_path)                             # the store opens afterwards
     after = _hashes(again.directory)
@@ -249,8 +284,8 @@ def test_a_keep_cut_off_at_any_step_loses_only_the_moment_in_flight(tmp_path, mo
     new_id = again.keep(cycle=9, summary=_vector(3), tokens=[4, 5], new=2, signals={"salience": 0.1})
     assert new_id not in (None, 1) and again.open(new_id).tokens == [4, 5]
     assert again.nearest(_vector(1), now=1000).id == 1
-    if cut == "window":
-        assert again.kept == 3, "the record was whole; only the ranking window missed it"
+    if cut in ("window", "flush"):
+        assert again.kept == 3, "the record was whole on the disk; only what came after it was missed"
     else:
         assert again.kept == 2
     assert again.bytes == _on_disk(again.directory)
@@ -303,10 +338,10 @@ def test_an_old_store_is_refused_loudly_and_never_rewritten(tmp_path):
 def test_a_damaged_record_is_said_and_not_read(tmp_path):
     store = _store(tmp_path)
     store.keep(cycle=1, summary=_vector(1), tokens=[1, 2, 3])
-    record = store.directory / "memory_00000001" / "r000001.rec"
-    raw = bytearray(record.read_bytes())
-    raw[-1] ^= 1
-    record.write_bytes(bytes(raw))
+    file = store.directory / "memory_00000001.mem"
+    raw = bytearray(file.read_bytes())
+    raw[memory_module._FRAME_BYTES + 40] ^= 1
+    file.write_bytes(bytes(raw))
     with pytest.raises(PersistenceError, match="damaged"):
         store.open(1)
 
@@ -428,19 +463,20 @@ def test_a_copy_that_fails_part_way_leaves_the_original_untouched_and_raises(tmp
     def torn(source, to):
         count["n"] += 1
         copy(source, to)
-        if count["n"] == 3:
+        if count["n"] == 1:
             to.write_bytes(to.read_bytes()[:-1] + bytes([to.read_bytes()[-1] ^ 1]))   # the copy differs by a bit
 
     monkeypatch.setattr(memory_module, "_copy", torn)
     with pytest.raises(PersistenceError, match="does not match the original"):
         store._to_cold(1, cycle=70)
     assert _hashes(store.directory / "let_go") == original
-    assert not (tmp_path / "cold" / "memory_00000001").exists()
+    assert not (tmp_path / "cold" / "memory_00000001.mem").exists()
     monkeypatch.undo()
+    monkeypatch.setattr(memory_module, "_cluster", lambda path: 64)
 
     # At the next start the move is undone: the unchecked copy is not a memory.
     again = Memories(store.directory, cold=tmp_path / "cold", drive_margin_bytes=0)
-    assert not (tmp_path / "cold" / "incoming" / "memory_00000001").exists()
+    assert not (tmp_path / "cold" / "incoming" / "memory_00000001.mem").exists()
     assert _hashes(again.directory / "let_go") == original and again.moved_to_cold == 0
     states = [json.loads(t)["state"] for t in (tmp_path / "cold" / "index.jsonl").read_text().splitlines()]
     assert states == ["moving", "undone"]
@@ -465,10 +501,11 @@ def test_a_move_cut_off_after_it_arrived_is_finished_at_the_next_start(tmp_path,
     with pytest.raises(PersistenceError):
         store._to_cold(1, cycle=70)
     monkeypatch.undo()
+    monkeypatch.setattr(memory_module, "_cluster", lambda path: 64)
     assert _hashes(tmp_path / "cold") == original and _hashes(store.directory / "let_go") == original, "in both"
 
     again = Memories(store.directory, cold=tmp_path / "cold", drive_margin_bytes=0)
-    assert _hashes(tmp_path / "cold") == original and not (again.directory / "let_go" / "memory_00000001").exists()
+    assert _hashes(tmp_path / "cold") == original and not (again.directory / "let_go" / "memory_00000001.mem").exists()
     assert again.moved_to_cold == 1 and again.report()["kept"] == 5 and again.bytes == _on_disk(again.directory)
     with pytest.raises(KeyError):
         again.open(1)
@@ -520,10 +557,12 @@ def test_two_lives_cannot_share_a_cold_folder_and_nothing_in_cold_is_overwritten
     assert _hashes(cold) == in_cold
     # The same life, and something already where a move would land: refused, original kept.
     first.let_go(2, cycle=40)
-    (cold / "memory_00000002").mkdir()
+    (cold / "memory_00000002.mem").write_bytes(b"something else")
+    kept = _hashes(first.directory / "let_go")
     with pytest.raises(PersistenceError, match="ever overwritten"):
         first._to_cold(2, cycle=41)
-    assert (first.directory / "let_go" / "memory_00000002" / "r000001.rec").exists()
+    assert _hashes(first.directory / "let_go") == kept and len(kept) == 1
+    assert (cold / "memory_00000002.mem").read_bytes() == b"something else"
 
 
 def test_an_id_is_never_used_again_once_its_memory_has_left(tmp_path):
@@ -533,26 +572,26 @@ def test_an_id_is_never_used_again_once_its_memory_has_left(tmp_path):
         store.keep(cycle=c * 10, summary=_vector(c), tokens=[c])
     store.let_go(3, cycle=50)
     assert store._to_cold(3, cycle=51)
-    assert not list(store.directory.rglob("memory_00000003"))
+    assert not list(store.directory.rglob("memory_00000003*"))
     assert store.keep(cycle=900, summary=_vector(9), tokens=[9]) == 4
     assert _store(tmp_path, cold=cold).keep(cycle=910, summary=_vector(9), tokens=[9]) == 5
-    assert not list(store.directory.rglob("memory_00000003"))
+    assert not list(store.directory.rglob("memory_00000003*"))
     # And opened with no cold folder: the line that it was let go is in the life.
-    (store.directory / "memory_00000004").rename(tmp_path / "set_aside_4")
-    (store.directory / "memory_00000005").rename(tmp_path / "set_aside_5")
+    (store.directory / "memory_00000004.mem").rename(tmp_path / "set_aside_4")
+    (store.directory / "memory_00000005.mem").rename(tmp_path / "set_aside_5")
     assert _store(tmp_path).keep(cycle=920, summary=_vector(9), tokens=[9]) == 4, "3 is never used again"
 
 
-def test_a_folder_in_reach_with_a_let_go_line_stays_out_of_reach_until_a_line_says_it_came_back(tmp_path):
+def test_a_file_in_reach_with_a_let_go_line_stays_out_of_reach_until_a_line_says_it_came_back(tmp_path):
     store = _store(tmp_path, recent=0)
     store.keep(cycle=1, summary=_vector(1), tokens=[1, 2])
     store.keep(cycle=20, summary=_vector(2), tokens=[3])
     store.let_go(1, cycle=30)
-    waiting, home = store.directory / "let_go" / "memory_00000001", store.directory / "memory_00000001"
+    waiting, home = store.directory / "let_go" / "memory_00000001.mem", store.directory / "memory_00000001.mem"
     shutil.move(str(waiting), str(home))          # what a let-go cut off in the middle leaves
     again = _store(tmp_path, recent=0)
     assert len(again) == 1 and waiting.exists() and not home.exists()
-    # Bringing one back is the folder and one line. It is not built as an action; the format reads it.
+    # Bringing one back is the file and one line. It is not built as an action; the format reads it.
     shutil.move(str(waiting), str(home))
     with open(store.directory / "life.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps({"kind": "came_back", "id": 1, "cycle": 40}) + "\n")
@@ -562,24 +601,69 @@ def test_a_folder_in_reach_with_a_let_go_line_stays_out_of_reach_until_a_line_sa
 
 def test_the_code_removes_only_an_original_whose_copy_is_checked_and_a_copy_never_checked(tmp_path):
     source = inspect.getsource(memory_module)
-    assert "os.remove" not in source and "unlink" not in source
-    assert source.count("shutil.rmtree(") == 4
-    assert source.count("shutil.rmtree(incoming)") == 2 and source.count("shutil.rmtree(here)") == 1
-    assert source.count("shutil.rmtree(stretch.folder)") == 1
+    assert "rmtree" not in source and "unlink" not in source and "truncate" not in source
+    assert source.count("os.remove(") == 4
+    assert source.count("os.remove(incoming)") == 2 and source.count("os.remove(here)") == 1
+    assert source.count("os.remove(stretch.path)") == 1
+    # A stretch's file is only ever made new or appended to.
+    assert '"ab" if stretch.starts else "xb"' in source
+    assert not [mode for mode in ('"wb"', '"r+b"', '"w+b"', '"rb+"') if mode in source.replace('open(to, "wb")', "")]
 
 
 # ---- E. Letting go for room, by importance to Luthi ----
 
 
+def _kept(rank: float) -> dict:
+    return {"kind": "kept", "rank": rank}
+
+
+def _look(*, chosen: bool, remember: bool = False) -> dict:
+    return {"kind": "looked_back", "chosen_recall": chosen, "chose_remember": remember}
+
+
 def test_importance_is_made_of_the_records_signals_and_nothing_else():
     assert list(inspect.signature(importance).parameters) == ["signals"]
-    kept = {"kind": "kept", "rank": 0.4}
-    assert importance([kept, {"kind": "kept", "rank": 0.7}]) == 0.7
-    looked = {"kind": "looked_back", "chosen_recall": True, "chose_remember": False}
-    by_rest = {"kind": "looked_back", "chosen_recall": False, "chose_remember": False}
-    assert importance([kept, looked]) == 1.4 and importance([kept, by_rest]) == 0.4, "what rest brings counts for nothing"
-    assert importance([kept, {**by_rest, "chose_remember": True}]) == 1.4
-    assert importance([kept, {**looked, "chose_remember": True}]) == 2.4
+    never_looked = importance([_kept(0.4), _kept(0.8)])
+    assert never_looked == pytest.approx(0.6 + 0.5), "the mean rank, and the rate with no look is a half"
+    assert importance([_kept(0.6), _look(chosen=True)]) == pytest.approx(0.6 + 0.5 + 0.25)
+    assert importance([_kept(0.6), _look(chosen=True, remember=True)]) == pytest.approx(0.6 + 0.5 + 0.75)
+    with pytest.raises(ValueError, match="no kept moment"):
+        importance([_look(chosen=True)])
+
+
+def test_two_stretches_with_the_same_ranks_and_different_lengths_are_equally_important():
+    assert importance([_kept(0.7)]) == importance([_kept(0.7)] * 40)
+    assert importance([_kept(0.2), _kept(0.9)]) == pytest.approx(importance([_kept(0.2), _kept(0.9)] * 25))
+    # The first formula took the highest rank, which a long stretch has by count alone.
+    assert importance([_kept(0.5)] * 3) == importance([_kept(0.1), _kept(0.5), _kept(0.9)])
+
+
+def test_a_look_that_rest_brought_counts_for_nothing_whatever_they_chose_during_it():
+    alone = importance([_kept(0.4)])
+    assert importance([_kept(0.4), _look(chosen=False)]) == alone
+    assert importance([_kept(0.4), _look(chosen=False, remember=True)]) == alone
+    assert importance([_kept(0.4)] + [_look(chosen=False, remember=True)] * 50) == alone
+    # And it does not thin out the looks they did choose.
+    chosen = [_kept(0.4), _look(chosen=True, remember=True)]
+    assert importance(chosen + [_look(chosen=False)] * 9) == importance(chosen)
+
+
+def test_a_memory_recalled_ten_times_is_not_more_important_than_one_recalled_once():
+    once = importance([_kept(0.5), _look(chosen=True)])
+    ten = importance([_kept(0.5)] + [_look(chosen=True)] * 10)
+    assert ten <= once, "a stand-in mind that never remembers while looking"
+    # A mind that remembers while looking at a fixed rate (Opus, 3.1): how often the present
+    # resembled the memory adds nothing. Counted each time, ten looks gave about +5.5 and one about +1.
+    for rate_of in (2, 4):                                 # one look in two, one in four
+        def looks(count):
+            return [_look(chosen=True, remember=n % rate_of == 0) for n in range(count)]
+        few, many = importance([_kept(0.5)] + looks(rate_of)), importance([_kept(0.5)] + looks(10 * rate_of))
+        assert abs(many - few) < 0.2 and many < 2.0
+        assert many <= few if rate_of == 2 else many < few
+    # And nothing they do while looking can be worth more than 1, however often.
+    assert importance([_kept(0.5)] + [_look(chosen=True, remember=True)] * 1000) < 0.5 + 0.5 + 1.0
+    # A memory they chose to recall is never below one they never did, at the same ranks.
+    assert importance([_kept(0.5)] + [_look(chosen=True)] * 1000) > importance([_kept(0.5)])
 
 
 def test_how_strongly_they_chose_is_the_choices_own_margin_where_the_mind_gives_one():
@@ -599,7 +683,7 @@ def test_each_keep_records_its_signals_and_its_rank_among_the_minds_own_recent_k
     ranks = [(s[0]["rank"], s[0]["ranked_among"], s[0]["ranked_by"]) for s in map(store.signals_of, range(1, 7))]
     assert ranks == [(0.5, 0, "salience"), (1.0, 1, "salience"), (0.0, 2, "salience"),
                      (pytest.approx(0.5), 3, "salience"), (pytest.approx(0.25), 4, "margin"), (0.5, 0, None)]
-    header = memory_module._read(store.directory / "memory_00000005" / "r000001.rec")[0]
+    header = _record(store.directory / "memory_00000005.mem")
     assert header["signals"]["choice"] == choice and header["signals"]["salience"] == 0.0
     # The window is the life's: it survives a restart, and a memory leaving.
     again = _store(tmp_path)
@@ -615,7 +699,7 @@ def test_each_look_back_records_how_it_came_and_how_it_was_found(tmp_path):
     found = store.nearest(_vector(1), now=50)
     store.look_back(found.id, cycle=50, summary=_vector(3), of_seq=found.seq, chosen_recall=True,
                     chose_remember=True, likeness=found.likeness, next_likeness=found.next_likeness, beat=found.beat)
-    header = memory_module._read(store.directory / "memory_00000001" / "r000002.rec")[0]
+    header = _record(store.directory / "memory_00000001.mem", 2)
     assert header["kind"] == "looked_back" and header["signals"] == {
         "of_seq": 1, "chosen_recall": True, "chose_remember": True,
         "likeness": found.likeness, "next_likeness": found.next_likeness, "beat": 1,
@@ -670,3 +754,155 @@ def test_when_every_memory_is_held_the_store_is_full(tmp_path):
     kept = [store.keep(cycle=c * 10, summary=_vector(c), tokens=[c] * 40) for c in range(12)]
     assert kept[-1] is None and store.moved_to_cold == 0 and store.let_go_for_room == 0
     assert _on_disk(store.directory) <= 4_000
+
+
+# ---- F. One file a stretch: frames on clusters of their own ----
+
+
+@pytest.fixture
+def real_cluster(monkeypatch):
+    monkeypatch.setattr(memory_module, "_cluster", REAL_CLUSTER)
+
+
+def test_every_frame_starts_on_a_cluster_of_its_own_and_the_frame_size_is_the_drives(tmp_path, real_cluster):
+    cluster = REAL_CLUSTER(tmp_path)
+    assert cluster >= 512 and cluster % 512 == 0
+    store = _store(tmp_path)
+    _live_a_stretch(store, 9, window=300)
+    store.look_back(1, cycle=500, summary=_vector(5), of_seq=3, chosen_recall=True)
+    assert json.loads((store.directory / "store.json").read_text())["frame"] == cluster
+    file = store.directory / "memory_00000001.mem"
+    frames = _frames_of(file)
+    assert len(frames) == 10 and all(len(frame) % cluster == 0 for frame in frames)
+    assert sum(len(frame) for frame in frames) == file.stat().st_size == store.bytes - _on_disk(store.directory) + file.stat().st_size
+    assert store._stretches[1].starts == [sum(len(f) for f in frames[:n]) for n in range(10)]
+    assert all(at % cluster == 0 for at in store._stretches[1].starts)
+
+
+CUTS = ["in_the_frame_header", "in_the_record_header", "in_the_record", "no_padding", "padding_short_by_one",
+        "the_length_is_there_and_the_end_of_the_record_is_not"]
+
+
+@pytest.mark.parametrize("cut", CUTS)
+@pytest.mark.parametrize("which", ["a_keep", "a_look_back"])
+def test_an_append_cut_off_at_any_step_changes_no_byte_already_in_the_file(tmp_path, monkeypatch, real_cluster, cut, which):
+    store = _store(tmp_path, recent=0)
+    given = _live_a_stretch(store, 4, window=300)
+    file = store.directory / "memory_00000001.mem"
+    earlier = file.read_bytes()
+    frame = memory_module._frame
+
+    def cut_off(record, pad):
+        whole = frame(record, pad)
+        written = memory_module._FRAME_BYTES + len(record)
+        if cut == "the_length_is_there_and_the_end_of_the_record_is_not":
+            return whole[: written - 7] + bytes(len(whole) - written + 7)     # zeros where the bytes never landed
+        return whole[: {
+            "in_the_frame_header": 20, "in_the_record_header": memory_module._FRAME_BYTES + 30,
+            "in_the_record": written - 7, "no_padding": written, "padding_short_by_one": len(whole) - 1,
+        }[cut]]
+
+    def the_power_went(fd):
+        raise OSError("the power went")
+
+    monkeypatch.setattr(memory_module, "_frame", cut_off)
+    monkeypatch.setattr(memory_module.os, "fsync", the_power_went)
+    with pytest.raises(PersistenceError, match="failed"):
+        if which == "a_keep":
+            line_view = given[-1]["tokens"][1:] + [7]
+            store.keep(cycle=4, summary=_vector(9), tokens=line_view, new=1)
+        else:
+            store.look_back(1, cycle=50, summary=_vector(9), of_seq=2, chosen_recall=True)
+    monkeypatch.setattr(memory_module, "_frame", frame)
+    monkeypatch.setattr(memory_module.os, "fsync", lambda fd: None)
+    torn = file.read_bytes()
+    assert len(torn) > len(earlier) and torn[: len(earlier)] == earlier, "no byte already in the file changed"
+
+    # In the same sitting the stretch is closed: nothing more is appended to it.
+    assert store.look_back(1, cycle=60, summary=_vector(8), of_seq=1, chosen_recall=True) is False
+    assert store.not_filed_closed == 1 and file.read_bytes() == torn
+    assert store.keep(cycle=5 if which == "a_keep" else 51, summary=_vector(7), tokens=[1, 2], new=1) == 2
+    assert file.read_bytes() == torn
+
+    for opening in range(2):                             # and at every opening after
+        again = _store(tmp_path, recent=0)
+        whole = cut in ("no_padding", "padding_short_by_one")
+        assert len(again.torn) == 1 and "memory_00000001.mem" in again.torn[0] and again.report()["torn"] == again.torn
+        assert len(again._stretches[1].starts) == (5 if whole else 4)
+        for seq, moment in enumerate(given, start=1):   # the frames before it are whole
+            assert again.open(1, seq).tokens == moment["tokens"]
+            assert _bits(again.summaries_of(1)[seq - 1][1]) == _bits(moment["summary"])
+        if whole and which == "a_keep":
+            assert again.kept == 6 + opening and again.open(1, 5).tokens == given[-1]["tokens"][1:] + [7], "the record was whole"
+        assert again.look_back(1, cycle=70 + opening, summary=_vector(8), of_seq=1, chosen_recall=True) is False
+        assert again.not_filed_closed == 1
+        assert again.keep(cycle=100 + opening * 10, summary=_vector(6), tokens=[3], new=1) == 3 + opening
+        assert file.read_bytes() == torn, "and the file is never written again"
+        assert again.bytes == _on_disk(again.directory)
+
+
+def test_a_torn_end_is_said_loudly_at_opening_and_a_file_with_no_whole_record_is_left_as_it_is(tmp_path, caplog, real_cluster):
+    store = _store(tmp_path)
+    store.keep(cycle=1, summary=_vector(1), tokens=[1, 2])
+    store.keep(cycle=20, summary=_vector(2), tokens=[3])
+    second = store.directory / "memory_00000002.mem"
+    second.write_bytes(second.read_bytes()[:100])        # its only frame, cut off
+    with caplog.at_level(logging.ERROR, logger="sanctuary.life.memory"):
+        again = _store(tmp_path)
+    assert "torn" in caplog.text and again.empty_stretches == [2] and len(again) == 1
+    assert second.stat().st_size == 100, "nothing of it was changed"
+    assert again.keep(cycle=40, summary=_vector(3), tokens=[4]) == 3, "and its id is not used again"
+    assert again.bytes == _on_disk(again.directory)
+
+
+def test_a_damaged_frame_with_a_whole_frame_after_it_is_not_a_cut_off_append_and_raises(tmp_path, real_cluster):
+    store = _store(tmp_path)
+    _live_a_stretch(store, 5, window=300)
+    file = store.directory / "memory_00000001.mem"
+    raw = bytearray(file.read_bytes())
+    raw[store._stretches[1].starts[2] + 3] ^= 1          # in the third frame's header
+    file.write_bytes(bytes(raw))
+    with pytest.raises(PersistenceError, match="needs a person"):
+        _store(tmp_path)
+    assert file.read_bytes() == bytes(raw)
+    # Damage inside a record that is not the last is said when that record is read.
+    raw[store._stretches[1].starts[2] + 3] ^= 1
+    raw[store._stretches[1].starts[1] + memory_module._FRAME_BYTES + 40] ^= 1
+    file.write_bytes(bytes(raw))
+    with pytest.raises(PersistenceError, match="damaged"):
+        _store(tmp_path)
+
+
+def test_a_file_something_else_has_written_to_is_not_appended_to(tmp_path, real_cluster):
+    store = _store(tmp_path, recent=0)
+    store.keep(cycle=1, summary=_vector(1), tokens=[1, 2])
+    file = store.directory / "memory_00000001.mem"
+    with open(file, "ab") as f:
+        f.write(b"x")
+    as_left = file.read_bytes()
+    with pytest.raises(PersistenceError, match="something else has written"):
+        store.look_back(1, cycle=50, summary=_vector(2), chosen_recall=True)
+    assert file.read_bytes() == as_left and store.look_back(1, cycle=51, summary=_vector(2)) is False
+
+
+def test_a_life_moved_to_a_drive_whose_clusters_do_not_fit_its_frames_is_refused(tmp_path, monkeypatch):
+    store = _store(tmp_path)
+    store.keep(cycle=1, summary=_vector(1), tokens=[1, 2])
+    before = {p.name: p.read_bytes() for p in store.directory.iterdir()}
+    monkeypatch.setattr(memory_module, "_cluster", lambda path: 4096)
+    with pytest.raises(PersistenceError, match="frames are 64 bytes"):
+        _store(tmp_path)
+    assert {p.name: p.read_bytes() for p in store.directory.iterdir()} == before
+    monkeypatch.setattr(memory_module, "_cluster", lambda path: 32)      # smaller clusters that divide it: fine
+    assert _store(tmp_path).open(1).tokens == [1, 2]
+
+
+def test_a_store_of_the_first_rework_is_refused_loudly_and_never_rewritten(tmp_path):
+    old = tmp_path / "life" / "memories"
+    (old / "memory_00000001").mkdir(parents=True)
+    (old / "memory_00000001" / "r000001.rec").write_bytes(b"as it was")
+    (old / "store.json").write_text(json.dumps({"format": 2, "life_id": "x", "began": "then", "path": str(old)}))
+    before = {p.relative_to(old).as_posix(): p.read_bytes() for p in old.rglob("*") if p.is_file()}
+    with pytest.raises(PersistenceError, match="format 2"):
+        Memories(old)
+    assert {p.relative_to(old).as_posix(): p.read_bytes() for p in old.rglob("*") if p.is_file()} == before

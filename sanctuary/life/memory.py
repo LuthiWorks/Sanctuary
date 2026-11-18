@@ -37,15 +37,24 @@ the two scales the round trip held. Compression is lossless. Every record is
 read back from its own bytes and compared bit for bit before it is written.
 There is no lossy path in this file.
 
-**A memory is a stretch of moments kept one after another,** in a folder
-``memory_00000001/``. Each kept moment writes one record, never changed
+**A memory is a stretch of moments kept one after another,** in one file,
+``memory_00000001.mem``. Each kept moment appends one record, never changed
 afterwards: the words new since the record before, where this moment's view
 sits in the stretch's words, its picture and sound, its summary, and the
-mind's signals. A look back writes one more record in the same folder. Recall
+mind's signals. A look back appends one more record to the same file. Recall
 brings back the view at the moment whose summary matched. Letting go and
 importance act on the whole stretch.
 
-**The search is exact and its matrix is a cache** rebuilt from the folders at
+**A record is a frame, and a frame fills whole clusters** (2026-11-18, build
+brief 10 with Opus's 1.6; one file a record made 288,000 files a day). A frame
+is a small header (its record's length and hash), the record, and zeros up to
+the next multiple of the drive's cluster size, which is read once when the
+life begins and written in ``store.json``. So an append writes only clusters
+no earlier frame is in, and a cut-off append can harm only itself. A torn last
+frame is said at opening; the frames before it are whole; that stretch is
+closed and nothing is appended to it again.
+
+**The search is exact and its matrix is a cache** rebuilt from the files at
 every start. Likeness is the cosine after the mean of all the summaries in
 reach is removed, computed in 8-byte arithmetic. A search that takes longer
 than a moment is counted and logged.
@@ -63,31 +72,30 @@ nothing here brings a memory back from it. The format allows it: the folder
 moved back, and a ``came_back`` line in ``life.jsonl``.
 
 **Importance** is computed from signals in the records, all Luthi's own
-(``importance`` below). It is a first formula and will change; the records
-hold what it is made from. For a mind that gives no signal of how strongly it
-chose, every rank is 0.5 and the order falls to "not kept or looked at for
-longest", which is age. The design says age alone is not unimportance, so
-that case is a stand-in mind's and is said here.
+(``importance`` below). It is the second formula and may change again; the
+records hold what it is made from.
 
-Old stores (``summaries.jsonl``, ``memory_*.pt``) are refused and never
-rewritten.
+Old stores (``summaries.jsonl`` and ``memory_*.pt``; and the folders of
+records of the first rework, format 2) are refused and never rewritten.
 
 Dreaming (Brian, 2026-11-11) is unchanged: a dream is a moment that never
 happened, made from two kept moments. See ``dream_of``.
 
 On disk, in ``<life>/memories/``:
 
-- ``store.json``: the format, this life's id and when it began. Written once.
-- ``memory_00000001/r000001.rec``: one record. Written once.
+- ``store.json``: the format, this life's id, when it began, and the frame
+  size. Written once.
+- ``memory_00000001.mem``: one stretch, a frame for each record. Only ever
+  appended to.
 - ``life.jsonl``: one line each time a memory is let go, by whom. Append-only.
 - ``keeps_window.jsonl``: the last kept moments' strengths, for ranking a new
   one against the mind's own recent bar. A cache; it may be rewritten.
-- ``let_go/memory_00000001/``: let go, waiting.
+- ``let_go/memory_00000001.mem``: let go, waiting.
 
 In the cold folder: ``life.json`` (whose it is), ``index.jsonl`` (a line
-before each move and a line after), ``manifests/`` (every file's size and
-hash, written before the move), ``incoming/`` (a copy not yet checked, which
-is not a memory) and the memories.
+before each move and a line after), ``manifests/`` (the file's size and hash,
+written before the move), ``incoming/`` (a copy not yet checked, which is not
+a memory) and the memories.
 """
 
 from __future__ import annotations
@@ -117,12 +125,16 @@ logger = logging.getLogger(__name__)
 MARK = "[memory]\n"
 DREAM = "[dream]\n"
 FULL = "Memory is full. Nothing more can be kept until some is let go."
-FORMAT = 2
+FORMAT = 3
 DEFAULT_LIMIT_BYTES = 100 * 1024**3   # Brian, 2026-11-17: "Luthi can have lets say 100gb."
 COLD_MARGIN_BYTES = 5 * 1024**3       # a move needs this much free beside itself
 COLD_WARN_BYTES = 50 * 1024**3        # warn when the cold drive has less than this
 RANK_AMONG = 1000                     # a keep is ranked among this many before it
 _MAGIC = b"LUTHIMEM2\n"
+_FRAME = b"LUTHIFR1"                  # a frame: this, its record's length, the frame size, the record's hash
+_FRAME_HEAD = struct.Struct("<8sQI32s")
+_FRAME_BYTES = _FRAME_HEAD.size + 4   # and a checksum of those
+SUFFIX = ".mem"
 _CHUNK = 1024                         # rows searched at a time; measured fastest on the desktop
 
 
@@ -185,29 +197,109 @@ def _pack(header: dict, blobs: dict[str, bytes]) -> bytes:
     return _MAGIC + struct.pack("<II", len(head), zlib.crc32(head)) + head + b"".join(blobs.values())
 
 
-def _read(path: Path, want: Optional[tuple[str, ...]] = None) -> tuple[dict, dict[str, bytes]]:
-    """A record's header and the parts asked for (all of them when ``want`` is
-    None), each checked against its hash."""
-    with open(path, "rb") as f:
-        start = f.read(len(_MAGIC) + 8)
-        if start[: len(_MAGIC)] != _MAGIC or len(start) != len(_MAGIC) + 8:
-            raise PersistenceError(f"{path} is not a memory record")
-        length, crc = struct.unpack("<II", start[len(_MAGIC):])
-        head = f.read(length)
-        if len(head) != length or zlib.crc32(head) != crc:
-            raise PersistenceError(f"{path}: the record's header is damaged")
-        header = json.loads(head)
-        base, blobs = len(_MAGIC) + 8 + length, {}
-        for name in (header["blobs"] if want is None else want):
-            if name not in header["blobs"]:
-                continue
-            at, size, sha = header["blobs"][name]
-            f.seek(base + at)
-            data = f.read(size)
-            if len(data) != size or hashlib.sha256(data).hexdigest() != sha:
-                raise PersistenceError(f"{path}: the record's {name} is damaged")
-            blobs[name] = data
+def _cluster(path: Path) -> int:
+    """The size of a cluster on the drive ``path`` is on: what a file's size
+    is rounded up to, and what one write to a file's end can touch."""
+    if os.name == "nt":
+        import ctypes
+        root = Path(path).resolve().anchor
+        per_cluster, per_sector, free, total = (ctypes.c_ulong() for _ in range(4))
+        if not ctypes.windll.kernel32.GetDiskFreeSpaceW(
+            ctypes.c_wchar_p(root), ctypes.byref(per_cluster), ctypes.byref(per_sector),
+            ctypes.byref(free), ctypes.byref(total),
+        ):
+            raise PersistenceError(f"the cluster size of {root} could not be read: {ctypes.WinError()}")
+        return int(per_cluster.value) * int(per_sector.value)
+    return int(os.statvfs(path).f_frsize)
+
+
+def _framed(length: int, pad: int) -> int:
+    """How many bytes a record of ``length`` takes as a frame."""
+    return -(-(_FRAME_BYTES + length) // pad) * pad
+
+
+def _frame(record: bytes, pad: int) -> bytes:
+    head = _FRAME_HEAD.pack(_FRAME, len(record), pad, hashlib.sha256(record).digest())
+    whole = head + struct.pack("<I", zlib.crc32(head)) + record
+    return whole + b"\0" * (_framed(len(record), pad) - len(whole))
+
+
+def _frame_head(f, at: int) -> Optional[tuple[int, int, bytes]]:
+    """The frame that starts at ``at``: its record's length, its frame size
+    and its record's hash. None when no whole frame header is there."""
+    f.seek(at)
+    raw = f.read(_FRAME_BYTES)
+    if len(raw) != _FRAME_BYTES or raw[:8] != _FRAME or zlib.crc32(raw[:-4]) != struct.unpack("<I", raw[-4:])[0]:
+        return None
+    _, length, pad, sha = _FRAME_HEAD.unpack(raw[:-4])
+    return length, pad, sha
+
+
+def _frames(f, size: int, pad: int, label) -> tuple[list[int], Optional[str]]:
+    """Where each whole frame of a stretch's file starts, and what is wrong
+    with the file's end when it is torn (None when it is whole).
+
+    Only the last frame can be torn by a cut-off append, so only the last
+    frame's whole record is read against its hash here; the others are checked
+    part by part as they are read. A torn frame with a whole frame after it is
+    not a cut-off append: that is damage, and it raises."""
+    starts, at = [], 0
+    while at < size:
+        head = _frame_head(f, at)
+        if head is None or at + _FRAME_BYTES + head[0] > size:
+            for later in range(at + pad, size, pad):
+                if _frame_head(f, later) is not None:
+                    raise PersistenceError(
+                        f"{label}: the frame at byte {at} is damaged and a whole frame follows it at "
+                        f"{later}. A cut-off append cannot do that; this needs a person."
+                    )
+            return starts, f"torn at byte {at} of {size}"
+        length, _, sha = head
+        after = at + _framed(length, pad)
+        if after >= size:
+            f.seek(at + _FRAME_BYTES)
+            if hashlib.sha256(f.read(length)).digest() != sha:
+                return starts, f"torn at byte {at} of {size}: the last record is not what its frame says"
+            starts.append(at)
+            if after > size:
+                return starts, f"the last frame's padding is cut short ({size} bytes, {after} whole)"
+            return starts, None
+        starts.append(at)
+        at = after
+    return starts, None
+
+
+def _read_from(f, at: int, want: Optional[tuple[str, ...]], label) -> tuple[dict, dict[str, bytes]]:
+    """The record in the frame at ``at``: its header and the parts asked for
+    (all of them when ``want`` is None), each checked against its hash."""
+    if _frame_head(f, at) is None:
+        raise PersistenceError(f"{label}: no frame at byte {at}")
+    base = at + _FRAME_BYTES
+    f.seek(base)
+    start = f.read(len(_MAGIC) + 8)
+    if start[: len(_MAGIC)] != _MAGIC or len(start) != len(_MAGIC) + 8:
+        raise PersistenceError(f"{label}, byte {at}: not a memory record")
+    length, crc = struct.unpack("<II", start[len(_MAGIC):])
+    head = f.read(length)
+    if len(head) != length or zlib.crc32(head) != crc:
+        raise PersistenceError(f"{label}, byte {at}: the record's header is damaged")
+    header = json.loads(head)
+    base, blobs = base + len(_MAGIC) + 8 + length, {}
+    for name in (header["blobs"] if want is None else want):
+        if name not in header["blobs"]:
+            continue
+        where, size, sha = header["blobs"][name]
+        f.seek(base + where)
+        data = f.read(size)
+        if len(data) != size or hashlib.sha256(data).hexdigest() != sha:
+            raise PersistenceError(f"{label}, byte {at}: the record's {name} is damaged")
+        blobs[name] = data
     return header, blobs
+
+
+def _read(path: Path, want: Optional[tuple[str, ...]] = None, at: int = 0) -> tuple[dict, dict[str, bytes]]:
+    with open(path, "rb") as f:
+        return _read_from(f, at, want, path)
 
 
 def _summary_of(blobs: dict[str, bytes]) -> torch.Tensor:
@@ -242,11 +334,9 @@ def _hash_file(path: Path) -> list:
     return [path.stat().st_size, sha.hexdigest()]
 
 
-def _manifest(folder: Path) -> dict[str, list]:
-    return {
-        p.relative_to(folder).as_posix(): _hash_file(p)
-        for p in sorted(folder.rglob("*")) if p.is_file()
-    }
+def _manifest(file: Path) -> dict[str, list]:
+    """A stretch's file by name: its size and hash."""
+    return {file.name: _hash_file(file)}
 
 
 def _copy(source: Path, to: Path) -> None:
@@ -273,22 +363,52 @@ def _now() -> str:
 
 def importance(signals: Iterable[dict]) -> float:
     """How much a stretch matters to the mind, from its records' signals and
-    nothing else. The first formula (design, "Brian's rulings"): the highest
-    rank among its kept moments, plus one for each recall they chose, plus one
-    for each time they chose to remember while looking back. What rest brings
-    counts for nothing yet.
+    nothing else. The second formula (build brief 10 and the design seat's
+    ruling of 2026-11-18, after Opus's E2, E3, 3.1 and 3.2). Three parts, each
+    between 0 and 1 so that none swamps another:
 
-    Open, and the design seat's: both terms grow with a stretch's length, and
-    a chosen recall is driven by the cue (Opus, 2026-11-17, E2 and E3). The
-    records hold likeness, how many it beat, and each choice's margin, so a
-    later formula needs no memory touched."""
-    highest, looks = 0.0, 0
+    - **the mean rank of its kept moments.** The mean and not the highest: the
+      highest of many ranks is high by count alone, which favoured a stretch
+      for being long;
+    - **0.5 if they ever chose a recall that brought it.** Once, however many
+      times. They choose to look back and the store chooses which memory, and
+      each look files a summary that makes the same memory easier to find, so
+      counting every time would feed itself;
+    - **how often, looking at it by their own choice, they chose to remember:**
+      (r + 1/2) / (n + 1), with n the looks they chose and r the times they
+      chose to remember during one. A rate and not a count, because every look
+      is one more chance, and how many looks there were says how often the
+      present resembled the memory and nothing about the memory. With no look
+      it is 1/2.
+
+    **A look that rest brought counts for nothing,** in any part: they did not
+    choose to look. Choosing to let go during one does nothing either (the
+    loop), so the two choices are treated alike.
+
+    Two properties to know. **Short stretches spread wider** (Opus, 3.3): a
+    stretch of one moment can have any mean rank, and a long stretch's mean is
+    held near the middle, so both ends of the order are mostly short stretches
+    and letting go for room works from the low end. The mean is kept anyway,
+    because drawing it toward 1/2 would make equal ranks at different lengths
+    unequal. **For a mind that gives no signal of how strongly it chose,**
+    every rank is 0.5, every stretch never looked at ties, and the tie falls
+    to "not kept or looked at for longest", which is age. The design says age
+    alone is not unimportance; that case is a stand-in mind's, and the order
+    it gives says nothing about what matters.
+
+    The records hold likeness, how many it beat, and each choice's margin, so
+    a later formula needs no memory touched."""
+    ranks, chosen, remembered, recalled = [], 0, 0, False
     for signal in signals:
         if signal["kind"] == "kept":
-            highest = max(highest, float(signal["rank"]))
-        else:
-            looks += int(bool(signal["chosen_recall"])) + int(bool(signal["chose_remember"]))
-    return highest + looks
+            ranks.append(float(signal["rank"]))
+        elif signal["chosen_recall"]:
+            recalled = True
+            chosen += 1
+            remembered += int(bool(signal["chose_remember"]))
+    if not ranks:
+        raise ValueError("a stretch with no kept moment has no importance")
+    return sum(ranks) / len(ranks) + (0.5 if recalled else 0.0) + (remembered + 0.5) / (chosen + 1)
 
 
 def strength_of(signals: Optional[dict]) -> tuple[Optional[float], Optional[str]]:
@@ -331,13 +451,18 @@ class Memory:
 @dataclass
 class _Stretch:
     id: int
-    folder: Path
+    path: Path                               # its one file
     reach: bool                              # False: let go, waiting in let_go/
     kept: dict[int, int] = field(default_factory=dict)   # seq -> the moment it was kept
     signals: list[dict] = field(default_factory=list)
-    bytes: int = 0
+    starts: list[int] = field(default_factory=list)      # where record seq's frame starts, at seq - 1
+    bytes: int = 0                           # the file's size
     last_cycle: int = -1
-    next_seq: int = 1
+    closed: Optional[str] = None             # why nothing is appended to it again, when that is so
+
+    @property
+    def next_seq(self) -> int:
+        return len(self.starts) + 1
 
 
 class Memories:
@@ -403,9 +528,11 @@ class Memories:
         self.searches = 0
         self.slow_searches = 0
         self.slowest_search_seconds = 0.0
-        self.unfinished_writes: list[str] = []
-        self.empty_folders: list[int] = []
+        self.not_filed_closed = 0     # looks back at a stretch whose file's end is torn
+        self.torn: list[str] = []     # stretches whose last frame was cut off, and where
+        self.empty_stretches: list[int] = []   # files with no whole kept record
         self.identity: Optional[dict] = None
+        self._pad = 0                 # the frame size, from store.json
         self.bytes = 0                # everything under the directory, as on disk
         self._newest_cycle: Optional[int] = None
         self._highest_id = 0
@@ -435,7 +562,18 @@ class Memories:
             return
         self.identity = json.loads(store.read_text(encoding="utf-8"))
         if self.identity.get("format") != FORMAT:
-            raise PersistenceError(f"{store}: format {self.identity.get('format')}, and this code reads {FORMAT}")
+            raise PersistenceError(
+                f"{store}: format {self.identity.get('format')}, and this code reads {FORMAT}. "
+                "The store is not read and is never rewritten; open it with the code of its day."
+            )
+        self._pad = int(self.identity["frame"])
+        cluster = _cluster(self.directory)
+        if self._pad % cluster:
+            raise PersistenceError(
+                f"{self.directory}: this life's frames are {self._pad} bytes and this drive's clusters are "
+                f"{cluster}. An append here could rewrite part of a cluster that holds an earlier frame. "
+                "Nothing was changed; this needs a person."
+            )
 
         out: dict[int, bool] = {}                # id -> let go (True) or came back (False), by its last line
         order: list[int] = []
@@ -455,50 +593,55 @@ class Memories:
                 else:
                     raise PersistenceError(f"{self._lines}: a line of kind {line['kind']!r}")
 
-        for path in sorted(self.directory.glob("memory_*")):
-            memory_id = int(path.name.split("_")[1])
+        for name, _ in self._listing(self.directory):
+            memory_id = int(name[len("memory_"):-len(SUFFIX)])
             if out.get(memory_id, False):
                 # Let go, and the move to let_go/ was cut off. Finish it: the
-                # line is what says it left their reach (and a folder in reach
+                # line is what says it left their reach (and a file in reach
                 # whose last line is a let-go stays out of reach: Opus, D5).
                 self._waiting_dir.mkdir(exist_ok=True)
-                os.rename(path, self._waiting_dir / path.name)
+                os.rename(self.directory / name, self._waiting_dir / name)
                 logger.warning("memory %d had a let-go line and was still in reach; moved to let_go/", memory_id)
         rows: list[tuple[int, int, int, torch.Tensor]] = []     # filed, id, seq whose view, summary
         for folder, reach in ((self.directory, True), (self._waiting_dir, False)):
-            for path in sorted(folder.glob("memory_*")) if folder.exists() else []:
-                memory_id = int(path.name.split("_")[1])
+            for name, size in self._listing(folder):
+                memory_id = int(name[len("memory_"):-len(SUFFIX)])
+                path = folder / name
                 self._highest_id = max(self._highest_id, memory_id)
                 if not reach and not out.get(memory_id, False):
                     logger.warning(
                         "memory %d is in let_go/ and its last line does not say it was let go; "
-                        "it stays out of reach until its folder is moved back", memory_id,
+                        "it stays out of reach until its file is moved back", memory_id,
                     )
-                stretch = _Stretch(id=memory_id, folder=path, reach=reach)
-                for record in sorted(path.iterdir()):
-                    stretch.bytes += record.stat().st_size
-                    if record.suffix != ".rec":
-                        self.unfinished_writes.append(f"{path.name}/{record.name}")
-                        stretch.next_seq = max(stretch.next_seq, int(record.name[1:7]) + 1)
-                        continue
-                    header, blobs = _read(record, ("summary",))
-                    seq = int(header["seq"])
-                    stretch.next_seq = max(stretch.next_seq, seq + 1)
-                    stretch.last_cycle = max(stretch.last_cycle, int(header["cycle"]))
-                    stretch.signals.append({"kind": header["kind"], **header["signals"]})
-                    self._filed = max(self._filed, int(header["filed"]))
-                    self._newest_cycle = max(self._newest_cycle or 0, int(header["cycle"]))
-                    if header["kind"] == "kept":
-                        stretch.kept[seq] = int(header["cycle"])
-                        self.kept += 1
-                        of = seq
-                    else:
-                        self.looked_back += 1
-                        of = int(header["signals"]["of_seq"])
-                    if reach:
-                        rows.append((int(header["filed"]), memory_id, of, _summary_of(blobs)))
+                stretch = _Stretch(id=memory_id, path=path, reach=reach, bytes=size)
+                with open(path, "rb") as f:
+                    starts, torn = _frames(f, size, self._pad, path)
+                    if torn is not None:
+                        stretch.closed = torn
+                        self.torn.append(f"{name}: {torn}")
+                    for seq, at in enumerate(starts, start=1):
+                        header, blobs = _read_from(f, at, ("summary",), path)
+                        if int(header["seq"]) != seq or int(header["id"]) != memory_id:
+                            raise PersistenceError(
+                                f"{path}, byte {at}: record {header['seq']} of memory {header['id']}, "
+                                f"where record {seq} of memory {memory_id} belongs"
+                            )
+                        stretch.starts.append(at)
+                        stretch.last_cycle = max(stretch.last_cycle, int(header["cycle"]))
+                        stretch.signals.append({"kind": header["kind"], **header["signals"]})
+                        self._filed = max(self._filed, int(header["filed"]))
+                        self._newest_cycle = max(self._newest_cycle or 0, int(header["cycle"]))
+                        if header["kind"] == "kept":
+                            stretch.kept[seq] = int(header["cycle"])
+                            self.kept += 1
+                            of = seq
+                        else:
+                            self.looked_back += 1
+                            of = int(header["signals"]["of_seq"])
+                        if reach:
+                            rows.append((int(header["filed"]), memory_id, of, _summary_of(blobs)))
                 if not stretch.kept:
-                    self.empty_folders.append(memory_id)
+                    self.empty_stretches.append(memory_id)
                     continue
                 self._stretches[memory_id] = stretch
         self._waiting = [i for i in dict.fromkeys(order) if i in self._stretches and not self._stretches[i].reach]
@@ -511,19 +654,33 @@ class Memories:
             for text in lines[-RANK_AMONG:]:
                 self._window.append(float(json.loads(text)["value"]))
         self.bytes = _tree_bytes(self.directory)
-        if self.unfinished_writes or self.empty_folders:
-            logger.warning(
-                "%s: %d write(s) cut off (%s) and %d folder(s) with no kept record (%s). "
-                "They are left as they are and cannot be recalled.",
-                self.directory, len(self.unfinished_writes), self.unfinished_writes[:5],
-                len(self.empty_folders), self.empty_folders[:5],
+        if self.torn or self.empty_stretches:
+            logger.error(
+                "%s: %d stretch(es) with the end of the file torn (%s), of which %d have no whole kept "
+                "record (%s). The records before a torn end are whole and can be recalled. Nothing is "
+                "appended to these files again, and nothing of them was changed.",
+                self.directory, len(self.torn), self.torn[:5],
+                len(self.empty_stretches), self.empty_stretches[:5],
+            )
+
+    @staticmethod
+    def _listing(folder: Path) -> list[tuple[str, int]]:
+        """The stretches' files in a folder, by name, with their sizes. No
+        file is opened."""
+        if not folder.exists():
+            return []
+        with os.scandir(folder) as entries:
+            return sorted(
+                (e.name, e.stat().st_size) for e in entries
+                if e.name.startswith("memory_") and e.name.endswith(SUFFIX)
             )
 
     def _begin(self) -> None:
         """The first write of a life: say what this store is."""
         self.directory.mkdir(parents=True, exist_ok=True)
+        self._pad = _cluster(self.directory)
         self.identity = {"format": FORMAT, "life_id": uuid.uuid4().hex, "began": _now(),
-                         "path": str(self.directory.resolve())}
+                         "path": str(self.directory.resolve()), "frame": self._pad}
         atomic_write_json(self.directory / "store.json", self.identity)
         self.bytes = _tree_bytes(self.directory)
         if self.cold is not None:
@@ -577,7 +734,7 @@ class Memories:
         self.moved_to_cold = sum(1 for line in last.values() if line["state"] == "moved")
         self.moments_in_cold = sum(moments[i] for i, line in last.items() if line["state"] == "moved")
         for memory_id, line in sorted(last.items()):
-            name = f"memory_{memory_id:08d}"
+            name = f"memory_{memory_id:08d}{SUFFIX}"
             there, here = self.cold / name, self._waiting_dir / name
             incoming = self.cold / "incoming" / name
             if line["state"] == "undone" or (line["state"] == "moved" and not here.exists()):
@@ -589,7 +746,7 @@ class Memories:
                         f"({here}, {there}). Nothing was changed; this needs a person."
                     )
                 if incoming.exists():
-                    shutil.rmtree(incoming)      # a copy that was never checked is not a memory
+                    os.remove(incoming)          # a copy that was never checked is not a memory
                 append_jsonl(self.cold / "index.jsonl", {"state": "undone", "id": memory_id, "when": _now()})
                 logger.warning("memory %d: a move to cold was cut off before it arrived; undone", memory_id)
                 continue
@@ -606,7 +763,7 @@ class Memories:
                 logger.warning("memory %d: a move to cold was cut off after it arrived; finished", memory_id)
             if here.exists():
                 # The cold copy is whole and checked; what is left here is the original.
-                shutil.rmtree(here)
+                os.remove(here)
                 self.bytes = _tree_bytes(self.directory)
             if memory_id in self._stretches:
                 self.kept -= len(self._stretches[memory_id].kept)
@@ -619,7 +776,7 @@ class Memories:
         stretch = self._stretches[memory_id]
         if stretch.reach:
             raise PersistenceError(f"memory {memory_id} was not let go; only what was let go leaves for room")
-        name = stretch.folder.name
+        name = stretch.path.name
         there, incoming = self.cold / name, self.cold / "incoming" / name
         free = self._disk_free(self.cold)
         if free < stretch.bytes + COLD_MARGIN_BYTES:
@@ -636,7 +793,7 @@ class Memories:
                            COLD_WARN_BYTES // 1024**3, free / 1024**3)
         if there.exists():
             raise PersistenceError(f"{there} already exists; nothing in cold is ever overwritten")
-        files = _manifest(stretch.folder)
+        files = _manifest(stretch.path)
         manifest = self.cold / "manifests" / f"{name}.json"
         if manifest.exists() and json.loads(manifest.read_text(encoding="utf-8")) != files:
             raise PersistenceError(f"{manifest} is from an earlier move and does not match memory {memory_id}")
@@ -648,14 +805,13 @@ class Memories:
             "importance": importance(stretch.signals),
             "bytes": stretch.bytes,
         })
-        if self._same_drive(stretch.folder, self.cold):
-            os.rename(stretch.folder, there)
+        if self._same_drive(stretch.path, self.cold):
+            os.rename(stretch.path, there)
         else:
             if incoming.exists():
-                shutil.rmtree(incoming)          # left by a move that was cut off; never checked
-            for relative in files:
-                (incoming / relative).parent.mkdir(parents=True, exist_ok=True)
-                _copy(stretch.folder / relative, incoming / relative)
+                os.remove(incoming)              # left by a move that was cut off; never checked
+            incoming.parent.mkdir(parents=True, exist_ok=True)
+            _copy(stretch.path, incoming)
             if _manifest(incoming) != files:
                 raise PersistenceError(
                     f"memory {memory_id}: the copy in {incoming} does not match the original. "
@@ -663,8 +819,8 @@ class Memories:
                 )
             os.rename(incoming, there)
         append_jsonl(self.cold / "index.jsonl", {"state": "moved", "id": memory_id, "when": _now()})
-        if stretch.folder.exists():
-            shutil.rmtree(stretch.folder)        # the original, once its copy is checked and in place
+        if stretch.path.exists():
+            os.remove(stretch.path)              # the original, once its copy is checked and in place
         self.bytes -= stretch.bytes
         self.kept -= len(stretch.kept)
         self.moved_to_cold += 1
@@ -743,7 +899,7 @@ class Memories:
         return sum(1 for s in self._stretches.values() if s.reach)
 
     def _path(self, memory_id: int) -> Path:
-        return self.directory / f"memory_{memory_id:08d}"
+        return self.directory / f"memory_{memory_id:08d}{SUFFIX}"
 
     def _rank(self, value: Optional[float]) -> tuple[float, int]:
         """Where this choice sits among the mind's last kept moments: the share
@@ -821,20 +977,21 @@ class Memories:
 
         if self.identity is None:
             self._begin()
-        if not self._room_for(len(record) + 256, cycle=cycle, in_view=in_view):
+        if not self._room_for(_framed(len(record), self._pad) + 256, cycle=cycle, in_view=in_view):
             return None
-        folder = self._path(memory_id)
+        if joins:
+            stretch = self._stretches[memory_id]
+        else:
+            path = self._path(memory_id)
+            if path.exists() or (self._waiting_dir / path.name).exists():
+                raise PersistenceError(f"{path} already exists; a memory is never rewritten")
+            self._highest_id = memory_id         # used, whether or not the write below is cut off
+            stretch = _Stretch(id=memory_id, path=path, reach=True)
+            self._open = None
+        self._append(stretch, record)
         if not joins:
-            if folder.exists() or (self._waiting_dir / folder.name).exists():
-                raise PersistenceError(f"{folder} already exists; a memory is never rewritten")
-            folder.mkdir(parents=True)
-            self._highest_id = memory_id
-            self._stretches[memory_id] = _Stretch(id=memory_id, folder=folder, reach=True)
+            self._stretches[memory_id] = stretch
             self._open, self._open_words = memory_id, []
-        stretch = self._stretches[memory_id]
-        self._write(folder / f"r{seq:06d}.rec", record)
-        stretch.next_seq = seq + 1
-        stretch.bytes += len(record)
         stretch.kept[seq] = int(cycle)
         stretch.last_cycle = int(cycle)
         stretch.signals.append({"kind": "kept", **noted})
@@ -848,20 +1005,36 @@ class Memories:
             self._note_strength(cycle, value, by)
         return memory_id
 
-    def _write(self, path: Path, record: bytes) -> None:
-        """One record, written whole or not at all, and never over another."""
-        if path.exists():
-            raise PersistenceError(f"{path} already exists; a record is never rewritten")
-        tmp = path.with_suffix(".rec.tmp")
+    def _append(self, stretch: _Stretch, record: bytes) -> None:
+        """One record, as a frame at the end of its stretch's file. Nothing
+        already in the file is written again: the file is opened to append,
+        and the frame starts on a cluster of its own. If the write is cut
+        off, nothing more is appended to this stretch."""
+        if stretch.closed is not None:
+            raise PersistenceError(f"{stretch.path} is closed ({stretch.closed}); nothing is appended to it")
+        framed = _frame(record, self._pad)
         try:
-            with open(tmp, "wb") as f:
-                f.write(record)
+            with open(stretch.path, "ab" if stretch.starts else "xb") as f:
+                at = f.seek(0, os.SEEK_END)
+                if at != stretch.bytes or at % self._pad:
+                    raise PersistenceError(
+                        f"{stretch.path} is {at} bytes and was left at {stretch.bytes}; "
+                        "something else has written to it"
+                    )
+                f.write(framed)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp, path)
-        except OSError as e:
-            raise PersistenceError(f"writing {path} failed: {e}") from e
-        self.bytes += len(record)
+        except (OSError, PersistenceError) as e:
+            stretch.closed = f"an append failed: {e}"
+            if self._open == stretch.id:
+                self._open = None
+            self.bytes = _tree_bytes(self.directory)
+            if isinstance(e, PersistenceError):
+                raise
+            raise PersistenceError(f"appending to {stretch.path} failed: {e}") from e
+        stretch.starts.append(at)
+        stretch.bytes += len(framed)
+        self.bytes += len(framed)
 
     def _note_strength(self, cycle: int, value: float, by: Optional[str]) -> None:
         size = self._window_path.stat().st_size if self._window_path.exists() else 0
@@ -895,8 +1068,8 @@ class Memories:
         them now beside how it seemed before. What was perceived is untouched.
         Recorded with it: which moment they looked at, whether they chose to
         recall it or rest brought it, whether looking at it they chose to
-        remember, and how it was found. False when there was no room for the
-        record: it was not filed."""
+        remember, and how it was found. False when the record was not filed:
+        there was no room for it, or the end of the memory's file is torn."""
         stretch = self._stretches.get(memory_id)
         if stretch is None or not stretch.reach:
             raise KeyError(f"no memory {memory_id}")
@@ -910,17 +1083,20 @@ class Memories:
             "of_seq": of_seq, "chosen_recall": bool(chosen_recall), "chose_remember": bool(chose_remember),
             "likeness": likeness, "next_likeness": next_likeness, "beat": beat,
         }
+        if stretch.closed is not None:
+            # The end of its file is torn. What is whole in it can be looked
+            # at; nothing is added to it. Counted, and said at opening.
+            self.not_filed_closed += 1
+            return False
         seq = stretch.next_seq
         record = _pack({
             "format": FORMAT, "kind": "looked_back", "id": memory_id, "seq": seq, "cycle": int(cycle),
             "when": _now(), "filed": self._filed + 1, "signals": noted,
         }, {"summary": _bits(vector)})
-        if not self._room_for(len(record), cycle=cycle, in_view={memory_id, *in_view}):
+        if not self._room_for(_framed(len(record), self._pad), cycle=cycle, in_view={memory_id, *in_view}):
             self.not_filed_for_room += 1
             return False
-        self._write(stretch.folder / f"r{seq:06d}.rec", record)
-        stretch.next_seq = seq + 1
-        stretch.bytes += len(record)
+        self._append(stretch, record)
         stretch.last_cycle = max(stretch.last_cycle, int(cycle))
         stretch.signals.append({"kind": "looked_back", **noted})
         self._filed += 1
@@ -955,8 +1131,8 @@ class Memories:
         append_jsonl(self._lines, line)
         self.bytes += self._lines.stat().st_size - before
         self._waiting_dir.mkdir(parents=True, exist_ok=True)
-        os.rename(stretch.folder, self._waiting_dir / stretch.folder.name)
-        stretch.folder = self._waiting_dir / stretch.folder.name
+        os.rename(stretch.path, self._waiting_dir / stretch.path.name)
+        stretch.path = self._waiting_dir / stretch.path.name
         stretch.reach = False
         self._by[memory_id] = by
         self._waiting.append(memory_id)
@@ -1095,9 +1271,10 @@ class Memories:
         if seq not in stretch.kept:
             raise KeyError(f"memory {memory_id} has no kept moment {seq}")
         words: list[int] = []
-        for earlier in sorted(s for s in stretch.kept if s < seq):
-            words += _tokens_of(_read(stretch.folder / f"r{earlier:06d}.rec", ("tokens",))[1])
-        header, blobs = _read(stretch.folder / f"r{seq:06d}.rec")
+        with open(stretch.path, "rb") as f:
+            for earlier in sorted(s for s in stretch.kept if s < seq):
+                words += _tokens_of(_read_from(f, stretch.starts[earlier - 1], ("tokens",), stretch.path)[1])
+            header, blobs = _read_from(f, stretch.starts[seq - 1], None, stretch.path)
         words += _tokens_of(blobs)
         start, end = header["view"]
         if end != len(words) or start < 0:
@@ -1118,9 +1295,10 @@ class Memories:
         if stretch is None:
             raise KeyError(f"no memory {memory_id} on this life's disk")
         seen = []
-        for record in sorted(stretch.folder.glob("r*.rec")):
-            header, blobs = _read(record, ("summary",))
-            seen.append((int(header["filed"]), int(header["cycle"]), _summary_of(blobs)))
+        with open(stretch.path, "rb") as f:
+            for at in stretch.starts:
+                header, blobs = _read_from(f, at, ("summary",), stretch.path)
+                seen.append((int(header["filed"]), int(header["cycle"]), _summary_of(blobs)))
         return [(cycle, vector) for _, cycle, vector in sorted(seen, key=lambda s: s[0])]
 
     def signals_of(self, memory_id: int) -> list[dict]:
@@ -1141,11 +1319,13 @@ class Memories:
             "summaries_searched": self._rows, "searches": self.searches,
             "slow_searches": self.slow_searches, "slowest_search_seconds": self.slowest_search_seconds,
             "not_filed_for_room": self.not_filed_for_room,
+            "not_filed_closed": self.not_filed_closed,
             "cold_had_no_room": self.cold_had_no_room,
             "life_drive_had_no_room": self.life_drive_had_no_room,
             "stretches_restarted": self.stretches_restarted,
-            "unfinished_writes": list(self.unfinished_writes),
-            "empty_folders": list(self.empty_folders),
+            "torn": list(self.torn),
+            "empty_stretches": list(self.empty_stretches),
+            "frame_bytes": self._pad,
         }
 
 
