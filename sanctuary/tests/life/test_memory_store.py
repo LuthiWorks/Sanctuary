@@ -906,3 +906,188 @@ def test_a_store_of_the_first_rework_is_refused_loudly_and_never_rewritten(tmp_p
     with pytest.raises(PersistenceError, match="format 2"):
         Memories(old)
     assert {p.relative_to(old).as_posix(): p.read_bytes() for p in old.rglob("*") if p.is_file()} == before
+
+
+# ---- G. The screened search is the full search (brief 10, part 2; Opus 2.1 to 2.6) ----
+
+
+def _filled(tmp_path, rows: torch.Tensor, *, per_memory: int = 3, recent: int = 0, name: str = "life") -> Memories:
+    """A store holding ``rows`` as its summaries, a few to a memory, kept through the store."""
+    store = _store(tmp_path, name, recent=recent, limit_bytes=None)
+    for n, row in enumerate(rows):
+        store.keep(cycle=n + (n // per_memory) * 5, summary=row, tokens=[n % 250], new=1 if n % per_memory else None)
+    return store
+
+
+def _both(store: Memories, cue: torch.Tensor, now: int):
+    """The screened search's answer and the full search's, for one cue."""
+    ids = store._row_id[: store._rows]
+    present = store._still_present(now)
+    able = ~torch.isin(ids, torch.tensor(sorted(present), dtype=torch.int64)) if present else torch.ones_like(ids, dtype=torch.bool)
+    vector = memory_module._as_summary(cue)
+    return store._find(vector, able, ids, screened=True), store._find(vector, able, ids, screened=False)
+
+
+def _stores_for_the_screen() -> dict[str, torch.Tensor]:
+    gen = torch.Generator().manual_seed(11)
+    width, count = 48, 2600                       # more than two chunks of rows
+    shared = torch.randn(width, generator=gen, dtype=torch.float64)
+    shared = shared / shared.norm()
+    walk = (torch.randn(count, width, generator=gen, dtype=torch.float64) * 2e-4).cumsum(0)
+    tight = shared + torch.randn(count, width, generator=gen, dtype=torch.float64) * 4.5e-3 / width ** 0.5
+    at_the_mean = tight.clone()
+    at_the_mean[5::40] = tight.to(torch.float32).to(torch.float64).mean(0)      # rows at the mean itself, near enough
+    at_the_mean[7::40] = at_the_mean[6::40]                                      # and rows that are the same row twice
+    return {
+        "unalike": torch.randn(count, width, generator=gen).to(torch.float64),
+        "a_walk": shared + walk / walk.norm(dim=1).max() * 0.045,
+        "alike_at_0.99999": tight,
+        "alike_with_rows_at_the_mean_and_rows_twice": at_the_mean,
+        "large_numbers": (shared + walk) * 3e4,
+    }
+
+
+@pytest.mark.parametrize("kind", sorted(_stores_for_the_screen()))
+def test_the_screened_search_gives_the_full_searchs_answer_bit_for_bit(tmp_path, kind):
+    rows = _stores_for_the_screen()[kind].to(torch.float32)
+    if kind.startswith("alike"):
+        alike = torch.nn.functional.cosine_similarity(rows[:-1].double(), rows[1:].double(), dim=1)
+        assert float(alike.median()) > 0.99998
+    half = len(rows) // 2
+    store = _filled(tmp_path, rows[:half])
+    gen = torch.Generator().manual_seed(3)
+    computed = []
+
+    def compare(now: int, cues: int) -> None:
+        for q in range(cues):
+            i = int(torch.randint(store._rows, (1,), generator=gen))
+            noise = torch.randn(rows.shape[1], generator=gen) * float(rows.std()) * (0.0, 1e-4, 1e-2, 1.0)[q % 4]
+            cue = store._matrix[i] + noise if q % 5 else store._matrix[store._rows - 1 - q % 7]
+            screened, full = _both(store, cue, now)
+            assert screened[:4] == full[:4], (kind, q, screened, full)
+            computed.append(screened[4])
+
+    compare(now=10**9, cues=60)
+    # More rows since the screen's reference was made: the mean has moved.
+    for n, row in enumerate(rows[half: half + half // 2]):
+        store.keep(cycle=10**6 + n * 7, summary=row, tokens=[1])
+    assert store._ref_base == half, "the reference is the earlier one"
+    compare(now=10**9, cues=60)
+    # What is still the present is left out, and it is the nearest (Opus 2.1).
+    store.recent = 2000
+    newest = int(store._newest_cycle)
+    assert 0 < len(store._still_present(newest)) < len(store)
+    compare(now=newest, cues=60)
+    store.recent = 0
+    # Looked back on, let go, and opened again.
+    for memory_id in (3, 9, 27):
+        store.look_back(memory_id, cycle=10**7 + memory_id, summary=rows[-memory_id], chosen_recall=True)
+    store.let_go(5, cycle=10**7 + 50)
+    assert store._ref_mean is None
+    compare(now=10**9, cues=40)
+    again = Memories(store.directory, recent=0, limit_bytes=None, drive_margin_bytes=0)
+    for q in range(40):
+        cue = rows[int(torch.randint(len(rows), (1,), generator=gen))]
+        a, b = store.nearest(cue, now=10**9), again.nearest(cue, now=10**9)
+        assert (a.id, a.seq, a.likeness, a.next_likeness, a.beat) == (b.id, b.seq, b.likeness, b.next_likeness, b.beat)
+    assert store.screened_searches == 40 and store.full_searches == 0
+    if kind == "unalike":
+        assert max(computed) < 40, "and on rows that are not alike the screen leaves few"
+
+
+def test_when_what_is_still_the_present_is_nearest_the_screen_still_finds_the_best_it_may_return(tmp_path):
+    # Opus 2.1: the newest rows are in a region of their own and the cue is among them. A bar
+    # taken over every row is set by rows the search may not return, and leaves no row it may.
+    gen = torch.Generator().manual_seed(5)
+    old = torch.randn(1500, 32, generator=gen)
+    new = torch.randn(32, generator=gen) * 4 + torch.randn(100, 32, generator=gen) * 0.05
+    store = _filled(tmp_path, torch.cat([old, new]), per_memory=1)
+    store.recent = 100 * 6
+    now = int(store._newest_cycle)
+    present = store._still_present(now)
+    assert len(present) == 100
+    cue = new[50]
+    screened, full = _both(store, cue, now)
+    assert screened[:4] == full[:4] and int(store._row_id[screened[0]]) not in present
+    up, low = store._bounds(store._sum / store._rows, cue.double() - store._sum / store._rows)
+    assert not bool((up[:1500] >= low.max()).any()), "the bar over every row would have left none it may return"
+    found = store.nearest(cue, now=now)
+    assert found is not None and found.id not in present
+
+
+def test_equal_likenesses_fall_to_the_same_row_as_in_the_full_search(tmp_path):
+    # Opus 2.5: a world where nothing moves gives the same summary again and again.
+    gen = torch.Generator().manual_seed(6)
+    rows = torch.randn(1200, 24, generator=gen)
+    rows[100::3] = rows[100]
+    store = _filled(tmp_path, rows, per_memory=1)
+    for cue in (rows[100], rows[100] * 1.5, rows[400]):
+        screened, full = _both(store, cue, 10**9)
+        assert screened[:4] == full[:4]
+    assert _both(store, rows[100], 10**9)[0][0] == 100 and _both(store, rows[100], 10**9)[0][1] == _both(store, rows[100], 10**9)[0][2]
+
+
+def test_a_store_on_which_plain_4_byte_arithmetic_brings_back_another_memory(tmp_path):
+    # Brief 10: "a test in which the plain 4-byte search does bring back a different memory
+    # and the screened search does not". Summaries with a large shared part, and each one
+    # kept twice a few of the smallest steps apart, as two moments of a still world would be.
+    gen = torch.Generator().manual_seed(8)
+    shared = torch.randn(48, generator=gen, dtype=torch.float64) * 300
+    rows = (shared + torch.randn(1500, 48, generator=gen, dtype=torch.float64) * 0.02).to(torch.float32)
+    rows[1::2] = rows[0::2] + torch.randn(750, 48, generator=gen) * 6e-5
+    store = _filled(tmp_path, rows, per_memory=1)
+    mean = store._sum / store._rows
+    plain_differs = 0
+    for q in range(300):
+        pair = (q * 4) % 1500                             # a cue about as near one of a pair as the other
+        cue = ((rows[pair].double() + rows[pair + 1].double()) / 2).float() + torch.randn(48, generator=gen) * 2e-5
+        screened, full = _both(store, cue, 10**9)
+        assert screened[:4] == full[:4]
+        centred = (cue.double() - mean).float()
+        plain_rows = store._matrix[: store._rows] - mean.float()
+        plain = int(((plain_rows @ centred) / (plain_rows.norm(dim=1) * centred.norm())).argmax())
+        plain_differs += int(plain != full[0])
+    assert plain_differs > 0, "no cue made the plain 4-byte search differ; this test needs a harder store"
+
+
+def test_every_hundredth_screened_search_is_checked_against_the_full_one_and_a_difference_raises(tmp_path, monkeypatch):
+    gen = torch.Generator().manual_seed(9)
+    rows = torch.randn(300, 16, generator=gen)
+    store = _filled(tmp_path, rows, per_memory=1)
+    for q in range(memory_module.CHECK_EVERY * 2):
+        store.nearest(rows[q], now=10**9)
+    assert store.checked_searches == 2 and store.screened_searches == 200
+    report = store.report()
+    assert report["checked_searches"] == 2 and report["most_candidates"] >= 1 and report["rows_computed_exactly"] >= 200
+    bounds = Memories._bounds
+
+    def wrong(self, mean, centred):                      # bounds that rule out the true best
+        up, low = bounds(self, mean, centred)
+        best = int(self._likeness(centred + mean).argmax())
+        up[best] = -1.0
+        return up, low
+
+    monkeypatch.setattr(Memories, "_bounds", wrong)
+    with pytest.raises(PersistenceError, match="bounds do not hold"):
+        for q in range(memory_module.CHECK_EVERY):
+            store.nearest(rows[q], now=10**9)
+
+
+def test_with_the_screen_off_every_search_computes_every_row(tmp_path):
+    rows = torch.randn(200, 16, generator=torch.Generator().manual_seed(2))
+    store = _filled(tmp_path, rows, per_memory=1)
+    plain = Memories(store.directory, recent=0, limit_bytes=None, drive_margin_bytes=0, screened=False)
+    for q in range(30):
+        a, b = store.nearest(rows[q] * 1.1, now=10**9), plain.nearest(rows[q] * 1.1, now=10**9)
+        assert (a.id, a.seq, a.likeness, a.next_likeness, a.beat) == (b.id, b.seq, b.likeness, b.next_likeness, b.beat)
+    assert plain.full_searches == 30 and plain.screened_searches == 0 and plain._ref_mean is None
+
+
+def test_the_screen_refuses_anything_but_4_byte_numbers_on_the_cpu(tmp_path):
+    # Opus 2.6: a product in another precision would void the bound silently.
+    rows = torch.randn(50, 8, generator=torch.Generator().manual_seed(2))
+    store = _filled(tmp_path, rows, per_memory=1)
+    store.nearest(rows[0], now=10**9)
+    store._matrix = store._matrix.to(torch.float64)
+    with pytest.raises(PersistenceError, match="4-byte numbers on the CPU"):
+        store.nearest(rows[1], now=10**9)

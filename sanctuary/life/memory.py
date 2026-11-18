@@ -59,6 +59,14 @@ every start. Likeness is the cosine after the mean of all the summaries in
 reach is removed, computed in 8-byte arithmetic. A search that takes longer
 than a moment is counted and logged.
 
+**The search is screened, and the answer is still the full search's** (build
+brief 10, part 2, with Opus's 2.1 to 2.6). One pass in 4-byte arithmetic gives
+every row an upper and a lower bound on its likeness. Only rows whose upper
+bound reaches the best lower bound among the rows the search may return are
+computed in 8-byte arithmetic, by the same code on the same chunks of rows as
+the full search, so their values are the full search's to the last bit. Every
+hundredth search also runs the full search, and a difference raises.
+
 **The limit counts everything under** ``memories/``, measured from the disk at
 start and kept as it is written. A record is written only if it fits.
 
@@ -136,6 +144,8 @@ _FRAME_HEAD = struct.Struct("<8sQI32s")
 _FRAME_BYTES = _FRAME_HEAD.size + 4   # and a checksum of those
 SUFFIX = ".mem"
 _CHUNK = 1024                         # rows searched at a time; measured fastest on the desktop
+_UNIT = 2.0 ** -24                    # half the gap between neighbouring 4-byte numbers, relative
+CHECK_EVERY = 100                     # every this-many-th screened search also runs the full search
 
 
 # ---- One record, exactly ----
@@ -476,6 +486,7 @@ class Memories:
         moment_seconds: Optional[float] = None,
         drive_margin_bytes: int = COLD_MARGIN_BYTES,
         disk_free: Callable[[Path], int] = _free_bytes,
+        screened: bool = True,
     ):
         """``recent``: a memory kept or looked back on within this many moments
         is not what recall brings, and is never let go for room: it is still
@@ -485,7 +496,7 @@ class Memories:
         how long a moment lasts, so a slower search can be said.
         ``drive_margin_bytes``: nothing is written when the life's drive has
         less than this free beside the write. ``disk_free`` is how free room
-        is read."""
+        is read. ``screened``: False and every search computes every row."""
         self.directory = Path(directory)
         self.recent = recent
         self.limit_bytes = limit_bytes
@@ -511,6 +522,19 @@ class Memories:
         # the order filed. A cache rebuilt from the folders adds the same rows
         # in the same order, so its mean is the same to the last bit.
         self._sum: Optional[torch.Tensor] = None
+        # For the screen: a reference mean, and each row's length and squared
+        # distance from that mean, in 8-byte numbers. Made at the first search
+        # after a start or a let-go, and again when the rows have doubled.
+        self._ref_mean: Optional[torch.Tensor] = None
+        self._ref_base = 0
+        self._row_len = torch.empty(0, dtype=torch.float64)
+        self._row_far = torch.empty(0, dtype=torch.float64)
+        self.screened = screened
+        self.screened_searches = 0
+        self.full_searches = 0                   # searches that computed every row: asked for, or the screen left too many
+        self.checked_searches = 0                # screened searches also run in full and compared
+        self.rows_computed_exactly = 0           # over all screened searches
+        self.most_candidates = 0
         self._filed = 0                          # a count of every record, in the order filed
         self._window: deque[float] = deque(maxlen=RANK_AMONG)
         self._window_lines = 0
@@ -1163,8 +1187,16 @@ class Memories:
         self._matrix[self._rows] = vector
         self._row_id[self._rows] = memory_id
         self._row_seq[self._rows] = seq
-        self._rows += 1
         wide = vector.to(torch.float64)
+        if self._ref_mean is not None:
+            if self._row_len.shape[0] <= self._rows:
+                for name in ("_row_len", "_row_far"):
+                    grown = torch.empty(self._matrix.shape[0], dtype=torch.float64)
+                    grown[: self._rows] = getattr(self, name)[: self._rows]
+                    setattr(self, name, grown)
+            self._row_len[self._rows] = wide.norm()
+            self._row_far[self._rows] = (wide - self._ref_mean).pow(2).sum()
+        self._rows += 1
         self._sum = wide if self._sum is None else self._sum + wide
 
     def _drop_rows(self, memory_id: int) -> None:
@@ -1181,6 +1213,71 @@ class Memories:
             part[0] += total
             total = part.cumsum(dim=0)[-1].clone()
         self._sum = total if count else None
+        self._ref_mean = None                    # the rows have moved; the screen's reference is made again
+
+    def _refer(self) -> None:
+        """Take the mean as it is now for the screen's reference, and each
+        row's length and squared distance from it, in 8-byte arithmetic."""
+        self._ref_mean = (self._sum / self._rows).clone()
+        self._ref_base = self._rows
+        self._row_len = torch.empty(self._matrix.shape[0], dtype=torch.float64)
+        self._row_far = torch.empty(self._matrix.shape[0], dtype=torch.float64)
+        for at in range(0, self._rows, _CHUNK):
+            rows = self._matrix[at: min(at + _CHUNK, self._rows)].to(torch.float64)
+            self._row_len[at: at + rows.shape[0]] = rows.norm(dim=1)
+            self._row_far[at: at + rows.shape[0]] = (rows - self._ref_mean).pow(2).sum(dim=1)
+
+    def _bounds(self, mean: torch.Tensor, centred: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """An upper and a lower bound on every row's likeness to the cue, from
+        one pass over the matrix in 4-byte arithmetic. Bounds, never the
+        answer: a row is only ever ruled out by them.
+
+        With r a row, m the mean now, m0 the reference mean, c the cue less m
+        and d = m - m0, the likeness is  (r.c - m.c) / (|r - m| |c|),  and
+        |r - m|^2 = |r - m0|^2 - 2 (r.d - m0.d) + |d|^2.  The pass gives r.c
+        and r.d in 4-byte arithmetic. A 4-byte dot of n terms is within
+        n 2^-24 |r| |x| of the true one, in any order of summing, and rounding
+        x to 4 bytes moves it by at most 2^-24 |r| |x| more. Everything else
+        is 8-byte arithmetic, whose own rounding is allowed for by the last
+        terms of each error below. Where a row cannot be told from the mean
+        itself, its bounds are 1 and -1.
+
+        Opus 2.2: each bound's formula is chosen by the sign of that bound's
+        own numerator. Opus 2.6: the pass is on the CPU in plain 4-byte
+        numbers; anything else would void the bound, so it is asserted."""
+        rows = self._matrix[: self._rows]
+        if rows.dtype != torch.float32 or rows.device.type != "cpu":
+            raise PersistenceError(f"the screen needs 4-byte numbers on the CPU; got {rows.dtype} on {rows.device}")
+        width = rows.shape[1]
+        moved = mean - self._ref_mean
+        pair = torch.stack([centred.to(torch.float32), moved.to(torch.float32)], dim=1)
+        dots = (rows @ pair).to(torch.float64)
+        length, far = self._row_len[: self._rows], self._row_far[: self._rows]
+        cue_len, moved_len = float(centred.norm()), float(moved.norm())
+        mean_len, ref_len = float(mean.norm()), float(self._ref_mean.norm())
+        rounding = (width + 3) * _UNIT * 1.01
+        tiny = 1e-12
+
+        off = rounding * length * cue_len + tiny * (length + mean_len) * cue_len + 1e-300
+        top = dots[:, 0] - float(mean @ centred) + off
+        bottom = dots[:, 0] - float(mean @ centred) - off
+
+        cross = dots[:, 1] - float(self._ref_mean @ moved)
+        cross_off = rounding * length * moved_len + tiny * (length + ref_len) * moved_len
+        far_off = tiny * (length + ref_len).pow(2)
+        middle = far - 2 * cross + moved_len ** 2
+        least = (middle - 2 * cross_off - far_off).clamp_min(0.0).sqrt()
+        most = (middle + 2 * cross_off + far_off).clamp_min(0.0).sqrt()
+        known = least > 0
+        safe = least.clamp_min(1e-300) * cue_len
+        slack = torch.where(known, tiny * (length + mean_len) / least.clamp_min(1e-300), torch.ones_like(least)) + tiny
+        up = torch.where(top >= 0, top / safe, top / (most * cue_len).clamp_min(1e-300)) + slack
+        low = torch.where(bottom >= 0, bottom / (most * cue_len).clamp_min(1e-300), bottom / safe) - slack
+        if cue_len == 0.0:
+            return torch.ones_like(up), -torch.ones_like(low)
+        up = torch.where(known, up, torch.ones_like(up)).clamp(max=1.0)
+        low = torch.where(known, low, -torch.ones_like(low)).clamp(min=-1.0)
+        return up, low
 
     def _likeness(self, cue: torch.Tensor) -> torch.Tensor:
         """The cosine between the cue and every summary in reach, after the
@@ -1190,10 +1287,62 @@ class Memories:
         centred = cue.to(torch.float64) - mean
         out = torch.empty(self._rows, dtype=torch.float64)
         for at in range(0, self._rows, _CHUNK):
-            rows = self._matrix[at: min(at + _CHUNK, self._rows)].to(torch.float64) - mean
-            norms = rows.norm(dim=1) * centred.norm()
-            out[at: at + rows.shape[0]] = torch.where(norms > 0, (rows @ centred) / norms, torch.zeros_like(norms))
+            self._likeness_of_chunk(at, mean, centred, out)
         return out
+
+    def _likeness_of_chunk(self, at: int, mean: torch.Tensor, centred: torch.Tensor, out: torch.Tensor) -> None:
+        """The likeness of the rows from ``at`` to the end of their chunk,
+        written into ``out``. The full search and the screened one both come
+        here with the same chunks, so a row's value does not depend on which
+        of them asked (Opus 2.4: a row's 8-byte product must not change with
+        the rows computed beside it; here the rows beside it never change)."""
+        rows = self._matrix[at: min(at + _CHUNK, self._rows)].to(torch.float64) - mean
+        norms = rows.norm(dim=1) * centred.norm()
+        out[at: at + rows.shape[0]] = torch.where(norms > 0, (rows @ centred) / norms, torch.zeros_like(norms))
+
+    def _find(self, vector: torch.Tensor, able: torch.Tensor, ids: torch.Tensor, *, screened: bool):
+        """The best row the search may return, its likeness, the best likeness
+        among other memories (None when there is none), how many other
+        memories it beat, and how many rows were computed exactly."""
+        if not screened:
+            likeness = self._likeness(vector).masked_fill(~able, float("-inf"))
+            computed = self._rows
+        else:
+            if self._ref_mean is None or self._rows >= 2 * self._ref_base:
+                self._refer()
+            mean = self._sum / self._rows
+            centred = vector.to(torch.float64) - mean
+            up, low = self._bounds(mean, centred)
+            likeness = torch.full((self._rows,), float("-inf"), dtype=torch.float64)
+            done: set[int] = set()
+
+            def compute(candidates: torch.Tensor) -> None:
+                # Whole chunks, in row order, so that equal likenesses fall to
+                # the lowest row as in the full search (Opus 2.5).
+                for chunk in torch.unique(candidates // _CHUNK).tolist():
+                    if chunk not in done:
+                        done.add(chunk)
+                        self._likeness_of_chunk(chunk * _CHUNK, mean, centred, likeness)
+
+            # The bar is the best lower bound among the rows the search may
+            # return (Opus 2.1): what is still the present is often nearer.
+            bar = low.masked_fill(~able, float("-inf")).max()
+            first = (able & (up >= bar)).nonzero().flatten()
+            compute(first)
+            likeness.masked_fill_(~able, float("-inf"))
+            computed = int(first.numel())
+        best = int(likeness.argmax())
+        memory_id = int(ids[best])
+        others = able & (ids != memory_id)
+        beat = int(torch.unique(ids[others]).numel())
+        if screened and beat:
+            bar = low.masked_fill(~others, float("-inf")).max()
+            second = (others & (up >= bar)).nonzero().flatten()
+            compute(second)
+            likeness.masked_fill_(~able, float("-inf"))
+            computed += int(second.numel())
+        runner_up = float(likeness[others].max()) if beat else None
+        return best, float(likeness[best]), runner_up, beat, computed
 
     def _still_present(self, now: int) -> set[int]:
         return {s.id for s in self._stretches.values() if s.reach and now - s.last_cycle < self.recent}
@@ -1214,12 +1363,25 @@ class Memories:
         able = ~torch.isin(ids, torch.tensor(sorted(present), dtype=torch.int64)) if present else torch.ones_like(ids, dtype=torch.bool)
         if not bool(able.any()):
             return None
-        likeness = self._likeness(vector).masked_fill(~able, float("-inf"))
-        best = int(likeness.argmax())
+        if self.screened:
+            found = self._find(vector, able, ids, screened=True)
+            self.screened_searches += 1
+            self.rows_computed_exactly += found[4]
+            self.most_candidates = max(self.most_candidates, found[4])
+            if self.screened_searches % CHECK_EVERY == 0:
+                full = self._find(vector, able, ids, screened=False)
+                self.checked_searches += 1
+                if full[:4] != found[:4]:
+                    raise PersistenceError(
+                        f"the screened search found row {found[0]} (likeness {found[1]!r}, next {found[2]!r}, "
+                        f"beat {found[3]}) and the full search found row {full[0]} ({full[1]!r}, {full[2]!r}, "
+                        f"{full[3]}). The screen's bounds do not hold; open the store with screened=False."
+                    )
+        else:
+            found = self._find(vector, able, ids, screened=False)
+            self.full_searches += 1
+        best, likeness_of_best, runner_up, beat, _ = found
         memory_id = int(ids[best])
-        others = able & (ids != memory_id)
-        beat = int(torch.unique(ids[others]).numel())
-        runner_up = float(likeness[others].max()) if beat else None
         took = time.perf_counter() - started
         self.searches += 1
         self.slowest_search_seconds = max(self.slowest_search_seconds, took)
@@ -1230,7 +1392,7 @@ class Memories:
                     "a search of %d summaries took %.3f s and a moment is %.3f s (%d slow so far)",
                     self._rows, took, self.moment_seconds, self.slow_searches,
                 )
-        return self.open(memory_id, int(self._row_seq[best]), likeness=float(likeness[best]),
+        return self.open(memory_id, int(self._row_seq[best]), likeness=likeness_of_best,
                          next_likeness=runner_up, beat=beat)
 
     def _moments(self, now: int, unlike: set[int]) -> list[tuple[int, int]]:
@@ -1318,6 +1480,9 @@ class Memories:
             "bytes": self.bytes, "limit_bytes": self.limit_bytes,
             "summaries_searched": self._rows, "searches": self.searches,
             "slow_searches": self.slow_searches, "slowest_search_seconds": self.slowest_search_seconds,
+            "screened_searches": self.screened_searches, "full_searches": self.full_searches,
+            "checked_searches": self.checked_searches, "rows_computed_exactly": self.rows_computed_exactly,
+            "most_candidates": self.most_candidates,
             "not_filed_for_room": self.not_filed_for_room,
             "not_filed_closed": self.not_filed_closed,
             "cold_had_no_room": self.cold_had_no_room,
