@@ -61,9 +61,10 @@ than a moment is counted and logged.
 
 **The search is screened, and the answer is still the full search's** (build
 brief 10, part 2, with Opus's 2.1 to 2.6). One pass in 4-byte arithmetic gives
-every row an upper and a lower bound on its likeness. Only rows whose upper
-bound reaches the best lower bound among the rows the search may return are
-computed in 8-byte arithmetic, by the same code on the same chunks of rows as
+every row an upper and a lower bound on its likeness; the rows that pass are
+bounded again more tightly. Only rows whose upper bound still reaches the best
+lower bound among the rows the search may return are computed in 8-byte
+arithmetic, by the same code on the same chunks of rows as
 the full search, so their values are the full search's to the last bit. Every
 hundredth search also runs the full search, and a difference raises.
 
@@ -146,6 +147,7 @@ SUFFIX = ".mem"
 _CHUNK = 1024                         # rows searched at a time; measured fastest on the desktop
 _UNIT = 2.0 ** -24                    # half the gap between neighbouring 4-byte numbers, relative
 CHECK_EVERY = 100                     # every this-many-th screened search also runs the full search
+REFER_AGAIN = 1.02                    # the screen's reference mean is taken again when the rows have grown by this
 
 
 # ---- One record, exactly ----
@@ -524,7 +526,7 @@ class Memories:
         self._sum: Optional[torch.Tensor] = None
         # For the screen: a reference mean, and each row's length and squared
         # distance from that mean, in 8-byte numbers. Made at the first search
-        # after a start or a let-go, and again when the rows have doubled.
+        # after a start or a let-go, and again when the rows have grown by 2%.
         self._ref_mean: Optional[torch.Tensor] = None
         self._ref_base = 0
         self._row_len = torch.empty(0, dtype=torch.float64)
@@ -1227,56 +1229,97 @@ class Memories:
             self._row_len[at: at + rows.shape[0]] = rows.norm(dim=1)
             self._row_far[at: at + rows.shape[0]] = (rows - self._ref_mean).pow(2).sum(dim=1)
 
-    def _bounds(self, mean: torch.Tensor, centred: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def _screen(self, mean: torch.Tensor, centred: torch.Tensor):
         """An upper and a lower bound on every row's likeness to the cue, from
-        one pass over the matrix in 4-byte arithmetic. Bounds, never the
-        answer: a row is only ever ruled out by them.
+        one pass over the matrix in 4-byte arithmetic, and a way to tighten
+        the bounds of chosen rows. Bounds, never the answer: a row is only
+        ever ruled out by them.
 
         With r a row, m the mean now, m0 the reference mean, c the cue less m
-        and d = m - m0, the likeness is  (r.c - m.c) / (|r - m| |c|),  and
-        |r - m|^2 = |r - m0|^2 - 2 (r.d - m0.d) + |d|^2.  The pass gives r.c
-        and r.d in 4-byte arithmetic. A 4-byte dot of n terms is within
-        n 2^-24 |r| |x| of the true one, in any order of summing, and rounding
-        x to 4 bytes moves it by at most 2^-24 |r| |x| more. Everything else
-        is 8-byte arithmetic, whose own rounding is allowed for by the last
-        terms of each error below. Where a row cannot be told from the mean
-        itself, its bounds are 1 and -1.
+        and d = m - m0, the likeness is  (r.c - m.c) / (|r - m| |c|).
+
+        - **The top of the fraction** comes from the pass, which gives r.c in
+          4-byte arithmetic. A 4-byte dot of n terms is within n 2^-24 |r| |c|
+          of the true one, in any order of summing, and rounding c to 4 bytes
+          moves it by at most 2^-24 |r| |c| more.
+        - **The bottom, first** from what is kept for each row: |r - m| lies
+          within |d| of |r - m0|. That costs nothing, and is loose by how far
+          the mean has moved since the reference.
+        - **The bottom, tightened** for the rows that pass the first screen:
+          |r - m|^2 = |r - m0|^2 - 2 (r.d - m0.d) + |d|^2, with r.d from a
+          second 4-byte product over those rows only. On the archived stores
+          it was the moved mean, and not rounding, that left rows to compute.
+
+        Everything else is 8-byte arithmetic, whose own rounding is allowed
+        for by the last terms of each error. Where a row cannot be told from
+        the mean itself, its bounds are 1 and -1.
 
         Opus 2.2: each bound's formula is chosen by the sign of that bound's
-        own numerator. Opus 2.6: the pass is on the CPU in plain 4-byte
+        own numerator. Opus 2.6: the products are on the CPU in plain 4-byte
         numbers; anything else would void the bound, so it is asserted."""
         rows = self._matrix[: self._rows]
         if rows.dtype != torch.float32 or rows.device.type != "cpu":
             raise PersistenceError(f"the screen needs 4-byte numbers on the CPU; got {rows.dtype} on {rows.device}")
         width = rows.shape[1]
         moved = mean - self._ref_mean
-        pair = torch.stack([centred.to(torch.float32), moved.to(torch.float32)], dim=1)
-        dots = (rows @ pair).to(torch.float64)
         length, far = self._row_len[: self._rows], self._row_far[: self._rows]
         cue_len, moved_len = float(centred.norm()), float(moved.norm())
         mean_len, ref_len = float(mean.norm()), float(self._ref_mean.norm())
         rounding = (width + 3) * _UNIT * 1.01
         tiny = 1e-12
-
-        off = rounding * length * cue_len + tiny * (length + mean_len) * cue_len + 1e-300
-        top = dots[:, 0] - float(mean @ centred) + off
-        bottom = dots[:, 0] - float(mean @ centred) - off
-
-        cross = dots[:, 1] - float(self._ref_mean @ moved)
-        cross_off = rounding * length * moved_len + tiny * (length + ref_len) * moved_len
-        far_off = tiny * (length + ref_len).pow(2)
-        middle = far - 2 * cross + moved_len ** 2
-        least = (middle - 2 * cross_off - far_off).clamp_min(0.0).sqrt()
-        most = (middle + 2 * cross_off + far_off).clamp_min(0.0).sqrt()
-        known = least > 0
-        safe = least.clamp_min(1e-300) * cue_len
-        slack = torch.where(known, tiny * (length + mean_len) / least.clamp_min(1e-300), torch.ones_like(least)) + tiny
-        up = torch.where(top >= 0, top / safe, top / (most * cue_len).clamp_min(1e-300)) + slack
-        low = torch.where(bottom >= 0, bottom / (most * cue_len).clamp_min(1e-300), bottom / safe) - slack
         if cue_len == 0.0:
-            return torch.ones_like(up), -torch.ones_like(low)
-        up = torch.where(known, up, torch.ones_like(up)).clamp(max=1.0)
-        low = torch.where(known, low, -torch.ones_like(low)).clamp(min=-1.0)
+            # The cue is the mean itself: every likeness is 0, and nothing is ruled out.
+            return torch.ones(self._rows, dtype=torch.float64), -torch.ones(self._rows, dtype=torch.float64), None
+
+        dots = (rows @ centred.to(torch.float32)).to(torch.float64)       # the one pass over the matrix
+        off = rounding * length * cue_len + tiny * (length + mean_len) * cue_len + 1e-300
+        top = dots - float(mean @ centred) + off
+        bottom = dots - float(mean @ centred) - off
+        far_off = tiny * (length + ref_len).pow(2)
+
+        def bounds(top, bottom, least, most, length):
+            known = least > 0
+            safe = least.clamp_min(1e-300) * cue_len
+            wide = (most * cue_len).clamp_min(1e-300)
+            slack = tiny * (length + mean_len) / least.clamp_min(1e-300) + tiny
+            up = torch.where(top >= 0, top / safe, top / wide) + slack
+            low = torch.where(bottom >= 0, bottom / wide, bottom / safe) - slack
+            up = torch.where(known, up, torch.ones_like(up)).clamp(max=1.0)
+            low = torch.where(known, low, -torch.ones_like(low)).clamp(min=-1.0)
+            return up, low
+
+        reach = moved_len * (1 + tiny)
+        up, low = bounds(
+            top, bottom,
+            ((far - far_off).clamp_min(0.0).sqrt() - reach).clamp_min(0.0),
+            (far + far_off).sqrt() + reach, length,
+        )
+        moved32 = moved.to(torch.float32)
+        ref_dot = float(self._ref_mean @ moved)
+
+        def tighten(which: torch.Tensor) -> None:
+            """Tighter bounds for the rows ``which``, in place."""
+            if which.numel() == 0 or moved_len == 0.0:
+                return
+            some = length[which]
+            cross = (rows.index_select(0, which) @ moved32).to(torch.float64) - ref_dot
+            cross_off = rounding * some * moved_len + tiny * (some + ref_len) * moved_len
+            middle = far[which] - 2 * cross + moved_len ** 2
+            tight_up, tight_low = bounds(
+                top[which], bottom[which],
+                (middle - 2 * cross_off - far_off[which]).clamp_min(0.0).sqrt(),
+                (middle + 2 * cross_off + far_off[which]).clamp_min(0.0).sqrt(), some,
+            )
+            up[which] = torch.minimum(up[which], tight_up)
+            low[which] = torch.maximum(low[which], tight_low)
+
+        return up, low, tighten
+
+    def _bounds(self, mean: torch.Tensor, centred: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """The screen's bounds with every row tightened."""
+        up, low, tighten = self._screen(mean, centred)
+        if tighten is not None:
+            tighten(torch.arange(self._rows))
         return up, low
 
     def _likeness(self, cue: torch.Tensor) -> torch.Tensor:
@@ -1308,13 +1351,24 @@ class Memories:
             likeness = self._likeness(vector).masked_fill(~able, float("-inf"))
             computed = self._rows
         else:
-            if self._ref_mean is None or self._rows >= 2 * self._ref_base:
+            if self._ref_mean is None or self._rows >= REFER_AGAIN * self._ref_base + 64:
                 self._refer()
             mean = self._sum / self._rows
             centred = vector.to(torch.float64) - mean
-            up, low = self._bounds(mean, centred)
+            up, low, tighten = self._screen(mean, centred)
             likeness = torch.full((self._rows,), float("-inf"), dtype=torch.float64)
             done: set[int] = set()
+
+            def passing(among: torch.Tensor) -> torch.Tensor:
+                """The rows of ``among`` whose upper bound reaches the best
+                lower bound in ``among``: first by the loose bounds, then,
+                with those rows tightened, by the tight ones."""
+                for step in range(2):
+                    bar = low.masked_fill(~among, float("-inf")).max()
+                    rows = (among & (up >= bar)).nonzero().flatten()
+                    if step == 0 and tighten is not None:
+                        tighten(rows)
+                return rows
 
             def compute(candidates: torch.Tensor) -> None:
                 # Whole chunks, in row order, so that equal likenesses fall to
@@ -1326,8 +1380,7 @@ class Memories:
 
             # The bar is the best lower bound among the rows the search may
             # return (Opus 2.1): what is still the present is often nearer.
-            bar = low.masked_fill(~able, float("-inf")).max()
-            first = (able & (up >= bar)).nonzero().flatten()
+            first = passing(able)
             compute(first)
             likeness.masked_fill_(~able, float("-inf"))
             computed = int(first.numel())
@@ -1336,8 +1389,7 @@ class Memories:
         others = able & (ids != memory_id)
         beat = int(torch.unique(ids[others]).numel())
         if screened and beat:
-            bar = low.masked_fill(~others, float("-inf")).max()
-            second = (others & (up >= bar)).nonzero().flatten()
+            second = passing(others)
             compute(second)
             likeness.masked_fill_(~able, float("-inf"))
             computed += int(second.numel())

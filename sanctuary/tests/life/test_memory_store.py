@@ -968,11 +968,16 @@ def test_the_screened_search_gives_the_full_searchs_answer_bit_for_bit(tmp_path,
             computed.append(screened[4])
 
     compare(now=10**9, cues=60)
-    # More rows since the screen's reference was made: the mean has moved.
-    for n, row in enumerate(rows[half: half + half // 2]):
+    # A few more rows since the screen's reference was made: the mean has moved, and the
+    # reference is not taken again until the rows have grown by 2%.
+    for n, row in enumerate(rows[half: half + 60]):
         store.keep(cycle=10**6 + n * 7, summary=row, tokens=[1])
-    assert store._ref_base == half, "the reference is the earlier one"
     compare(now=10**9, cues=60)
+    assert store._ref_base == half, "the reference is the earlier one"
+    for n, row in enumerate(rows[half + 60: half + half // 2]):
+        store.keep(cycle=2 * 10**6 + n * 7, summary=row, tokens=[1])
+    compare(now=10**9, cues=30)
+    assert store._ref_base == half + half // 2, "and now it has been taken again"
     # What is still the present is left out, and it is the nearest (Opus 2.1).
     store.recent = 2000
     newest = int(store._newest_cycle)
@@ -1059,15 +1064,15 @@ def test_every_hundredth_screened_search_is_checked_against_the_full_one_and_a_d
     assert store.checked_searches == 2 and store.screened_searches == 200
     report = store.report()
     assert report["checked_searches"] == 2 and report["most_candidates"] >= 1 and report["rows_computed_exactly"] >= 200
-    bounds = Memories._bounds
+    screen = Memories._screen
 
     def wrong(self, mean, centred):                      # bounds that rule out the true best
-        up, low = bounds(self, mean, centred)
+        up, low, tighten = screen(self, mean, centred)
         best = int(self._likeness(centred + mean).argmax())
         up[best] = -1.0
-        return up, low
+        return up, low, tighten
 
-    monkeypatch.setattr(Memories, "_bounds", wrong)
+    monkeypatch.setattr(Memories, "_screen", wrong)
     with pytest.raises(PersistenceError, match="bounds do not hold"):
         for q in range(memory_module.CHECK_EVERY):
             store.nearest(rows[q], now=10**9)
