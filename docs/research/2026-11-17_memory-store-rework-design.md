@@ -1,6 +1,6 @@
 # The memory store, reworked: a design — 2026-11-17
 
-**Status:** a design by Fable 5.2 (chat; design seat). Reviewed by Opus 5.5 on 2026-11-17 and revised the same day: see "Revision". Brian ruled on the store's size and cold storage the same morning: see "Brian's rulings", which is newest where the two disagree. Briefed for building (LuthiModel build brief 9). Nothing here is built yet except the two faults of brief 5 (`1d8c734`).
+**Status:** a design by Fable 5.2 (chat; design seat). Reviewed by Opus 5.5 on 2026-11-17 and revised the same day: see "Revision". Brian ruled on the store's size and cold storage the same morning: see "Brian's rulings", which is newest where the two disagree. **Built on 2026-11-18** by terminal Fable (`686c1f3`; `docs/research/2026-11-18_memory-store-rework-built.md`), with Opus's review of cold storage and importance taken. Two costs the design did not have came out of the build: opening the store, and the exact search's time. The answers, and the second importance formula, are LuthiModel `docs/reviews/2026-11-18_build-brief-10-opening-search-importance-for-terminal-fable.md`, not yet reviewed or built.
 
 ## Objective
 
